@@ -3,16 +3,12 @@
 //!provides a directory structure for mounpoints
 
 use std::{
-    boxed::Box,
-    collections::btree_map::BTreeMap,
-    lock_w_info,
-    string::{String, ToString},
-    sync::arc::Arc,
-    sync::no_int_spinlock::NoIntSpinlock,
-    vec::Vec,
+    boxed::Box, collections::btree_map::BTreeMap, error::ErrorCode, lock_w_info, string::{String, ToString}, sync::{arc::Arc, no_int_spinlock::NoIntSpinlock}, vec::Vec
 };
 
 use uuid::Uuid;
+
+use crate::drivers::disk::DirEntry;
 
 use super::{
     filesystem_trait::{FileSystem, FileSystemFactory}, DeviceId, InodeIndex, InodeType, ROOT_INODE_INDEX
@@ -65,7 +61,7 @@ impl FileSystem for Dtmpfs {
         panic!("Reading is not supported in dtmpfs");
     }
 
-    async fn read_dir(&self, inode: InodeIndex) -> std::boxed::Box<[crate::drivers::disk::DirEntry]> {
+    async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, ErrorCode> {
         let inner = lock_w_info!(self.global_lock);
         let mut entries = Vec::new();
         if let Some(node) = inner.inodes.get(&inode) {
@@ -77,7 +73,7 @@ impl FileSystem for Dtmpfs {
             }
         }
         drop(inner);
-        entries.into_boxed_slice()
+        Ok(entries.into_boxed_slice())
     }
 
     async fn write(&self, _inode: InodeIndex, _offset: u64, _size: u64, _buffer: &[std::mem_utils::PhysAddr]) -> (super::Inode, u64) {
@@ -144,15 +140,16 @@ impl FileSystem for Dtmpfs {
         panic!("Truncating is not supported in dtmpfs");
     }
 
-    async fn rename(&self, inode: InodeIndex, parent_inode: InodeIndex, name: &str) {
+    async fn rename(&self, inode: InodeIndex, parent_inode: InodeIndex, name: &str) -> Result<(), ErrorCode> {
         let mut inner = lock_w_info!(self.global_lock);
         let Some(parent_node) = inner.inodes.get_mut(&parent_inode) else {
-            return;
+            return Ok(());
         };
         if let Some((_, child_inode)) = parent_node.children.iter_mut().find(|(n, _)| n == name) {
             *child_inode = inode;
         } else {
             parent_node.children.push((name.to_string(), inode));
         }
+        Ok(())
     }
 }

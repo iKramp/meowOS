@@ -3,7 +3,6 @@ use std::{boxed::Box, mem_utils::PhysAddr, sync::arc::Arc, vec::Vec};
 use crate::{proc::{syscall::SyscallArgs, ProcessData}, task_runner};
 
 
-
 pub fn fwrite(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
     let fd = args.arg1;
     let buffer_ptr = args.arg2 as *const u8;
@@ -12,7 +11,8 @@ pub fn fwrite(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
     let pid = proc.pid();
 
     if size == 0 {
-        proc.get().set_syscall_return(0, 0).unwrap();
+        args.arg1 = 0;
+        args.arg2 = 0;
         return true;
     }
 
@@ -44,7 +44,7 @@ pub fn fwrite(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
         };
         if write_result.is_err() {
             let proc_lock = proc.get();
-            proc_lock.set_syscall_return(u64::MAX, 1).unwrap();
+            proc_lock.set_syscall_return(u64::MAX, 1);
             return;
         }
         let bytes_written = unsafe { write_result.unwrap_unchecked() };
@@ -58,7 +58,7 @@ pub fn fwrite(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
         proc.get_mutable().insert_file_handle(fd, f_handle);
 
         //return
-        proc.set_syscall_return(bytes_written, 0).unwrap();
+        proc.set_syscall_return(bytes_written, 0);
         crate::proc::wake_process(proc.pid())
     };
 

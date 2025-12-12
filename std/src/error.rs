@@ -13,6 +13,10 @@ pub enum ErrorCode {
     UnsupportedFilesystem,
     InsufficientPermissions,
     UnsupportedOperation,
+    InvalidPointer,
+    AlreadyMapped,
+    NotMapped,
+    InsufficientResources,
 }
 
 impl Error for ErrorCode {}
@@ -30,6 +34,10 @@ impl core::fmt::Display for ErrorCode {
             ErrorCode::UnsupportedFilesystem => write!(f, "Filesystem type is unsupported"),
             ErrorCode::InsufficientPermissions => write!(f, "Insufficient permissions"),
             ErrorCode::UnsupportedOperation => write!(f, "Unsupported operation"),
+            ErrorCode::InvalidPointer => write!(f, "invalid poitner"),
+            ErrorCode::AlreadyMapped => write!(f, "requested virtual address in mmap is already mapped"),
+            ErrorCode::NotMapped => write!(f, "some address had to be mapped, but wasn't"),
+            ErrorCode::InsufficientResources => write!(f, "No resources (OOM, storage,...)")
         }
     }
 }

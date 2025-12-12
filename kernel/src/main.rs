@@ -16,8 +16,8 @@
 
 extern crate static_cond;
 
-use core::ffi;
-use std::{boxed::Box, println, printlnc};
+use core::{ffi, time::Duration};
+use std::{boxed::Box, println, printlnc, thread::sleep};
 
 mod acpi;
 mod clocks;
@@ -101,6 +101,12 @@ extern "C" fn _start() -> ! {
     // }
 
     proc::init();
+
+    // sleep(Duration::from_secs(1));
+    let time_now = std::time::Instant::now();
+    while std::time::Instant::now() - time_now < std::time::Duration::from_secs(1) {
+        unsafe { core::arch::asm!("hlt") };
+    }
     //start first proc
     unsafe { core::arch::asm!("int 254") };
 

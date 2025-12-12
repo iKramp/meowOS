@@ -3,12 +3,7 @@
 
 use core::{fmt::Debug, sync::atomic::AtomicU32, time::Duration};
 use std::{
-    boxed::Box,
-    lock_w_info,
-    mem_utils::{PhysAddr, VirtAddr, get_at_physical_addr, get_at_virtual_addr, memset_virtual_addr},
-    println,
-    sync::no_int_spinlock::NoIntSpinlock,
-    vec::Vec,
+    boxed::Box, lock_w_info, mem_utils::{get_at_physical_addr, get_at_virtual_addr, memset_virtual_addr, PhysAddr, VirtAddr}, println, sync::no_int_spinlock::NoIntSpinlock, thread::sleep, vec::Vec
 };
 
 use bitfield::bitfield;
@@ -18,8 +13,8 @@ use crate::{
         ahci::fis::{D2HRegisterFis, IdentifyStructure, PioSetupFis},
         disk::BlockDevice,
     },
-    memory::{PAGE_TREE_ALLOCATOR, paging::LiminePat, physical_allocator},
-    pci::device_config::{self, Bar},
+    memory::{paging::LiminePat, physical_allocator, PAGE_TREE_ALLOCATOR},
+    pci::device_config::{self, Bar}, task_runner,
 };
 
 use super::fis::{FisType, H2DRegFisPmport, H2DRegisterFis};
@@ -93,7 +88,7 @@ impl AhciController {
 
 impl AhciController {
     pub fn new(device: device_config::RegularPciDevice) -> Self {
-        let abar = device.bars.iter().find(|bar| bar.get_index() == 5).unwrap().clone();
+        let abar = device.bars.iter().find(|bar| bar.get_index() == 5).expect("AHCI device not following AHCI spec").clone();
         let Bar::Memory(_, addr, _) = abar else {
             panic!("Abar is not memory mapped");
         };
@@ -216,23 +211,15 @@ struct CommandMetadata {
 
 impl VirtualPort {
     pub fn get_command_index(&self) -> Option<u8> {
-        loop {
-            let pos = self
-                .commands_issued
-                .load(core::sync::atomic::Ordering::Acquire)
-                .trailing_ones() as u8;
-            if pos >= self.command_depth as u8 {
-                return None;
-            }
-
-            let old = self.commands_issued.fetch_or(1 << pos, core::sync::atomic::Ordering::AcqRel);
-            if old & (1 << pos) == 0 {
-                if pos != 0 {
-                    panic!("there shouldn't be more than 1 operation in a synchronous system");
-                }
-                return Some(pos);
-            }
+        let pos = self
+            .commands_issued
+            .load(core::sync::atomic::Ordering::Acquire)
+            .trailing_ones() as u8;
+        if pos >= self.command_depth as u8 {
+            return None;
         }
+
+        Some(pos)
     }
 
     pub fn release_command_index(&self, index: u8) {
@@ -277,12 +264,12 @@ impl VirtualPort {
         unsafe {
             PAGE_TREE_ALLOCATOR
                 .get_page_table_entry_mut(clb_virt)
-                .unwrap()
+                .expect("page entry must exist after allocation")
                 .set_pat(LiminePat::UC);
             if FIS_SWITCHING {
                 PAGE_TREE_ALLOCATOR
                     .get_page_table_entry_mut(fis_virt)
-                    .unwrap()
+                    .expect("page entry must exist after allocation")
                     .set_pat(LiminePat::UC);
             }
         }
@@ -389,7 +376,8 @@ impl VirtualPort {
         };
 
         let ident_fis = unsafe { core::mem::transmute::<H2DRegisterFis, [u8; 20]>(ident_fis) };
-        let identify_cmd_index = self.build_command(false, &ident_fis, &[prdt]).unwrap();
+        let identify_cmd_index = self.get_command_index().expect("no command slots free during identify?????");
+        self.build_command(false, &ident_fis, &[prdt], identify_cmd_index);
 
         let mut ci = self.get_property(0x38);
         while ci & (1 << identify_cmd_index) != 0 {
@@ -413,9 +401,8 @@ impl VirtualPort {
     }
 
     ///PRDT cannot be more than a bit over 900MB. Just use multiple commands
-    fn build_command(&self, write: bool, cfis: &[u8], prdt: &[PrdtDescriptor]) -> Option<u8> {
+    fn build_command(&self, write: bool, cfis: &[u8], prdt: &[PrdtDescriptor], index: u8) {
         assert!(prdt.len() <= 248); //i don't want to deal with contiguous allocation
-        let index = self.get_command_index()?;
 
         let cmd_table_page = if self.is_64_bit {
             physical_allocator::allocate_frame()
@@ -438,7 +425,7 @@ impl VirtualPort {
             let cmd_table_virt = PAGE_TREE_ALLOCATOR.allocate(Some(cmd_table_page), false);
             PAGE_TREE_ALLOCATOR
                 .get_page_table_entry_mut(cmd_table_virt)
-                .unwrap()
+                .expect("page entry must exist after allocation")
                 .set_pat(LiminePat::UC);
             let cmd_table_raw = cmd_table_virt.0 as *mut u8;
             for (i, byte) in cfis.iter().enumerate() {
@@ -461,8 +448,6 @@ impl VirtualPort {
 
         //no need for lock, is write-1 register
         self.set_property(0x38, cmd_issue);
-
-        Some(index)
     }
 
     ///frees command header memory. Does not free regions pointed to by PRDT
@@ -526,8 +511,16 @@ impl BlockDevice for VirtualPort {
             ..H2DRegisterFis::default()
         };
 
-        let read_cmd_index = self.build_command(false, (&cfis).into(), &prdt).unwrap();
 
+        let read_cmd_index = loop {
+            match self.get_command_index() {
+                Some(cmd_index) => break cmd_index,
+                None => {
+                    task_runner::yield_now().await;
+                },
+            }
+        };
+        self.build_command(false, (&cfis).into(), &prdt, read_cmd_index);
         CommandWaiter {
             port: self,
             command_index: read_cmd_index,
@@ -578,7 +571,15 @@ impl BlockDevice for VirtualPort {
             ..H2DRegisterFis::default()
         };
 
-        let write_cmd_index = self.build_command(true, (&cfis).into(), &prdt).unwrap();
+        let write_cmd_index = loop {
+            match self.get_command_index() {
+                Some(cmd_index) => break cmd_index,
+                None => {
+                    task_runner::yield_now().await;
+                },
+            }
+        };
+        self.build_command(false, (&cfis).into(), &prdt, write_cmd_index);
 
         CommandWaiter {
             port: self,

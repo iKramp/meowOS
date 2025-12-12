@@ -230,7 +230,7 @@ impl PciDevice {
                 );
                 //mark caching as uncacheable, unless prefetchable, then write-through
                 for i in 0..num {
-                    let page_entry = PAGE_TREE_ALLOCATOR.get_page_table_entry_mut(address + (i * 4096)).unwrap();
+                    let page_entry = PAGE_TREE_ALLOCATOR.get_page_table_entry_mut(address + (i * 4096)).expect("could not retrieve just mapped addresses");
                     if prefetchable {
                         page_entry.set_pat(LiminePat::WT);
                     } else {

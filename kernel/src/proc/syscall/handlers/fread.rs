@@ -11,7 +11,8 @@ pub fn fread(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
     let pid = proc.pid();
 
     if size == 0 {
-        proc.get().set_syscall_return(0, 0).unwrap();
+        args.arg1 = 0;
+        args.arg2 = 0;
         return true;
     }
 
@@ -37,7 +38,7 @@ pub fn fread(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
         };
         if read_result.is_err() {
             let proc_lock = proc.get();
-            proc_lock.set_syscall_return(u64::MAX, 1).unwrap();
+            proc_lock.set_syscall_return(u64::MAX, 1);
             return;
         }
         let bytes_read = unsafe { read_result.unwrap_unchecked() };
@@ -56,7 +57,7 @@ pub fn fread(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
         proc.get_mutable().insert_file_handle(fd, f_handle);
 
         //return
-        proc.set_syscall_return(bytes_read, 0).unwrap();
+        proc.set_syscall_return(bytes_read, 0);
         crate::proc::wake_process(proc.pid())
     };
 

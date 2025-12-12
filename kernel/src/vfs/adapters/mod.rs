@@ -1,5 +1,5 @@
 use core::{fmt::Debug, sync::atomic::AtomicU32};
-use std::{boxed::Box, mem_utils::PhysAddr};
+use std::{boxed::Box, error::ErrorCode, mem_utils::PhysAddr};
 
 use crate::drivers::disk::DirEntry;
 
@@ -43,7 +43,7 @@ impl VfsAdapterDevice {
 #[async_trait::async_trait]
 pub trait VfsAdapterTrait: Debug + Send + Sync {
     async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> u64;
-    async fn read_dir(&self, inode: InodeIndex) -> Box<[DirEntry]>;
+    async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, ErrorCode>;
     async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> (Inode, u64);
     async fn stat(&self, inode: InodeIndex) -> Inode;
 }
@@ -54,7 +54,7 @@ impl<T: VfsAdapterTrait> FileSystem for T {
         VfsAdapterTrait::read(self, inode, offset_bytes, size_bytes, buffer).await
     }
 
-    async fn read_dir(&self, inode: InodeIndex) -> Box<[DirEntry]> {
+    async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, ErrorCode> {
         VfsAdapterTrait::read_dir(self, inode).await
     }
 
@@ -97,7 +97,7 @@ impl<T: VfsAdapterTrait> FileSystem for T {
         unreachable!()
     }
 
-    async fn rename(&self, _inode: InodeIndex, _parent_inode: InodeIndex, _name: &str) {
+    async fn rename(&self, _inode: InodeIndex, _parent_inode: InodeIndex, _name: &str) -> Result<(), ErrorCode> {
         unreachable!()
     }
 }

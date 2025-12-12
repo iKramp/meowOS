@@ -1,7 +1,9 @@
+use std::error::ErrorCode;
 use std::{lock_w_info, print};
 use std::{sync::no_int_spinlock::NoIntSpinlock, vec::Vec};
 use std::boxed::Box;
 
+use crate::drivers::disk::DirEntry;
 use crate::vfs::{DeviceId, InodeType};
 
 use super::VfsAdapterTrait;
@@ -67,7 +69,7 @@ impl VfsAdapterTrait for TtyAdapter {
         read_size
     }
 
-    async fn read_dir(&self, _inode: crate::vfs::InodeIndex) -> std::boxed::Box<[crate::drivers::disk::DirEntry]> {
+    async fn read_dir(&self, _inode: crate::vfs::InodeIndex) -> Result<Box<[DirEntry]>, ErrorCode> {
         panic!("TTY does not support read_dir");
     }
 

@@ -1,9 +1,9 @@
 use std::{
     boxed::Box,
     lock_w_info,
-    mem_utils::{PhysAddr, get_at_virtual_addr, translate_virt_phys_addr},
+    mem_utils::{get_at_virtual_addr, translate_virt_phys_addr, PhysAddr},
     println,
-    string::String,
+    string::{String, ToString},
     vec::Vec,
 };
 
@@ -31,7 +31,7 @@ impl PartitionSchemeDriver for GPTDriver {
         unsafe {
             PAGE_TREE_ALLOCATOR
                 .get_page_table_entry_mut(first_lba_binding)
-                .unwrap()
+                .expect("page entry must exist after allocation")
                 .set_pat(LiminePat::UC);
         }
         disk.read(1, 1, &[first_lba]).await;
@@ -43,16 +43,17 @@ impl PartitionSchemeDriver for GPTDriver {
         let num_entries = header.num_partition_entries as usize;
         let entry_size = header.size_partition_entry as usize;
         let entry_num_lbas = (num_entries * entry_size).div_ceil(512);
-        let buffer = unsafe { PAGE_TREE_ALLOCATOR.allocate_contigious(entry_num_lbas as u64 / 8, None, false) };
+        let entry_num_pages = (entry_num_lbas as u64).div_ceil(8);
+        let buffer = unsafe { PAGE_TREE_ALLOCATOR.allocate_contigious(entry_num_pages, None, false) };
         let page_tree_root = PageTree::get_level4_addr();
-        let physical_addresses: Vec<PhysAddr> = (0..entry_num_lbas / 8)
+        let physical_addresses: Vec<PhysAddr> = (0..entry_num_pages)
             .inspect(|i| unsafe {
                 PAGE_TREE_ALLOCATOR
-                    .get_page_table_entry_mut(buffer + (*i as u64 * 4096))
-                    .unwrap()
+                    .get_page_table_entry_mut(buffer + (*i * 4096))
+                    .expect("page entry must exist after allocation")
                     .set_pat(LiminePat::UC)
             })
-            .map(|i| translate_virt_phys_addr(buffer + (i as u64 * 4096), page_tree_root).unwrap())
+            .map(|i| translate_virt_phys_addr(buffer + (i * 4096), page_tree_root).expect("must translate to physical addr after allocation"))
             .collect();
         disk.read(start_entries, entry_num_lbas, &physical_addresses).await;
 
@@ -68,7 +69,7 @@ impl PartitionSchemeDriver for GPTDriver {
                 if entry.partition_type_guid == [0; 16] {
                     continue;
                 }
-                let mut name = String::from_utf16(&entry.partition_name).unwrap();
+                let mut name = String::from_utf16(&entry.partition_name).unwrap_or("invalid_partition_name".to_string());
                 name.remove_matches("\u{0}");
                 let partition_uuid = Uuid::from_bytes(entry.unique_partition_guid);
                 let fs_uuid = Uuid::from_bytes(entry.partition_type_guid);
@@ -104,7 +105,7 @@ impl PartitionSchemeDriver for GPTDriver {
         unsafe {
             PAGE_TREE_ALLOCATOR
                 .get_page_table_entry_mut(first_lba_binding)
-                .unwrap()
+                .expect("page entry must exist after allocation")
                 .set_pat(LiminePat::UC);
         }
         disk.read(1, 1, &[first_lba]).await;

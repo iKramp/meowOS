@@ -7,9 +7,11 @@ pub fn fclose(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
     let fd = args.arg1;
     let mut proc_mut = proc.get_mutable();
     if proc_mut.take_file_handle(fd).is_some() {
-        proc.set_syscall_return(0, 0).unwrap();
+        args.arg1 = 0;
+        args.arg2 = 0;
     } else {
-        proc.set_syscall_return(u64::MAX, 1).unwrap();
+        args.arg1 = u64::MAX;
+        args.arg2 = 1;
     }
     false
 }

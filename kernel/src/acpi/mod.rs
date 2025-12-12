@@ -54,9 +54,9 @@ pub fn read_tables() {
     for table in &tables {
         unsafe {
             let header = std::mem_utils::get_at_physical_addr::<sdt::AcpiSdtHeader>(*table);
-            let signature = std::str::from_utf8(&header.signature).unwrap();
+            let signature = std::str::from_utf8(&header.signature).expect("signatures are ascii, error in mem read");
             println!("Found ACPI table: {} at physical address {}", signature, table.0);
-            ACPI_TABLE_MAP.insert(std::str::from_utf8(&header.signature).unwrap(), *table);
+            ACPI_TABLE_MAP.insert(signature, *table);
         }
     }
     println!("Acpi tables read");
@@ -73,7 +73,7 @@ pub fn init_acpi() {
     unsafe {
         PLATFORM_INFO = Some(platform_info);
     };
-    let platform_info = unsafe { PLATFORM_INFO.as_ref().unwrap() };
+    let platform_info = get_platform_info();
     cpu_locals::init(platform_info);
 
     apic::enable_apic(platform_info, platform_info.boot_processor.processor_id);

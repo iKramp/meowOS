@@ -181,7 +181,7 @@ async fn load_dir(current: InodeIdentifier, cache: &mut Option<NoIntSpinlockGuar
     drop(vfs);
     drop(cache.take()); //drop lock
 
-    let dir = fs.read_dir(current.index).await;
+    let dir = fs.read_dir(current.index).await?;
 
     let mut children = Vec::new();
     if dir.is_empty() {

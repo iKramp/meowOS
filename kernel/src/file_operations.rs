@@ -122,7 +122,7 @@ impl WriteFileOperation {
             unsafe {
                 PAGE_TREE_ALLOCATOR
                     .get_page_table_entry_mut(frame_binding)
-                    .unwrap()
+                    .expect("page entry must exist after allocation")
                     .set_pat(crate::memory::paging::LiminePat::UC);
             }
         }
@@ -138,7 +138,7 @@ impl WriteFileOperation {
         }
 
         let open_file_flags = FileFlags::new().with_write(true);
-        let mut file = block_task(Box::pin(vfs::open_file((&path).into(), None, open_file_flags))).unwrap();
+        let mut file = block_task(Box::pin(vfs::open_file((&path).into(), None, open_file_flags))).expect("fopen failed in debug function");
 
         println!("Writing file: {} of size: {}", self.file_name, content.len());
         block_task(Box::pin(vfs::write_file(
@@ -146,7 +146,7 @@ impl WriteFileOperation {
             &frames,
             self.content.len() as u64,
         )))
-        .unwrap();
+        .expect("file write failed in debug function");
 
         for frame in frames {
             unsafe { crate::memory::physical_allocator::deallocate_frame(frame) };
@@ -220,9 +220,9 @@ impl ReadFileOperation {
             }
 
             let open_file_flags = FileFlags::new().with_read(true);
-            let mut file = vfs::open_file((&path).into(), None, open_file_flags).await.unwrap();
+            let mut file = vfs::open_file((&path).into(), None, open_file_flags).await.expect("fopen failed in debug function");
 
-            vfs::read_file(&mut file, &buffer, real_length).await.unwrap();
+            vfs::read_file(&mut file, &buffer, real_length).await.expect("file read failed in debug function");
             let mut final_data = Vec::with_capacity(length as usize);
             let mut frame_ptr = (offset as usize) & 0xFFF;
             for (index, frame) in buffer.iter().enumerate() {
@@ -246,7 +246,7 @@ impl ReadFileOperation {
             );
             // println!("File content: {:?}", final_data);
             //transofm into string
-            let string = String::from_utf8(final_data).unwrap();
+            let string = String::from_utf8(final_data).unwrap_or(String::from(""));
             println!("File content as string:");
             printlnc!((255, 200, 100), "{}", string);
         };

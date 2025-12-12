@@ -98,7 +98,7 @@ fn map_lapic_registers(lapic_address: PhysAddr) {
         let lapic_virt_addr = crate::memory::PAGE_TREE_ALLOCATOR.allocate(Some(lapic_address), false);
         let apic_registers_page_entry = crate::memory::PAGE_TREE_ALLOCATOR
             .get_page_table_entry_mut(lapic_virt_addr)
-            .unwrap();
+            .expect("LAPIC page entry must exist after allocation");
         apic_registers_page_entry.set_pat(LiminePat::UC);
         let lapic_ref = &mut *(lapic_virt_addr.0 as *mut LapicRegisters);
         LAPIC_REGISTERS = MaybeUninit::new(lapic_ref);

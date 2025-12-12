@@ -74,8 +74,6 @@ pub fn wake_cpus(platform_info: &PlatformInfo) {
 
 fn copy_trampoline() {
     let destination = unsafe { crate::memory::TRAMPOLINE_RESERVED };
-    let destination_entry = unsafe { PAGE_TREE_ALLOCATOR.get_page_table_entry_mut(VirtAddr(destination.0)).unwrap() };
-    destination_entry.set_pat(LiminePat::UC);
     println!("copying trampoline to {:x?}", destination);
 
     assert!(
@@ -91,6 +89,7 @@ fn copy_trampoline() {
     }
 
     let cr3: u64;
+
     unsafe {
         core::arch::asm!(
             "mov {}, cr3",
@@ -102,7 +101,7 @@ fn copy_trampoline() {
         let gdt_ptr = TablePointer {
             limit: gdt_ptr.limit,
             base: std::mem_utils::translate_virt_phys_addr(VirtAddr(gdt_ptr.base), page_tree_root)
-                .unwrap()
+                .expect("page of a static is mapped")
                 .0,
         };
         let wait_loop_ptr = super::ap_startup::ap_started_wait_loop as *const () as u64;

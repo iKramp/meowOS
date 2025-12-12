@@ -1,5 +1,5 @@
 use core::fmt::Display;
-use std::{print, println, string::String};
+use std::{error::ErrorCode, print, println, string::String};
 
 use bitfield::bitfield;
 
@@ -247,7 +247,7 @@ impl PageTable {
         //remove highest page from pool
         let highest_virt_page = VirtAddr(0xFFFF_FFFF_FFFF_F000);
         unsafe { self.mmap(highest_virt_page, PhysAddr(0)) };
-        let entry = self.get_page_table_entry(highest_virt_page, 4).unwrap();
+        let entry = self.get_page_table_entry(highest_virt_page, 4).expect("page entry must exist after allocation");
         entry.set_writeable(false);
         entry.set_no_execute(true);
     }
@@ -276,19 +276,19 @@ impl PageTable {
     ///# Safety
     ///This function must be called with a valid level. External callers should always use 4
     ///number of pages requested cannot be more than 512
-    unsafe fn get_available_entry_pages(&self, level: u64, pages: u64, low: bool) -> u64 {
+    unsafe fn get_available_entry_pages(&self, level: u64, pages: u64, low: bool) -> Option<u64> {
         debug_assert!(pages <= 512);
 
         if low {
             for iterator in self.entries.iter().enumerate() {
                 if let Some(addr) = internal(iterator, level, pages, low) {
-                    return addr;
+                    return Some(addr);
                 }
             }
         } else {
             for iterator in self.entries.iter().enumerate().rev() {
                 if let Some(addr) = internal(iterator, level, pages, low) {
-                    return addr;
+                    return Some(addr);
                 }
             }
         };
@@ -297,18 +297,18 @@ impl PageTable {
             if !entry.1.present() {
                 return Some((entry.0 as u64) << (3 + level * 9));
             }
-            if entry.1.present() && (!entry.1.huge_page() && entry.1.num_of_available_pages() >= pages) {
+            if entry.1.present() && (!entry.1.huge_page() && (level > 1 || entry.1.num_of_available_pages() >= pages)) {
                 let lower_table = unsafe { get_at_physical_addr::<PageTable>(entry.1.address()) };
                 let addr = if level == 2 {
-                    lower_table.get_available_entry_level_1_pages(pages, low)
+                    lower_table.get_available_entry_level_1_pages(pages, low)?
                 } else {
-                    unsafe { lower_table.get_available_entry_pages(level - 1, pages, low) }
+                    unsafe { lower_table.get_available_entry_pages(level - 1, pages, low)? }
                 };
                 return Some(((entry.0 as u64) << (3 + level * 9)) + addr);
             }
             None
         }
-        panic!("could not find available virtual page");
+        return None;
     }
 
     fn get_available_entry_level_1(&self, low: bool) -> usize {
@@ -325,32 +325,35 @@ impl PageTable {
                 }
             }
         }
-        panic!("could not find available virtual page");
+        panic!("didn't run out of memory, but still ran out of pages????");
     }
 
     ///returns the address after which the requested number of pages are available.
-    fn get_available_entry_level_1_pages(&self, pages: u64, low: bool) -> u64 {
+    fn get_available_entry_level_1_pages(&self, pages: u64, low: bool) -> Option<u64> {
         if low {
             for entries in self.entries.windows(pages as usize).enumerate() {
                 if entries.1.iter().all(|entry| !entry.present()) {
-                    return (entries.0 as u64) << 12;
+                    return Some((entries.0 as u64) << 12);
                 }
             }
         } else {
             for entries in self.entries.windows(pages as usize).enumerate().rev() {
                 if entries.1.iter().all(|entry| !entry.present()) {
-                    return (entries.0 as u64) << 12;
+                    return Some((entries.0 as u64) << 12);
                 }
             }
         }
-        panic!("could not find available virtual page");
+        return None
     }
 
-    pub fn allocate(&mut self, virtual_address: VirtAddr) -> PhysAddr {
+    pub fn allocate(&mut self, virtual_address: VirtAddr) -> Result<PhysAddr, ErrorCode> {
         unsafe {
             let frame_addr = physical_allocator::allocate_frame();
-            self.mmap(virtual_address, frame_addr);
-            frame_addr
+            if let Err(e) = self.mmap(virtual_address, frame_addr) {
+                physical_allocator::deallocate_frame(frame_addr);
+                return Err(e);
+            }
+            Ok(frame_addr)
         }
     }
 
@@ -379,7 +382,7 @@ impl PageTable {
     ///Physical addresses from physical_address to physical_address + num must already be marked as
     ///used, and not yet mapped
     pub unsafe fn mmap_contigious_any(&mut self, num: u64, physical_address: PhysAddr, low: bool) -> VirtAddr {
-        let address = unsafe { self.get_available_entry_pages(4, num, low) };
+        let address = unsafe { self.get_available_entry_pages(4, num, low).ok_or(ErrorCode::InsufficientResources).expect("no pages?? impossible!") };
         for i in 0..num {
             assert!(
                 !is_on_ram(physical_address + PhysAddr(i * 4096))
@@ -387,12 +390,7 @@ impl PageTable {
                 "memory space must already be allocated"
             );
             unsafe {
-                let entry = self.get_page_table_entry(VirtAddr(address + i * 4096), 4);
-
-                if let Some(entry) = entry {
-                    assert!(!entry.present(), "incorrect contigious map logic");
-                }
-                self.mmap(VirtAddr(address + i * 4096), physical_address + PhysAddr(i * 4096));
+                self.mmap(VirtAddr(address + i * 4096), physical_address + PhysAddr(i * 4096)).expect("inconsistency between searching free contigious pages and allocating them in mmap_contigious_any");
             }
         }
         VirtAddr(address)
@@ -403,10 +401,10 @@ impl PageTable {
     ///# Safety
     ///physical address must be marked as used by an external actor. Virtual address must
     ///not yet be in use by this page tree
-    pub unsafe fn mmap(&mut self, virtual_address: VirtAddr, physical_address: PhysAddr) {
+    pub unsafe fn mmap(&mut self, virtual_address: VirtAddr, physical_address: PhysAddr) -> Result<(), ErrorCode> {
         debug_assert!(!is_on_ram(physical_address) || physical_allocator::is_frame_allocated(physical_address));
         unsafe {
-            self.allocate_4_to_2_virtual(4, virtual_address, physical_address);
+            self.allocate_4_to_2_virtual(4, virtual_address, physical_address).map(|_| ())
         }
     }
 
@@ -440,7 +438,7 @@ impl PageTable {
 
     ///#Safety: Virtual address must not yet be in use by this page tree. Physical address must be
     ///marked as used
-    unsafe fn allocate_4_to_2_virtual(&mut self, level: u64, address: VirtAddr, physical_address: PhysAddr) -> bool {
+    unsafe fn allocate_4_to_2_virtual(&mut self, level: u64, address: VirtAddr, physical_address: PhysAddr) -> Result<bool, ErrorCode> {
         let entry = self.get_page_table_entry_on_level(address, level);
         if !entry.present() {
             let frame_addr = physical_allocator::allocate_frame();
@@ -454,16 +452,16 @@ impl PageTable {
         let lower_less_available = unsafe {
             let lower_page_table = get_at_physical_addr::<PageTable>(entry.address());
             if level == 2 {
-                lower_page_table.allocate_level_1_virtual(address, physical_address);
+                lower_page_table.allocate_level_1_virtual(address, physical_address)?;
                 true
             } else {
-                lower_page_table.allocate_4_to_2_virtual(level - 1, address, physical_address)
+                lower_page_table.allocate_4_to_2_virtual(level - 1, address, physical_address)?
             }
         };
         if lower_less_available {
             entry.decrease_available();
         }
-        entry.num_of_available_pages() == 0
+        Ok(entry.num_of_available_pages() == 0)
     }
 
     ///# Safety
@@ -476,16 +474,14 @@ impl PageTable {
         *entry = PageTableEntry::new(physical_address, is_user_mode(*address));
     }
 
-    unsafe fn allocate_level_1_virtual(&mut self, virtual_address: VirtAddr, physical_address: PhysAddr) {
+    unsafe fn allocate_level_1_virtual(&mut self, virtual_address: VirtAddr, physical_address: PhysAddr) -> Result<(), ErrorCode> {
         let entry = self.get_page_table_entry_on_level(virtual_address, 1);
-        debug_assert!(
-            !entry.present(),
-            "requested virtual address {:#x?} already used. Entry: {:#x?}",
-            virtual_address,
-            entry
-        );
+        if entry.present() {
+            return Err(ErrorCode::AlreadyMapped);
+        }
 
         *entry = PageTableEntry::new(physical_address, is_user_mode(virtual_address));
+        Ok(())
     }
 
     //returns if there was no space but now there is
@@ -517,27 +513,29 @@ impl PageTable {
     //TODO: when unmapping lowest pages, also unmap higher pages
 
     //returns if there was no space but now there is
-    pub unsafe fn unmap(&mut self, address: VirtAddr, level: u64) -> bool {
+    pub unsafe fn unmap(&mut self, address: VirtAddr, level: u64) -> Result<bool, ErrorCode> {
         let entry = &mut self.entries[(address.0 >> (3 + level * 9) & 0b111_111_111) as usize];
-        debug_assert!(entry.present());
+        if !entry.present() {
+            return Err(ErrorCode::NotMapped)
+        }
         if level == 1 {
             entry.set_present(false);
-            return true;
+            return Ok(true);
         }
-        if entry.present() && entry.huge_page() {
+        if entry.huge_page() {
             entry.set_present(false);
-            return true;
+            return Ok(true);
         }
         unsafe {
             let lower_level_table = get_at_physical_addr::<PageTable>(entry.address());
-            let more_space = lower_level_table.unmap(address, level - 1);
+            let more_space = lower_level_table.unmap(address, level - 1)?;
             if !more_space {
-                return false;
+                return Ok(false);
             }
         }
         entry.increase_available();
         //if it was 0 before, this entry was not available but now it is
-        entry.num_of_available_pages() == 1
+        Ok(entry.num_of_available_pages() == 1)
     }
 
     ///init function
@@ -768,14 +766,14 @@ impl PageTree {
         &mut self,
         physical_address: Option<PhysAddr>,
         virtual_address: std::mem_utils::VirtAddr,
-    ) -> PhysAddr {
+    ) -> Result<PhysAddr, ErrorCode> {
         unsafe {
             let level_4_table = get_at_physical_addr::<PageTable>(self.level_4_table);
             match physical_address {
                 None => level_4_table.allocate(virtual_address),
                 Some(physical_address) => {
-                    level_4_table.mmap(virtual_address, physical_address);
-                    physical_address
+                    level_4_table.mmap(virtual_address, physical_address)?;
+                    Ok(physical_address)
                 }
             }
         }
@@ -795,20 +793,14 @@ impl PageTree {
         }
     }
 
-    pub fn allocate_contigious(&mut self, num: u64, physical_address: Option<PhysAddr>, low: bool) -> std::mem_utils::VirtAddr {
+    pub fn allocate_contigious(&mut self, num: u64, physical_address: Option<PhysAddr>, low: bool) -> VirtAddr {
         unsafe {
             let level_4_table = get_at_physical_addr::<PageTable>(self.level_4_table);
             let address = match physical_address {
                 None => {
-                    let addr = level_4_table.get_available_entry_pages(4, num, low);
+                    let addr = level_4_table.get_available_entry_pages(4, num, low).ok_or(ErrorCode::InsufficientResources).expect("no pages?? impossible!");
                     for i in 0..num {
-                        let entry = level_4_table.get_page_table_entry(VirtAddr(addr + i * 4096), 4);
-
-                        if let Some(entry) = entry {
-                            assert!(!entry.present(), "incorrect contigious map logic");
-                        }
-
-                        level_4_table.allocate(VirtAddr(addr + i * 4096));
+                        level_4_table.allocate(VirtAddr(addr + i * 4096)).expect("inconsistency between searching free contigious pages and allocating them in mmap_contigious_any");
                     }
                     VirtAddr(addr)
                 }
@@ -822,12 +814,12 @@ impl PageTree {
         }
     }
 
-    pub fn mmap_contigious(&mut self, physical_addresses: &[PhysAddr], low: bool) -> std::mem_utils::VirtAddr {
+    pub fn mmap_contigious(&mut self, physical_addresses: &[PhysAddr], low: bool) -> VirtAddr {
         unsafe {
             let level_4_table = get_at_physical_addr::<PageTable>(self.level_4_table);
-            let addr = level_4_table.get_available_entry_pages(4, physical_addresses.len() as u64, low);
+            let addr = level_4_table.get_available_entry_pages(4, physical_addresses.len() as u64, low).expect("no pages?? impossible!");
             for i in 0..physical_addresses.len() {
-                level_4_table.mmap(VirtAddr(addr + i as u64 * 4096), physical_addresses[i]);
+                level_4_table.mmap(VirtAddr(addr + i as u64 * 4096), physical_addresses[i]).expect("inconsistency between searching free contigious pages and allocating them in mmap_contigious_any");
             }
             if low {
                 return VirtAddr(addr);
@@ -837,14 +829,14 @@ impl PageTree {
         }
     }
 
-    pub fn find_contigious_pages(&mut self, n_pages: usize, low: bool) -> std::mem_utils::VirtAddr {
+    pub fn find_contigious_pages(&mut self, n_pages: usize, low: bool) -> Option<std::mem_utils::VirtAddr> {
         let level_4_table = unsafe { get_at_physical_addr::<PageTable>(self.level_4_table) };
-        let addr = unsafe { VirtAddr(level_4_table.get_available_entry_pages(4, n_pages as u64, low)) };
+        let addr = unsafe { VirtAddr(level_4_table.get_available_entry_pages(4, n_pages as u64, low)?) };
         if low {
-            return addr;
+            return Some(addr);
         }
         //force sign extension
-        VirtAddr(addr.0 | 0xFFFF_0000_0000_0000)
+        Some(VirtAddr(addr.0 | 0xFFFF_0000_0000_0000))
     }
 
     pub fn get_page_table_entry_mut(&mut self, addr: std::mem_utils::VirtAddr) -> Option<&mut PageTableEntry> {

@@ -128,7 +128,7 @@ async fn mount_filesystem(mountpoint: ResolvedPath, fs: Arc<dyn FileSystem + Sen
     let root = mountpoint.inner().is_empty();
     if root {
         //mounting root
-        mount_new_root(&fs).await;
+        mount_new_root(&fs).await?;
         let fs: Arc<dyn FileSystem + Send> = fs;
         let mut vfs = lock_w_info!(VFS);
         vfs.mounted_filesystems.insert(part_id, fs);
@@ -146,13 +146,13 @@ async fn mount_filesystem(mountpoint: ResolvedPath, fs: Arc<dyn FileSystem + Sen
     Ok(())
 }
 
-async fn mount_new_root(fs: &Arc<dyn FileSystem + Send>) {
+async fn mount_new_root(fs: &Arc<dyn FileSystem + Send>) -> Result<(), ErrorCode> {
     let inode = fs.stat(ROOT_INODE_INDEX).await;
     let inode_index = inode.index;
     fs_tree::init(inode);
 
     //root checks
-    let root_dirs = fs.read_dir(inode_index).await;
+    let root_dirs = fs.read_dir(inode_index).await?;
     let required_dirs = ["tty", "proc"];
     for required_dir in required_dirs.iter() {
         if !root_dirs.iter().any(|entry| entry.name.as_ref() == *required_dir) {
@@ -161,6 +161,7 @@ async fn mount_new_root(fs: &Arc<dyn FileSystem + Send>) {
                 .await;
         }
     }
+    Ok(())
 
 }
 
@@ -209,15 +210,15 @@ pub async fn open_file(
     })
 }
 
-pub async fn get_dir_entries(file_handle: &FileHandle) -> Result<Box<[DirEntry]>, String> {
-    let inode = fs_tree::get_inode(file_handle.inode).ok_or("Inode not found")?;
+pub async fn get_dir_entries(file_handle: &FileHandle) -> Result<Box<[DirEntry]>, ErrorCode> {
+    let inode = fs_tree::get_inode(file_handle.inode).ok_or(ErrorCode::InodeNotPresent)?;
     let mut vfs = lock_w_info!(VFS);
-    let device_details = vfs.devices.get(&inode.device).ok_or("Device not found")?;
+    let device_details = vfs.devices.get(&inode.device).ok_or(ErrorCode::NoEntry)?;
     let partition_id = device_details.partition;
-    let fs = vfs.mounted_filesystems.get_mut(&partition_id).ok_or("FS not found")?;
+    let fs = vfs.mounted_filesystems.get_mut(&partition_id).ok_or(ErrorCode::NoEntry)?;
     let fs = fs.clone();
     drop(vfs);
-    Ok(fs.read_dir(file_handle.inode.index).await)
+    Ok(fs.read_dir(file_handle.inode.index).await?)
 }
 
 pub async fn create_file(parent_dir: &mut FileHandle, name: &str, inode_type: InodeType) -> Result<(), ErrorCode> {

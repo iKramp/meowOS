@@ -10,7 +10,7 @@ pub fn init_ioapic(platform_info: &PlatformInfo) {
             let io_apic_address = crate::memory::PAGE_TREE_ALLOCATOR.allocate(Some(PhysAddr(io_apic_info.address.into())), false);
             let apic_registers_page_entry = crate::memory::PAGE_TREE_ALLOCATOR
                 .get_page_table_entry_mut(io_apic_address)
-                .unwrap();
+                .expect("page entry must exist after allocation");
             apic_registers_page_entry.set_pat(LiminePat::UC);
             core::arch::asm!(
                 "mov rax, cr3",

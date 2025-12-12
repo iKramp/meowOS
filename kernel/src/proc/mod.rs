@@ -101,8 +101,6 @@ pub fn set_proc_initialized() {
         GENERIC_PAGE_TREE = paging::PageTree::get_level4_addr();
         PROC_INITIALIZED = true;
     }
-    let locals = crate::acpi::cpu_locals::CpuLocals::get();
-    locals.proc_initialized = true;
 }
 
 pub fn get_proc(pid: Pid) -> Option<Arc<ProcessData>> {
@@ -127,8 +125,8 @@ pub fn wake_process(pid: Pid) {
 
 //context switch to this process when no other processes exist
 pub fn create_fallback_process() {
-    let code_region = MemoryRegionDescriptor::new(VirtAddr(0x1000), 1, MemoryRegionFlags(2)).unwrap();
-    let data_region = MemoryRegionDescriptor::new(VirtAddr(0x2000), 1, MemoryRegionFlags(1)).unwrap();
+    let code_region = MemoryRegionDescriptor::new(VirtAddr(0x1000), 1, MemoryRegionFlags(2)).expect("fallback can't error");
+    let data_region = MemoryRegionDescriptor::new(VirtAddr(0x2000), 1, MemoryRegionFlags(1)).expect("fallback can't error");
     let code_init = [
         0x90,                  //nop
         0x90,                  //nop
@@ -164,7 +162,7 @@ pub fn create_fallback_process() {
         "fallback_process".to_string().into_boxed_str(),
         "[fallback_process]".to_string().into_boxed_str(),
     )
-    .unwrap();
+    .expect("fallback can't error");
     let pid = create_process(&fake_context);
     assert_eq!(pid.0, 0);
     let mut scheduler_lock = lock_w_info!(SCHEDULER);

@@ -1,7 +1,7 @@
-use crate::vfs::InodeType;
+use crate::{drivers::disk::DirEntry, vfs::InodeType};
 
 use super::VfsAdapterTrait;
-use std::boxed::Box;
+use std::{boxed::Box, error::ErrorCode};
 
 #[derive(Debug)]
 pub struct ProcAdapter {
@@ -26,7 +26,7 @@ impl VfsAdapterTrait for ProcAdapter {
         todo!()
     }
 
-    async fn read_dir(&self, _inode: crate::vfs::InodeIndex) -> std::boxed::Box<[crate::drivers::disk::DirEntry]> {
+    async fn read_dir(&self, _inode: crate::vfs::InodeIndex) -> Result<Box<[DirEntry]>, ErrorCode> {
         todo!()
     }
 

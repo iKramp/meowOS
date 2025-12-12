@@ -72,6 +72,28 @@ impl AsyncTaskData {
     }
 }
 
+pub fn yield_now() -> YieldOnce {
+    YieldOnce { yielded: false }
+}
+
+pub struct YieldOnce {
+    yielded: bool,
+}
+
+impl Future for YieldOnce {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if self.yielded {
+            Poll::Ready(())
+        } else {
+            self.yielded = true;
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+    }
+}
+
 pub fn add_task(task: AsyncTask, pid: Option<Pid>) {
     let locals = CpuLocals::get();
     let interrupts = disable_interrupts();

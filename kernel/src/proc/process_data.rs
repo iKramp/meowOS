@@ -86,14 +86,13 @@ impl ProcessData {
         lock_w_info!(self.internal)
     }
 
-    pub fn set_syscall_return(&self, val: u64, err: u64) -> Result<(), ()> {
+    pub fn set_syscall_return(&self, val: u64, err: u64) {
         let internal = &mut lock_w_info!(self.internal);
         if let CpuStateType::Syscall((syscall_state, _)) = &mut internal.cpu_state {
             syscall_state.rax = val;
             syscall_state.rdx = err;
-            Ok(())
         } else {
-            Err(())
+            panic!("set syscall return from non-syscall context: kill process");
         }
     }
 

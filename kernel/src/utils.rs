@@ -1,4 +1,5 @@
 use core::{arch::asm, ffi::CStr};
+use std::error::ErrorCode;
 
 pub fn byte_to_port(port: u16, byte: u8) {
     unsafe {
@@ -42,9 +43,9 @@ pub fn dword_from_port(port: u16) -> u32 {
     }
 }
 
-pub fn ptr_to_str(ptr: *const u8) -> &'static str {
+pub fn ptr_to_str(ptr: *const u8) -> Result<&'static str, ErrorCode> {
     unsafe {
         let c_str = CStr::from_ptr(ptr as *const i8);
-        c_str.to_str().unwrap()
+        c_str.to_str().map_err(|_| ErrorCode::InvalidPointer)
     }
 }

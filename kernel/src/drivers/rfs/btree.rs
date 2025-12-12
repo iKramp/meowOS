@@ -1,6 +1,6 @@
-use std::{boxed::Box, mem_utils::VirtAddr};
+use std::{boxed::Box, mem_utils::{PhysAddr, VirtAddr}};
 
-use super::{BLOCK_SIZE_SECTORS, Rfs};
+use super::{AllocatedBlock, Rfs, BLOCK_SIZE_SECTORS};
 use crate::{
     drivers::disk::MountedPartition,
     memory::{
@@ -19,7 +19,7 @@ pub struct BtreeNode {
 }
 
 impl BtreeNode {
-    pub async fn read_from_disk(partition: &MountedPartition, block: u32) -> VirtAddr {
+    pub async fn read_from_disk(partition: &MountedPartition, block: u32) -> AllocatedBlock {
         let sector = block as usize * BLOCK_SIZE_SECTORS;
 
         let phys_ptr = physical_allocator::allocate_frame();
@@ -27,35 +27,28 @@ impl BtreeNode {
         unsafe {
             PAGE_TREE_ALLOCATOR
                 .get_page_table_entry_mut(virt_ptr)
-                .unwrap()
+                .expect("page entry must exist after allocation")
                 .set_pat(paging::LiminePat::UC);
         }
         partition.read(sector, BLOCK_SIZE_SECTORS, &[phys_ptr]).await;
-        virt_ptr
-    }
-
-    pub fn drop(node: VirtAddr) {
-        unsafe {
-            PAGE_TREE_ALLOCATOR.deallocate(node);
-        }
+        AllocatedBlock::new(phys_ptr, virt_ptr)
     }
 
     ///set modified to false
-    pub async fn write_to_disk(node: VirtAddr, partition: &MountedPartition, block: u32) {
+    pub async fn write_to_disk(node: PhysAddr, partition: &MountedPartition, block: u32) {
         let sector = block as usize * BLOCK_SIZE_SECTORS;
-        let root_page_table = PageTree::get_level4_addr();
-        let phys_addr = std::mem_utils::translate_virt_phys_addr(node, root_page_table).unwrap();
 
-        partition.write(sector, BLOCK_SIZE_SECTORS, &[phys_addr]).await;
+        partition.write(sector, BLOCK_SIZE_SECTORS, &[node]).await;
     }
 
     #[allow(clippy::new_ret_no_self)]
-    pub fn new() -> VirtAddr {
-        let virt_ptr = unsafe { PAGE_TREE_ALLOCATOR.allocate(None, false) };
+    pub fn new() -> AllocatedBlock {
+        let phys_ptr = physical_allocator::allocate_frame();
+        let virt_ptr = unsafe { PAGE_TREE_ALLOCATOR.allocate(Some(phys_ptr), false) };
         unsafe {
             std::mem_utils::memset_virtual_addr(virt_ptr, 0, 4096);
         }
-        virt_ptr
+        AllocatedBlock::new(phys_ptr, virt_ptr)
     }
 
     fn get_key(node: VirtAddr, index: usize) -> Key {
@@ -91,7 +84,7 @@ impl BtreeNode {
                     return None;
                 }
                 let child_block = Self::get_child(node, i);
-                let child_node = unsafe { fs_data.get_node(child_block).await.1 };
+                let child_node = unsafe { fs_data.get_node(child_block).await.1.virt };
                 return Box::pin(BtreeNode::find_inode_block(child_node, key_index, fs_data)).await;
             }
             if key.index == key_index {
@@ -102,7 +95,7 @@ impl BtreeNode {
                     return None;
                 }
                 let child_block = Self::get_child(node, i);
-                let child_node = unsafe { fs_data.get_node(child_block).await.1 };
+                let child_node = unsafe { fs_data.get_node(child_block).await.1.virt };
                 return Box::pin(BtreeNode::find_inode_block(child_node, key_index, fs_data)).await;
             }
         }
@@ -110,7 +103,7 @@ impl BtreeNode {
             return None;
         }
         let child_block = Self::get_child(node, 341);
-        let child_node = unsafe { fs_data.get_node(child_block).await.1 };
+        let child_node = unsafe { fs_data.get_node(child_block).await.1.virt };
         Box::pin(BtreeNode::find_inode_block(child_node, key_index, fs_data)).await
     }
 
@@ -122,7 +115,7 @@ impl BtreeNode {
         if is_leaf {
             if is_full {
                 let new_root_block = Self::split_root(node, block, fs_data).await;
-                let new_root_node = unsafe { fs_data.get_node(new_root_block).await.1 };
+                let new_root_node = unsafe { fs_data.get_node(new_root_block).await.1.virt };
                 if key.index < BtreeNode::get_key(new_root_node, 0).index {
                     BtreeNode::insert_key_internal(new_root_node, new_root_block, 0, key, fs_data).await;
                 } else {
@@ -148,7 +141,7 @@ impl BtreeNode {
         let is_full = Self::get_key(node, 340).index != 0;
         let child_node_index = Self::get_child(node, child_index);
         let rebalance_result = BtreeNode::insert_key_internal(
-            unsafe { fs_data.get_node(child_node_index).await.1 },
+            unsafe { fs_data.get_node(child_node_index).await.1.virt },
             child_node_index,
             block,
             key,
@@ -166,7 +159,7 @@ impl BtreeNode {
             RebalanceResult::Split(new_block, new_key) => {
                 if is_full {
                     let new_root_block = Self::split_root(node, block, fs_data).await;
-                    let new_root_node = unsafe { fs_data.get_node(new_root_block).await.1 };
+                    let new_root_node = unsafe { fs_data.get_node(new_root_block).await.1.virt };
                     if new_key.index < BtreeNode::get_key(new_root_node, 0).index {
                         BtreeNode::insert_key_internal(new_root_node, new_root_block, 0, new_key, fs_data).await;
                     } else {
@@ -207,7 +200,7 @@ impl BtreeNode {
             if key_index == Self::get_key(node, i).index {
                 //child on the left of the key
                 let child_block = Self::get_child(node, i);
-                let child_node = unsafe { fs_data.get_node(child_block).await.1 };
+                let child_node = unsafe { fs_data.get_node(child_block).await.1.virt };
                 let (key, rebalance_result) = BtreeNode::take_biggest_key(child_node, child_block, block, fs_data).await;
                 //If the result is a merge, this key has escaped to the merged child. Find and
                 //replace it there. No need to worry about additional merges, as the node will be
@@ -229,10 +222,9 @@ impl BtreeNode {
 
                         if Self::get_key(node, 0).index == 0 {
                             //root is empty, merge
-                            unsafe { fs_data.remove_inode_cache_entry(block) };
-                            fs_data.free_block(block).await;
                             let child = Self::get_child(node, 0);
-                            BtreeNode::drop(node);
+                            fs_data.free_block(block).await;
+                            unsafe { fs_data.remove_inode_cache_entry(block) };
                             return Some(child);
                         } else {
                             return None;
@@ -278,17 +270,16 @@ impl BtreeNode {
         fs_data: &Rfs,
     ) -> Option<u32> {
         let child_block = Self::get_child(node, child_index);
-        let child_node = unsafe { fs_data.get_node(child_block).await.1 };
+        let child_node = unsafe { fs_data.get_node(child_block).await.1.virt };
         let rebalance_result = BtreeNode::delete_key_internal(child_node, child_block, key_index, block, fs_data).await;
 
         match rebalance_result {
             RebalanceResult::Merge(_) => {
                 if Self::get_key(node, 0).index == 0 {
                     //root is empty, merge
-                    unsafe { fs_data.remove_inode_cache_entry(block) };
                     fs_data.free_block(block).await;
                     let child = BtreeNode::get_child(node, 0);
-                    BtreeNode::drop(node);
+                    unsafe { fs_data.remove_inode_cache_entry(block) };
                     Some(child)
                 } else {
                     None
@@ -344,7 +335,7 @@ impl BtreeNode {
             if key_index == Self::get_key(node, i).index {
                 //child on the left of the key
                 let child_block = Self::get_child(node, i);
-                let child_node = unsafe { fs_data.get_node(child_block).await.1 };
+                let child_node = unsafe { fs_data.get_node(child_block).await.1.virt };
                 let (key, rebalance_result) = BtreeNode::take_biggest_key(child_node, child_block, block, fs_data).await;
                 //If the result is a merge, this key has escaped to the merged child. Find and
                 //replace it there. No need to worry about additional merges, as the node will be
@@ -480,7 +471,7 @@ impl BtreeNode {
     ) -> (Key, RebalanceResult) {
         let child_node_block = BtreeNode::get_child(node, child_index);
         let (key, rebalance_result) = BtreeNode::take_biggest_key(
-            unsafe { fs_data.get_node(child_node_block).await.1 },
+            unsafe { fs_data.get_node(child_node_block).await.1.virt },
             child_node_block,
             block,
             fs_data,
@@ -518,19 +509,19 @@ impl BtreeNode {
     }
 
     async fn merge(node: VirtAddr, block: u32, parent_block: u32, fs_data: &Rfs) -> MergeDirection {
-        let parent = unsafe { fs_data.get_node(parent_block).await.1 };
-        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }.children.iter().position(|&x| x == block).unwrap();
+        let parent = unsafe { fs_data.get_node(parent_block).await.1.virt };
+        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }.children.iter().position(|&x| x == block).expect("block must be a child of parent");
         let (left_node, right_node, separator, direction, right_block, left_block);
         if self_index == 0 {
             left_block = block;
             left_node = node;
             right_block = BtreeNode::get_child(parent, self_index + 1);
-            right_node = unsafe { fs_data.get_node(right_block).await.1 };
+            right_node = unsafe { fs_data.get_node(right_block).await.1.virt };
             separator = BtreeNode::get_key(parent, self_index);
             direction = MergeDirection::RightToCurrent;
         } else {
             left_block = BtreeNode::get_child(parent, self_index - 1);
-            left_node = unsafe { fs_data.get_node(left_block).await.1 };
+            left_node = unsafe { fs_data.get_node(left_block).await.1.virt };
             right_node = node;
             separator = BtreeNode::get_key(parent, self_index - 1);
             direction = MergeDirection::CurrentToLeft;
@@ -571,7 +562,6 @@ impl BtreeNode {
         BtreeNode::set_key(parent, 340, Key::empty());
         BtreeNode::set_child(parent, 341, 0);
 
-        BtreeNode::drop(right_node);
         fs_data.free_block(right_block).await;
         unsafe { fs_data.remove_inode_cache_entry(right_block) };
 
@@ -586,7 +576,9 @@ impl BtreeNode {
         let sibling_block = fs_data.allocate_block().await;
         let parent_block = fs_data.allocate_block().await;
         let sibling_node = BtreeNode::new();
+        let sibling_virt = sibling_node.virt;
         let parent_node = BtreeNode::new();
+        let parent_virt = parent_node.virt;
 
         unsafe { fs_data.add_node(sibling_block, sibling_node) };
         unsafe { fs_data.add_node(parent_block, parent_node) };
@@ -595,16 +587,16 @@ impl BtreeNode {
         BtreeNode::set_key(node, 170, Key::empty());
 
         for i in 171..341 {
-            BtreeNode::set_key(sibling_node, i - 171, BtreeNode::get_key(node, i));
-            BtreeNode::set_child(sibling_node, i - 170, BtreeNode::get_child(node, i + 1));
+            BtreeNode::set_key(sibling_virt, i - 171, BtreeNode::get_key(node, i));
+            BtreeNode::set_child(sibling_virt, i - 170, BtreeNode::get_child(node, i + 1));
             BtreeNode::set_key(node, i, Key::empty());
             BtreeNode::set_child(node, i + 1, 0);
         }
-        BtreeNode::set_child(sibling_node, 171, BtreeNode::get_child(node, 341));
+        BtreeNode::set_child(sibling_virt, 171, BtreeNode::get_child(node, 341));
 
-        BtreeNode::set_key(parent_node, 0, separator);
-        BtreeNode::set_child(parent_node, 0, block);
-        BtreeNode::set_child(parent_node, 1, sibling_block);
+        BtreeNode::set_key(parent_virt, 0, separator);
+        BtreeNode::set_child(parent_virt, 0, block);
+        BtreeNode::set_child(parent_virt, 1, sibling_block);
 
         unsafe { fs_data.get_node(block).await.0 = true };
 
@@ -641,7 +633,7 @@ impl BtreeNode {
     ) -> RebalanceResult {
         let child_node_index = BtreeNode::get_child(node, child_index);
         let rebalance_result = BtreeNode::insert_key_internal(
-            unsafe { fs_data.get_node(child_node_index).await.1 },
+            unsafe { fs_data.get_node(child_node_index).await.1.virt },
             child_node_index,
             block,
             key,
@@ -740,6 +732,7 @@ impl BtreeNode {
         //-------------------SPLIT NODE-------------------
         let new_block = fs_data.allocate_block().await;
         let new_node = BtreeNode::new();
+        let new_virt = new_node.virt;
 
         unsafe { fs_data.add_node(new_block, new_node) };
         unsafe { fs_data.get_node(block).await.0 = true };
@@ -751,8 +744,8 @@ impl BtreeNode {
         let mut key_inserted = false;
         while right_ptr >= 0 {
             if key_inserted {
-                BtreeNode::set_key(new_node, right_ptr as usize, BtreeNode::get_key(node, left_ptr as usize));
-                BtreeNode::set_child(new_node, right_ptr as usize + 1, BtreeNode::get_child(node, left_ptr as usize + 1));
+                BtreeNode::set_key(new_virt, right_ptr as usize, BtreeNode::get_key(node, left_ptr as usize));
+                BtreeNode::set_child(new_virt, right_ptr as usize + 1, BtreeNode::get_child(node, left_ptr as usize + 1));
                 BtreeNode::set_key(node, left_ptr as usize, Key::empty());
                 BtreeNode::set_child(node, left_ptr as usize + 1, 0);
                 right_ptr -= 1;
@@ -761,15 +754,15 @@ impl BtreeNode {
             }
             let left_key = BtreeNode::get_key(node, left_ptr as usize);
             if left_key.index > key.index {
-                BtreeNode::set_key(new_node, right_ptr as usize, left_key);
-                BtreeNode::set_child(new_node, right_ptr as usize + 1, BtreeNode::get_child(node, left_ptr as usize + 1));
+                BtreeNode::set_key(new_virt, right_ptr as usize, left_key);
+                BtreeNode::set_child(new_virt, right_ptr as usize + 1, BtreeNode::get_child(node, left_ptr as usize + 1));
                 BtreeNode::set_key(node, left_ptr as usize, Key::empty());
                 BtreeNode::set_child(node, left_ptr as usize + 1, 0);
                 right_ptr -= 1;
                 left_ptr -= 1;
             } else {
-                BtreeNode::set_key(new_node, right_ptr as usize, key);
-                BtreeNode::set_child(new_node, right_ptr as usize + 1, child.unwrap_or(0));
+                BtreeNode::set_key(new_virt, right_ptr as usize, key);
+                BtreeNode::set_child(new_virt, right_ptr as usize + 1, child.unwrap_or(0));
                 key_inserted = true;
                 right_ptr -= 1;
             }
@@ -801,15 +794,15 @@ impl BtreeNode {
     }
 
     async fn rotate_left_take(node: VirtAddr, block: u32, parent_block: u32, fs_data: &Rfs, leaf: bool) -> bool {
-        let parent = unsafe { fs_data.get_node(parent_block).await.1 };
-        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }.children.iter().position(|&x| x == block).unwrap();
+        let parent = unsafe { fs_data.get_node(parent_block).await.1.virt };
+        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }.children.iter().position(|&x| x == block).expect("block must be a child of parent");
         if self_index == 0 {
             return false;
         }
         let left_sibling = unsafe { fs_data.get_node(BtreeNode::get_child(parent, self_index - 1)).await };
         let left_key = unsafe { &*(parent.0 as *const BtreeNode) }.keys[self_index - 1];
 
-        let sibling_has_elements = BtreeNode::get_key(left_sibling.1, 170).index != 0;
+        let sibling_has_elements = BtreeNode::get_key(left_sibling.1.virt, 170).index != 0;
         let self_has_space = BtreeNode::get_key(node, 340).index == 0;
         if !sibling_has_elements || !self_has_space {
             return false;
@@ -835,24 +828,24 @@ impl BtreeNode {
         let mut last_key_index = 340;
         //find where left sibling's last key is
         for i in (0..340).rev() {
-            if BtreeNode::get_key(left_sibling.1, i).index != 0 {
+            if BtreeNode::get_key(left_sibling.1.virt, i).index != 0 {
                 last_key_index = i;
                 break;
             }
         }
 
         //set parent's key to left sibling's last key
-        unsafe { &mut *(parent.0 as *mut BtreeNode) }.keys[self_index - 1] = BtreeNode::get_key(left_sibling.1, last_key_index);
+        unsafe { &mut *(parent.0 as *mut BtreeNode) }.keys[self_index - 1] = BtreeNode::get_key(left_sibling.1.virt, last_key_index);
 
         //set self first child to left sibling's last child
         if !leaf {
-            BtreeNode::set_child(node, 0, BtreeNode::get_child(left_sibling.1, last_key_index + 1));
+            BtreeNode::set_child(node, 0, BtreeNode::get_child(left_sibling.1.virt, last_key_index + 1));
         }
 
         //remove left sibling's last key and child
-        BtreeNode::set_key(left_sibling.1, last_key_index, Key::empty());
+        BtreeNode::set_key(left_sibling.1.virt, last_key_index, Key::empty());
         if !leaf {
-            BtreeNode::set_child(left_sibling.1, last_key_index + 1, 0);
+            BtreeNode::set_child(left_sibling.1.virt, last_key_index + 1, 0);
         }
 
         left_sibling.0 = true;
@@ -863,15 +856,15 @@ impl BtreeNode {
     }
 
     async fn rotate_right_take(node: VirtAddr, block: u32, parent_block: u32, fs_data: &Rfs, leaf: bool) -> bool {
-        let parent = unsafe { fs_data.get_node(parent_block).await.1 };
-        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }.children.iter().position(|&x| x == block).unwrap();
+        let parent = unsafe { fs_data.get_node(parent_block).await.1.virt };
+        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }.children.iter().position(|&x| x == block).expect("block must be a child of parent");
         if unsafe { *(*(parent.0 as *const BtreeNode) ).children.get_unchecked(self_index + 1) } == 0 {
             return false;
         }
         let right_sibling = unsafe { fs_data.get_node((*(parent.0 as *const BtreeNode)).children[self_index + 1]).await };
         let right_key = BtreeNode::get_key(parent, self_index);
 
-        let sibling_has_elements = BtreeNode::get_key(right_sibling.1, 170).index != 0;
+        let sibling_has_elements = BtreeNode::get_key(right_sibling.1.virt, 170).index != 0;
         let self_has_space = BtreeNode::get_key(node, 340).index == 0;
         if !sibling_has_elements || !self_has_space {
             return false;
@@ -891,28 +884,28 @@ impl BtreeNode {
 
         //set self last child to right sibling's first child
         if !leaf {
-            BtreeNode::set_child(node, last_key_index + 2, BtreeNode::get_child(right_sibling.1, 0));
+            BtreeNode::set_child(node, last_key_index + 2, BtreeNode::get_child(right_sibling.1.virt, 0));
         }
 
         //set parent's key to right sibling's first key
-        BtreeNode::set_key(parent, self_index, BtreeNode::get_key(right_sibling.1, 0));
+        BtreeNode::set_key(parent, self_index, BtreeNode::get_key(right_sibling.1.virt, 0));
 
         //shift right sibling's elements to the left
         let mut ptr: i32 = 0;
         while ptr < 340 {
-                BtreeNode::set_key(right_sibling.1, ptr as usize, BtreeNode::get_key(right_sibling.1, ptr as usize + 1));
+                BtreeNode::set_key(right_sibling.1.virt, ptr as usize, BtreeNode::get_key(right_sibling.1.virt, ptr as usize + 1));
             ptr += 1;
         }
         if !leaf {
             let mut ptr: i32 = 0;
             while ptr < 341 {
-                BtreeNode::set_child(right_sibling.1, ptr as usize, BtreeNode::get_child(right_sibling.1, ptr as usize + 1));
+                BtreeNode::set_child(right_sibling.1.virt, ptr as usize, BtreeNode::get_child(right_sibling.1.virt, ptr as usize + 1));
                 ptr += 1;
             }
         }
-        BtreeNode::set_key(right_sibling.1, 340, Key::empty());
+        BtreeNode::set_key(right_sibling.1.virt, 340, Key::empty());
         if !leaf {
-            BtreeNode::set_child(right_sibling.1, 341, 0);
+            BtreeNode::set_child(right_sibling.1.virt, 341, 0);
         }
 
         right_sibling.0 = true;
@@ -923,25 +916,25 @@ impl BtreeNode {
     }
 
     async fn rotate_left_give(block: u32, parent_block: u32, fs_data: &Rfs, leaf: bool) -> bool {
-        let parent = unsafe { fs_data.get_node(parent_block).await.1 };
-        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }.children.iter().position(|&x| x == block).unwrap();
+        let parent = unsafe { fs_data.get_node(parent_block).await.1.virt };
+        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }.children.iter().position(|&x| x == block).expect("block must be a child of parent");
         if self_index == 0 {
             return false;
         }
         let left_sibling_block = unsafe { &*(parent.0 as *const BtreeNode) }.children[self_index - 1];
-        let left_sibling = unsafe { fs_data.get_node(left_sibling_block).await };
-        BtreeNode::rotate_right_take(left_sibling.1, left_sibling_block, parent_block, fs_data, leaf).await
+        let left_sibling = unsafe { fs_data.get_node(left_sibling_block).await.1.virt };
+        BtreeNode::rotate_right_take(left_sibling, left_sibling_block, parent_block, fs_data, leaf).await
     }
 
     async fn rotate_right_give(block: u32, parent_block: u32, fs_data: &Rfs, leaf: bool) -> bool {
-        let parent = unsafe { fs_data.get_node(parent_block).await.1 };
-        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }.children.iter().position(|&x| x == block).unwrap();
+        let parent = unsafe { fs_data.get_node(parent_block).await.1.virt };
+        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }.children.iter().position(|&x| x == block).expect("block must be a child of parent");
         if self_index == 341 || unsafe { *(*(parent.0 as *const BtreeNode) ).children.get_unchecked(self_index + 1) } == 0 {
             return false;
         }
         let right_sibling_block = unsafe { &*(parent.0 as *const BtreeNode) }.children[self_index + 1];
-        let right_sibling = unsafe { fs_data.get_node(right_sibling_block).await };
-        BtreeNode::rotate_right_take(right_sibling.1, right_sibling_block, parent_block, fs_data, leaf).await
+        let right_sibling = unsafe { fs_data.get_node(right_sibling_block).await.1.virt };
+        BtreeNode::rotate_right_take(right_sibling, right_sibling_block, parent_block, fs_data, leaf).await
     }
 }
 

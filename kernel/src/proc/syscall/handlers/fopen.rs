@@ -40,11 +40,11 @@ pub fn fopen(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
             Ok(handle) => {
                 let proc_lock = proc.get();
                 let f_descriptor = proc_lock.open_file_handle(handle);
-                proc_lock.set_syscall_return(f_descriptor, 0).unwrap();
+                proc_lock.set_syscall_return(f_descriptor, 0);
             },
             Err(_) => {
                 let proc_lock = proc.get();
-                proc_lock.set_syscall_return(u64::MAX, 1).unwrap();
+                proc_lock.set_syscall_return(u64::MAX, 1);
             }
         }
         proc::wake_process(pid)

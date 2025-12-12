@@ -1,5 +1,5 @@
 use core::fmt::Debug;
-use std::{sync::arc::Arc, boxed::Box, mem_utils::PhysAddr};
+use std::{boxed::Box, error::ErrorCode, mem_utils::PhysAddr, sync::arc::Arc};
 
 use crate::drivers::disk::{DirEntry, MountedPartition};
 
@@ -16,7 +16,7 @@ pub trait FileSystem: Debug + Send + Sync {
     async fn unmount(&self);
     ///Offset must be page aligned
     async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> u64;
-    async fn read_dir(&self, inode: InodeIndex) -> Box<[DirEntry]>;
+    async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, ErrorCode>;
     ///Offset must be page aligned. Returns the new inode
     async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> (Inode, u64);
     async fn stat(&self, inode: InodeIndex) -> Inode;
@@ -27,5 +27,5 @@ pub trait FileSystem: Debug + Send + Sync {
     ///returns the new parent inode
     async fn link(&self, inode: InodeIndex, parent_dir: InodeIndex, name: &str) -> Inode;
     async fn truncate(&self, inode: InodeIndex, size: u64);
-    async fn rename(&self, inode: InodeIndex, parent_inode: InodeIndex, name: &str);
+    async fn rename(&self, inode: InodeIndex, parent_inode: InodeIndex, name: &str) -> Result<(), ErrorCode>;
 }

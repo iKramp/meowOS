@@ -30,7 +30,7 @@ pub fn create_process(context_info: &ContextInfo) -> Pid {
         .memory_regions
         .iter()
         .find(|region| (*region.name).eq("[stack]"))
-        .unwrap();
+        .expect("stack must exist for each proc");
     let rsp = stack.base.0 + (stack.size_pages as u64 * 0x1000) - 16; //-16 just in case (ret val and other things are 0)
 
     let cpu_state = InterruptProcessorState::new(rip, rsp);
@@ -58,7 +58,7 @@ pub fn build_generic_memory_context(context: &ContextInfo) -> MemoryContext {
         let end = start + region.size_pages() as u64 * 0x1000;
         for page_addr in (start..end).step_by(0x1000) {
             let _phys_addr_map = memory_tree.allocate_set_virtual(None, VirtAddr(page_addr));
-            let page = memory_tree.get_page_table_entry_mut(VirtAddr(page_addr)).unwrap();
+            let page = memory_tree.get_page_table_entry_mut(VirtAddr(page_addr)).expect("page must exist after allocation");
             page.set_writeable(region.flags().is_writeable());
             page.set_user_accessible(true);
 
@@ -72,7 +72,7 @@ pub fn build_generic_memory_context(context: &ContextInfo) -> MemoryContext {
         let first_page = mem_init.0.0 & (!0xfff);
         let last_page = (mem_init.0.0 + mem_init.1.len() as u64) & (!0xfff); //inclusive
         for page_addr in (first_page..=last_page).step_by(0x1000) {
-            let page = memory_tree.get_page_table_entry_mut(VirtAddr(page_addr)).unwrap();
+            let page = memory_tree.get_page_table_entry_mut(VirtAddr(page_addr)).expect("page must exist after allocation");
             let start_mem_addr = page_addr.max(mem_init.0.0);
             let start_data_index = (start_mem_addr - mem_init.0.0) as usize;
             let mem_offset = start_mem_addr & 0xFFF;
@@ -136,8 +136,7 @@ pub fn add_stack(context: &mut MemoryContext, stack_size_pages: u8) {
     //found a free stack at this address
     for page in (top_page - stack_reserve_pages + 2)..=top_page {
         mem_tree.allocate_set_virtual(None, VirtAddr(page << 12));
-        println!("allocating stack page at {:#X}", page << 12);
-        let entry = mem_tree.get_page_table_entry_mut(VirtAddr(page << 12)).unwrap();
+        let entry = mem_tree.get_page_table_entry_mut(VirtAddr(page << 12)).expect("page must exist after allocation");
         entry.set_writeable(true);
         entry.set_no_execute(true);
         entry.set_user_accessible(true);
@@ -146,7 +145,7 @@ pub fn add_stack(context: &mut MemoryContext, stack_size_pages: u8) {
     let overflow_page = top_page - stack_reserve_pages + 1;
     println!("allocating stack overflow page at {:#X}", overflow_page << 12);
     mem_tree.allocate_set_virtual(None, VirtAddr(overflow_page << 12));
-    let entry = mem_tree.get_page_table_entry_mut(VirtAddr(overflow_page << 12)).unwrap();
+    let entry = mem_tree.get_page_table_entry_mut(VirtAddr(overflow_page << 12)).expect("page must exist after allocation");
     entry.set_writeable(true);
     entry.set_no_execute(true);
     entry.set_user_accessible(false);
