@@ -78,7 +78,11 @@ extern "C" fn _start() -> ! {
 
     acpi::init_acpi();
 
+
     pci::enumerate_devices();
+
+    std::thread::sleep(core::time::Duration::from_micros(11));
+
     vfs::init();
 
     let res = block_task(Box::pin(vfs::mount_blkdev_partition(

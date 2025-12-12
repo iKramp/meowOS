@@ -1,8 +1,9 @@
+use core::alloc::{self, GlobalAlloc, Layout};
 use std::{boxed::Box, mem_utils::*};
 
 use reg_map::RegMap;
 
-use crate::acpi::sdt::{AcpiSdtHeader, AcpiSdtHeaderPtr};
+use crate::{acpi::sdt::{AcpiSdtHeader, AcpiSdtHeaderPtr}, memory::heap};
 
 pub trait RootSystemDescriptorTable {
     fn validate(&self) -> bool {
@@ -27,15 +28,29 @@ pub trait RootSystemDescriptorTable {
 pub fn get_rsdt(rsdp: &super::rsdp::Rsdp) -> Box<dyn RootSystemDescriptorTable> {
     unsafe {
         let address = rsdp.address();
+        let virt_address = translate_phys_virt_addr(address);
+
+        let header_address = ensure_aligned::<AcpiSdtHeader>(virt_address);
+        let header = AcpiSdtHeaderPtr::from_ptr(header_address.0 as *mut _);
+        let table_size = header.length().read() as u64;
+
+        if header_address != virt_address {
+            crate::println!("RSDT/XSDT not aligned, copied to aligned address");
+            heap::HEAP.dealloc(header_address.0 as *mut u8, Layout::new::<AcpiSdtHeader>());
+        }
+
+        let virt_address = ensure_aligned_manual(virt_address, table_size, core::mem::align_of::<AcpiSdtHeader>() as u64);
+        
 
         #[cfg(debug_assertions)]
         match rsdp {
             super::rsdp::Rsdp::V1(_) => crate::println!("V1"),
             super::rsdp::Rsdp::V2(_) => crate::println!("V2"),
         }
+
         match rsdp {
-            super::rsdp::Rsdp::V1(_) => Box::new(RsdtPtr::from_ptr(address.0 as *mut _)),
-            super::rsdp::Rsdp::V2(_) => Box::new(XsdtPtr::from_ptr(address.0 as *mut _)),
+            super::rsdp::Rsdp::V1(_) => Box::new(RsdtPtr::from_ptr(virt_address.0 as *mut _)),
+            super::rsdp::Rsdp::V2(_) => Box::new(XsdtPtr::from_ptr(virt_address.0 as *mut _)),
         }
     }
 }

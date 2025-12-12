@@ -1,3 +1,5 @@
+use core::alloc::Layout;
+
 static mut PHYSICAL_OFFSET: PhysOffset = PhysOffset(0);
 static mut MEM_INITIALIZED: bool = false;
 static mut HEAP_INITIALIZED: bool = false;
@@ -130,6 +132,33 @@ pub fn get_physical_offset() -> PhysOffset {
         #[cfg(debug_assertions)]
         assert!(MEM_INITIALIZED);
         PHYSICAL_OFFSET
+    }
+}
+
+///# Safety
+///Can only be called on in-memory read only STATIC data structures
+pub unsafe fn ensure_aligned<T>(addr: VirtAddr) -> VirtAddr {
+    let align = core::mem::align_of::<T>() as u64;
+    let size = core::mem::size_of::<T>() as u64;
+    unsafe { ensure_aligned_manual(addr, size, align) }
+}
+///# Safety
+///Can only be called on in-memory read only STATIC data structures
+pub unsafe fn ensure_aligned_manual(addr: VirtAddr, size: u64, align: u64) -> VirtAddr {
+    if addr.0 % align == 0 {
+        addr
+    } else {
+        let heap_data = unsafe { alloc::alloc::alloc(
+            Layout::from_size_align(size as usize, align as usize).unwrap()
+        )};
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                addr.0 as *const u8,
+                heap_data,
+                size as usize
+            );
+        }
+        VirtAddr(heap_data as u64)
     }
 }
 

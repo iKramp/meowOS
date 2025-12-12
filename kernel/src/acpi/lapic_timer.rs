@@ -74,10 +74,6 @@ pub(super) fn activate_timer(lapic_registers: &mut LapicRegisters) {
 }
 
 fn sleep_duration(duration: Duration) {
-    if duration.as_micros() < 1 {
-        return; //no need to sleep
-    }
-
     let rflags: u64;
     unsafe {
         core::arch::asm!(
@@ -88,7 +84,7 @@ fn sleep_duration(duration: Duration) {
     }
 
     let interrupts_enabled = (rflags & (1 << 9)) != 0;
-    if interrupts_enabled {
+    if interrupts_enabled && duration.as_micros() >= 11 { //experimental testing :3
         set_timeout(duration);
         unsafe { core::arch::asm!("hlt") };
     } else {
@@ -111,9 +107,9 @@ pub fn set_timeout(duration: Duration) {
     // 128      | 0b1010
     // 1        | 0b1011
 
-    let tics_seconds = seconds * (unsafe { FREQUENCY });
-    let ticks_nanos = nanos * (unsafe { FREQUENCY }) / 1_000_000_000;
-    let ticks = tics_seconds + ticks_nanos;
+    let ticks_seconds = seconds.saturating_mul(unsafe { FREQUENCY });
+    let ticks_nanos = nanos.saturating_mul(unsafe { FREQUENCY }) / 1_000_000_000;
+    let ticks = ticks_seconds.saturating_add(ticks_nanos);
     let leading_zeros = ticks.leading_zeros();
     let (division, ticks) = match leading_zeros {
         32.. => (0b1011, ticks),        //no division

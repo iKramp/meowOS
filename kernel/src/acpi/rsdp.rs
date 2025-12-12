@@ -1,4 +1,4 @@
-use std::mem_utils::PhysAddr;
+use std::mem_utils::{PhysAddr, VirtAddr, ensure_aligned};
 
 use reg_map::RegMap;
 
@@ -132,6 +132,9 @@ pub struct RsdpV2 {
 
 //first do memory allocation and mapping, then i can map rsdp memory and do this
 pub fn get_rsdp_table(rsdp_addr: u64) -> Option<Rsdp> {
+    //guard against misaligned tables...
+    let rsdp_addr = unsafe { ensure_aligned::<RsdpV2>(VirtAddr(rsdp_addr)).0 };
+
     let rsdp_table = unsafe { RsdpV1Ptr::from_ptr(rsdp_addr as *mut _) };
     let revision = rsdp_table.revision().read();
     let rsdp = if revision == 0 {
