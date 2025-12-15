@@ -6,7 +6,7 @@ use crate::{
     },
     memory::{
         PAGE_TREE_ALLOCATOR,
-        paging::{LiminePat, PageTree},
+        paging::PageTree,
         stack::{KERNEL_STACK_SIZE_PAGES, prepare_kernel_stack},
     },
     msr::{get_msr, get_mtrr_cap, get_mtrr_def_type},

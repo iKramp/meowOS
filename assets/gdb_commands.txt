@@ -54,10 +54,8 @@ Interprets GS-based CPU locals as type CpuLocals and prints fields.
 end
 
 
-source ./gdb_unwinder.py
 source ./interrupt_macro_unwinder.py
 
-b _start
-
+b kernel::_start
 
 c

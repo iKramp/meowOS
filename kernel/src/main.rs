@@ -16,8 +16,8 @@
 
 extern crate static_cond;
 
-use core::{ffi, time::Duration};
-use std::{boxed::Box, println, printlnc, thread::sleep};
+use core::ffi;
+use std::{boxed::Box, println, printlnc};
 
 mod acpi;
 mod clocks;
@@ -78,7 +78,6 @@ extern "C" fn _start() -> ! {
 
     acpi::init_acpi();
 
-
     pci::enumerate_devices();
 
     std::thread::sleep(core::time::Duration::from_micros(11));
@@ -106,11 +105,6 @@ extern "C" fn _start() -> ! {
 
     proc::init();
 
-    // sleep(Duration::from_secs(1));
-    let time_now = std::time::Instant::now();
-    while std::time::Instant::now() - time_now < std::time::Duration::from_secs(1) {
-        unsafe { core::arch::asm!("hlt") };
-    }
     //start first proc
     unsafe { core::arch::asm!("int 254") };
 

@@ -108,7 +108,7 @@ extern "C" fn handler(args_rsp: u64) -> ! {
     let state = unsafe { &*(state_ptr as *const SyscallCpuState) };
 
     let locals = crate::acpi::cpu_locals::CpuLocals::get();
-    locals.int_depth += 1;
+    unsafe { core::ptr::addr_of_mut!(locals.int_depth).write_volatile(1) };
     let curr_proc = locals.current_process.as_mut().expect("syscalled while no current process in locals");
     enable_interrupts();
 

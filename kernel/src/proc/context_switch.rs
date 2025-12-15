@@ -44,6 +44,6 @@ pub fn no_ret_context_switch() -> ! {
         }
         drop(scheduler_lock);
         //wait here
-        std::thread::sleep(core::time::Duration::from_millis(10));
+        std::thread::sleep(core::time::Duration::from_millis(20));
     }
 }

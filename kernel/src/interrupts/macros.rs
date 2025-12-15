@@ -22,11 +22,17 @@ macro_rules! handler {
                 //cs (64 bit) //rsp + 18 * 8
                 //rip //rsp + 17 * 8
                 //
-                //possibly error code
+                //possibly error code rsp + 16 * 8
 
-                "sub rsp, 17 * 8",
-                handler!(@if_not_flag has_code, $($flag)* {
-                    "mov qword ptr [rsp + 16 * 8], 0"
+                handler!(@if_else_flag has_code, $($flag)*, {
+                    "
+                        sub rsp, 16 * 8
+                    "
+                } {
+                    "
+                        sub rsp, 17 * 8
+                        mov qword ptr [rsp + 16 * 8], 0
+                    "
                 }),
 
                 //save all general purpose registers

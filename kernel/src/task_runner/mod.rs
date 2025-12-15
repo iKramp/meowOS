@@ -113,6 +113,7 @@ pub fn add_task(task: AsyncTask, pid: Option<Pid>) {
 }
 
 pub fn wake_task(task_id: u64, apic_id: u8) {
+    assert_eq!(apic_id, 0);
     let locals = CpuLocals::get();
     let locals_start = locals.self_addr.0 - (locals.apic_id as u64 * core::mem::size_of::<CpuLocals>() as u64);
     let target_locals = locals_start + (apic_id as u64 * core::mem::size_of::<CpuLocals>() as u64);
@@ -152,8 +153,8 @@ fn wake_tasks_in_list() {
 pub fn process_tasks() {
     let locals = CpuLocals::get();
     locals.lock_info.assert_no_locks();
-    wake_tasks_in_list();
     let interrupts = disable_interrupts();
+    wake_tasks_in_list();
     let mut tasks_to_process = core::mem::take(&mut locals.async_task_data.task_list);
     if interrupts {
         enable_interrupts();
@@ -187,7 +188,7 @@ fn w_clone(this_data: *const ()) -> RawWaker {
         task_id: data.task_id,
     };
     std::mem::forget(data); //avoid double free
-    row_raw_waker(Box::new(cloned))
+    ros_raw_waker(Box::new(cloned))
 }
 fn w_wake(this_data: *const ()) {
     let data = unsafe { Box::from_raw(this_data as *mut WakerData) };
@@ -206,14 +207,13 @@ struct WakerData {
     task_id: u64,
 }
 
-fn row_raw_waker(data: Box<WakerData>) -> RawWaker {
+fn ros_raw_waker(data: Box<WakerData>) -> RawWaker {
     let ptr = Box::into_raw(data) as *const ();
     static VTABLE: RawWakerVTable = RawWakerVTable::new(w_clone, w_wake, w_wake_by_ref, w_drop);
     RawWaker::new(ptr, &VTABLE)
 }
 fn ros_waker(data: Box<WakerData>) -> Waker {
-    // SAFETY: VTABLE functions are no-ops, so this is safe
-    unsafe { Waker::from_raw(row_raw_waker(data)) }
+    unsafe { Waker::from_raw(ros_raw_waker(data)) }
 }
 
 fn process_single_task(mut task: AsyncTaskHolder) {

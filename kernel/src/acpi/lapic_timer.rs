@@ -2,29 +2,26 @@ use core::time::Duration;
 use std::{println, time::Instant};
 
 use crate::{
-    handler,
-    interrupts::{
+    acpi::apic::LapicRegistersPtr, handler, interrupts::{
         TIMER_DESIRED_FREQUENCY, general_interrupt_handler,
         handlers::apic_timer_tick,
         idt::{Entry, IDT},
-    },
+    }
 };
-
-use super::apic::LapicRegisters;
 
 static mut TIMER_CONF: u32 = 0;
 static mut FREQUENCY: u64 = 0;
 
-pub(super) fn setup_timer_ap(lapic_registers: &mut LapicRegisters) {
+pub(super) fn setup_timer_ap(lapic_registers: &LapicRegistersPtr) {
     unsafe {
-        lapic_registers.lvt_timer.bytes = TIMER_CONF;
-        lapic_registers.divide_configuration.bytes = 0;
-        lapic_registers.initial_count.bytes = 0; //disable timer
+        lapic_registers.lvt_timer().bytes().write(TIMER_CONF);
+        lapic_registers.divide_configuration().bytes().write(0);
+        lapic_registers.initial_count().bytes().write(0); //disable timer
     }
 }
 
-pub(super) fn activate_timer(lapic_registers: &mut LapicRegisters) {
-    let mut timer_conf = unsafe { core::ptr::addr_of!(lapic_registers.lvt_timer.bytes).read_volatile() };
+pub(super) fn activate_timer(lapic_registers: &LapicRegistersPtr) {
+    let mut timer_conf = lapic_registers.lvt_timer().bytes().read();
 
     timer_conf &= !0xFF_u32;
     timer_conf |= 255; //init the timer vector //TODO reset
@@ -33,21 +30,18 @@ pub(super) fn activate_timer(lapic_registers: &mut LapicRegisters) {
     timer_conf &= !(1 << 16); //unmask
 
     const TIMER_COUNT: u32 = u32::MAX;
-    let ticks;
-    unsafe {
-        core::ptr::addr_of_mut!(lapic_registers.lvt_timer.bytes).write_volatile(timer_conf);
-        //no division
-        core::ptr::addr_of_mut!(lapic_registers.divide_configuration.bytes).write_volatile(0b1011);
-        core::ptr::addr_of_mut!(lapic_registers.initial_count.bytes).write_volatile(TIMER_COUNT);
+    lapic_registers.lvt_timer().bytes().write(timer_conf);
+    //no division
+    lapic_registers.divide_configuration().bytes().write(0b1011);
+    lapic_registers.initial_count().bytes().write(TIMER_COUNT);
 
-        let start_time = Instant::now();
-        let end_time = start_time + Duration::from_millis(5);
-        while Instant::now() < end_time {}
+    let start_time = Instant::now();
+    let end_time = start_time + Duration::from_millis(5);
+    while Instant::now() < end_time {}
 
-        ticks = core::ptr::addr_of!(lapic_registers.current_count.bytes).read_volatile();
-        core::ptr::addr_of_mut!(lapic_registers.initial_count.bytes).write_volatile(0); //disable
-        crate::interrupts::trigger_pit_eoi();
-    }
+    let ticks = lapic_registers.current_count().bytes().read();
+    lapic_registers.initial_count().bytes().write(0); //disable
+    crate::interrupts::trigger_pit_eoi();
 
     let ticks_counted = TIMER_COUNT - ticks;
     let frequency = ticks_counted as u64 * 1_000 / 5; //ticks counted in 5 miliseconds
@@ -61,10 +55,8 @@ pub(super) fn activate_timer(lapic_registers: &mut LapicRegisters) {
 
     timer_conf &= !0xFF_u32;
     timer_conf |= 32; //set correct interrupt vector
-    unsafe {
-        core::ptr::addr_of_mut!(lapic_registers.lvt_timer.bytes).write_volatile(timer_conf);
-        core::ptr::addr_of_mut!(lapic_registers.initial_count.bytes).write_volatile(0);
-    }
+    lapic_registers.lvt_timer().bytes().write(timer_conf);
+    lapic_registers.initial_count().bytes().write(0);
 
     unsafe {
         TIMER_CONF = timer_conf;
@@ -123,8 +115,6 @@ pub fn set_timeout(duration: Duration) {
         _ => (0b1010, u32::MAX as u64), //more than 10 minutes timeout, treat as max
     };
     let lapic_registers = unsafe { super::LAPIC_REGISTERS.assume_init_mut() };
-    unsafe {
-        core::ptr::addr_of_mut!(lapic_registers.divide_configuration.bytes).write_volatile(division);
-        core::ptr::addr_of_mut!(lapic_registers.initial_count.bytes).write_volatile(ticks as u32);
-    }
+    lapic_registers.divide_configuration().bytes().write(division);
+    lapic_registers.initial_count().bytes().write(ticks as u32);
 }

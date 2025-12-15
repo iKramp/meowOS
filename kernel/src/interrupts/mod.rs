@@ -1,5 +1,6 @@
 mod gdt;
 pub use gdt::{STATIC_GDT_PTR, create_new_gdt, load_gdt};
+use core::sync::atomic::Ordering;
 use std::{println, printlnc};
 #[macro_use]
 pub mod handlers;
@@ -18,7 +19,8 @@ const PIC2_DATA: u16 = PIC2 + 1;
 
 #[inline(always)]
 pub fn enable_interrupts() {
-    unsafe { std::arch::asm!("sti") };
+    core::sync::atomic::fence(Ordering::Release);
+    unsafe { core::arch::asm!("sti", options(nomem, nostack)) };
 }
 
 #[inline(always)]
@@ -29,9 +31,11 @@ pub fn disable_interrupts() -> bool {
             "pushfq",
             "pop {}",
             "cli",
-            out(reg) prev_rflags
+            out(reg) prev_rflags,
+            options(nostack)
         );
     }
+    core::sync::atomic::fence(Ordering::Acquire);
     (prev_rflags & (1 << 9)) != 0
 }
 

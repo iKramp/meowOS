@@ -19,7 +19,7 @@ use crate::{
 
 use super::lapic_timer::{activate_timer, setup_timer_ap};
 
-pub static mut LAPIC_REGISTERS: MaybeUninit<&mut LapicRegisters> = MaybeUninit::uninit();
+pub static mut LAPIC_REGISTERS: MaybeUninit<LapicRegistersPtr> = MaybeUninit::uninit();
 
 #[unroll_for_loops]
 pub fn enable_apic(platform_info: &super::platform_info::PlatformInfo, processor_id: u8) {
@@ -41,18 +41,32 @@ pub fn enable_apic(platform_info: &super::platform_info::PlatformInfo, processor
         }
     }
 
-    lapic_registers.lvt_corrected_machine_check_interrupt.bytes = 0b00000000_00000000_0_000_0_0_000_01000000_u32;
+    lapic_registers
+        .lvt_corrected_machine_check_interrupt()
+        .bytes()
+        .write(0b00000000_00000000_0_000_0_0_000_01000000_u32);
 
     //this constantly gives interrupts??
-    unsafe {
-        core::ptr::addr_of_mut!(lapic_registers.lvt_lint0.bytes).write_volatile(0b00000000_00000000_0_000_0_0_000_01000001_u32);
-        core::ptr::addr_of_mut!(lapic_registers.lvt_lint1.bytes).write_volatile(0b00000000_00000000_0_000_0_0_000_01000010_u32);
-        core::ptr::addr_of_mut!(lapic_registers.lvt_error.bytes).write_volatile(0b00000000_00000000_0_000_0_0_000_01000011_u32);
-        core::ptr::addr_of_mut!(lapic_registers.lvt_performance_monitoring_counters.bytes)
-            .write_volatile(0b00000000_00000000_0_000_0_0_000_01000100_u32);
-        core::ptr::addr_of_mut!(lapic_registers.lvt_thermal_sensor.bytes)
-            .write_volatile(0b00000000_00000000_0_000_0_0_000_01000101_u32);
-    }
+    lapic_registers
+        .lvt_lint0()
+        .bytes()
+        .write(0b00000000_00000000_0_000_0_0_000_01000001_u32);
+    lapic_registers
+        .lvt_lint1()
+        .bytes()
+        .write(0b00000000_00000000_0_000_0_0_000_01000010_u32);
+    lapic_registers
+        .lvt_error()
+        .bytes()
+        .write(0b00000000_00000000_0_000_0_0_000_01000011_u32);
+    lapic_registers
+        .lvt_performance_monitoring_counters()
+        .bytes()
+        .write(0b00000000_00000000_0_000_0_0_000_01000100_u32);
+    lapic_registers
+        .lvt_thermal_sensor()
+        .bytes()
+        .write(0b00000000_00000000_0_000_0_0_000_01000101_u32);
 
     let mut nmi_source = 0b00000000_00000000_0_000_0_0_100_00000000_u32;
     let lapic_nmi = platform_info.get_nmi_structure(processor_id);
@@ -64,17 +78,17 @@ pub fn enable_apic(platform_info: &super::platform_info::PlatformInfo, processor
         nmi_source |= 1 << 13;
     }
     if lapic_nmi.lint == 0 {
-        unsafe { core::ptr::addr_of_mut!(lapic_registers.lvt_lint0.bytes).write_volatile(nmi_source) };
+        lapic_registers.lvt_lint0().bytes().write(nmi_source);
     } else {
-        unsafe { core::ptr::addr_of_mut!(lapic_registers.lvt_lint1.bytes).write_volatile(nmi_source) };
+        lapic_registers.lvt_lint1().bytes().write(nmi_source);
     }
 
     //fully enable apic:
-    unsafe {
-        core::ptr::addr_of_mut!(lapic_registers.spurious_interrupt.bytes)
-            .write_volatile(0b0000000000000000000_0_00_0_1_11111111_u32);
-        core::ptr::addr_of_mut!(lapic_registers.task_priority.bytes).write_volatile(0);
-    }
+    lapic_registers
+        .spurious_interrupt()
+        .bytes()
+        .write(0b0000000000000000000_0_00_0_1_11111111_u32);
+    lapic_registers.task_priority().bytes().write(0);
 
     if !bsp {
         setup_timer_ap(lapic_registers);
@@ -101,7 +115,7 @@ fn map_lapic_registers(lapic_address: PhysAddr) {
             .expect("LAPIC page entry must exist after allocation");
         apic_registers_page_entry.set_pat(LiminePat::UC);
         let lapic_ref = &mut *(lapic_virt_addr.0 as *mut LapicRegisters);
-        LAPIC_REGISTERS = MaybeUninit::new(lapic_ref);
+        LAPIC_REGISTERS = MaybeUninit::new(LapicRegistersPtr::from_mut(lapic_ref));
 
         println!(
             "Mapping LAPIC registers. Phys: {:016X}, Virt: {:016X}",
@@ -164,13 +178,12 @@ pub struct LapicRegisters {
     reserved_16: LapicRegisterValueStructure,
 }
 
-impl LapicRegisters {
+impl LapicRegistersPtr<'_> {
     pub fn send_ipi(&mut self, delivery_mode: u8, destination: u8, vector: u8) {
-        unsafe {
-            (&mut self.interrupt_command_register_32_64.bytes as *mut u32).write_volatile((destination as u32) << 24);
-            (&mut self.interrupt_command_register_0_32.bytes as *mut u32)
-                .write_volatile((vector as u32) | ((delivery_mode as u32) << 8));
-        }
+        self.interrupt_command_register_32_64().bytes().write((destination as u32) << 24);
+        self.interrupt_command_register_0_32()
+            .bytes()
+            .write((vector as u32) | ((delivery_mode as u32) << 8));
     }
 
     pub fn send_init_ipi(&mut self, destination: u8) {

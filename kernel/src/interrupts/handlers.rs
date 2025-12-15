@@ -112,7 +112,7 @@ pub extern "C" fn other_legacy_interrupt(_proc_data: &mut InterruptProcessorStat
 #[inline]
 pub fn apic_eoi() {
     let lapic_registers = unsafe { LAPIC_REGISTERS.assume_init_mut() };
-    lapic_registers.end_of_interrupt.bytes = 0;
+    lapic_registers.end_of_interrupt().bytes().write(0);
 }
 
 #[inline]
@@ -136,8 +136,8 @@ pub extern "C" fn legacy_timer_tick(_proc_data: &mut InterruptProcessorState) {
 
 pub extern "C" fn apic_error(_proc_data: &mut InterruptProcessorState) {
     let lapic_registers = unsafe { LAPIC_REGISTERS.assume_init_mut() };
-    lapic_registers.error_status.bytes = 0; //activate it to load the real value
-    let _error_register = &lapic_registers.error_status;
+    lapic_registers.error_status().bytes().write(0); //activate it to load the real value
+    let _error_val = &lapic_registers.error_status().bytes().read();
     //do error shit
     apic_eoi();
 }
