@@ -14,7 +14,7 @@ fn main() {
 
     let mut cmd = std::process::Command::new("qemu-system-x86_64");
     cmd.arg("-d")
-        .arg("int,cpu_reset")
+        .arg("cpu_reset")
         .arg("-D")
         .arg("./log.txt")
         .arg("-no-reboot");
