@@ -107,21 +107,22 @@ extern "C" fn handler(args_rsp: u64) -> ! {
     let args = unsafe { &mut *(args_ptr as *mut SyscallArgs) };
     let state = unsafe { &*(state_ptr as *const SyscallCpuState) };
 
-    let locals = crate::acpi::cpu_locals::CpuLocals::get();
+    let mut locals = crate::acpi::cpu_locals::CpuLocals::get_mut();
     unsafe { core::ptr::addr_of_mut!(locals.int_depth).write_volatile(1) };
-    let curr_proc = locals.current_process.as_mut().expect("syscalled while no current process in locals");
+    let curr_proc = locals.current_process.as_mut().expect("syscalled while no current process in locals").clone();
+    drop(locals);
     enable_interrupts();
 
     #[allow(clippy::single_match)]
     let task_sleep = match args.syscall_number {
-        0 => syscall::handlers::illegal(args, curr_proc),
+        0 => syscall::handlers::illegal(args, &curr_proc),
         1 => todo!("implement exit"),
         2 => todo!("implement exec"),
         3 => todo!("implement clone"),
-        4 => syscall::handlers::fopen(args, curr_proc),
-        5 => syscall::handlers::fclose(args, curr_proc),
-        6 => syscall::handlers::fread(args, curr_proc),
-        7 => syscall::handlers::fwrite(args, curr_proc),
+        4 => syscall::handlers::fopen(args, &curr_proc),
+        5 => syscall::handlers::fclose(args, &curr_proc),
+        6 => syscall::handlers::fread(args, &curr_proc),
+        7 => syscall::handlers::fwrite(args, &curr_proc),
         8 => todo!("implement fseek"),
         9 => todo!("implement mmap"),
         10 => todo!("implement munmap"),
@@ -136,7 +137,7 @@ extern "C" fn handler(args_rsp: u64) -> ! {
         None
     };
 
-    save_and_release_current(curr_proc, &StackCpuStateData::Syscall(state), sleep_cond);
+    save_and_release_current(&curr_proc, &StackCpuStateData::Syscall(state), sleep_cond);
     no_ret_context_switch();
 }
 

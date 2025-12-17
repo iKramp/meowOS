@@ -15,6 +15,7 @@
 
     rust = pkgs.rust-bin.nightly."2025-03-03".default.override {
       targets = [ "x86_64-unknown-none" ];
+      extensions = [ "rust-src" ];
     };
 
   in {
@@ -33,6 +34,7 @@
       ];
 
       shellHook = ''
+        export RUST_STORE_PATH=${rust}
         exec zsh -c "nvim"
       '';
     };

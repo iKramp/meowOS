@@ -21,12 +21,12 @@ pub fn context_switch() {
             locals.int_depth, locals.atomic_context
         );
     }
+    drop(locals);
 
     no_ret_context_switch();
 }
 
 pub fn no_ret_context_switch() -> ! {
-    let cpu_locals = CpuLocals::get();
 
     // Switch to the next process
     loop {
@@ -35,7 +35,11 @@ pub fn no_ret_context_switch() -> ! {
         let mut scheduler_lock = lock_w_info!(SCHEDULER);
         let scheduler = unsafe { scheduler_lock.assume_init_mut() };
         if let Some(process_data_arc) = scheduler.schedule() {
+            
+            let mut cpu_locals = CpuLocals::get_mut();
             cpu_locals.current_process = Some(process_data_arc.clone());
+            drop(cpu_locals);
+
             let process_data_ptr = process_data_arc.get() as *const ProcessData;
             drop(process_data_arc);
             let process_data = unsafe { &*process_data_ptr }; //safe because it's saved in cpu locals

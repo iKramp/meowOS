@@ -3,6 +3,7 @@ target remote localhost:1234
 layout src
 set directories std/src/:kernel/src/
 symbol-file kernel_build_files/kernel.elf
+set substitute-path /rustc/ $env{RUST_STORE_PATH}/lib/rustlib/src/rust/
 define b
 hbreak $arg0
 end

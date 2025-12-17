@@ -8,6 +8,7 @@ pub struct PlatformInfo {
     pub apic: Apic,
     pub boot_processor: Processor,
     pub application_processors: std::Vec<Processor>,
+    pub max_apic_id: u8,
 }
 
 impl PlatformInfo {
@@ -22,6 +23,7 @@ impl PlatformInfo {
                         apic_id: data.apic_id,
                         flags: data.flags,
                     };
+                    info.max_apic_id = info.max_apic_id.max(processor.apic_id);
                     if !processor.flags.enabled() {
                         if processor.flags.online_capable() {
                             println!("processor {} is not enabled but online capable", processor.apic_id);

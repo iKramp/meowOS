@@ -16,7 +16,7 @@
 
 extern crate static_cond;
 
-use core::ffi;
+use core::{ffi, time::Duration};
 use std::{boxed::Box, println, printlnc};
 
 mod acpi;

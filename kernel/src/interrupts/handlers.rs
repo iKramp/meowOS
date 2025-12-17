@@ -173,9 +173,10 @@ pub extern "C" fn primary_ata_hard_disk(_proc_data: &mut InterruptProcessorState
 }
 
 pub extern "C" fn first_context_switch(_proc_data: &mut InterruptProcessorState) {
-    let locals = CpuLocals::get();
+    let mut locals = CpuLocals::get_mut();
     locals.int_depth = 1; //this one context switches back into 0
     locals.proc_initialized = true;
+    drop(locals);
     context_switch();
 }
 

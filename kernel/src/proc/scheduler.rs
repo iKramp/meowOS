@@ -61,7 +61,7 @@ impl Scheduler {
         }
         let pid = self.ready_to_run.remove(0);
         if let Some(proc_data) = self.tasks.get_mut(&pid) {
-            let locals = CpuLocals::get();
+            let mut locals = CpuLocals::get_mut();
             // Move the process to active tasks
             self.active_tasks.push((pid, locals.apic_id.into()));
             locals.current_process = Some(proc_data.clone());
@@ -105,8 +105,7 @@ impl Scheduler {
             }
         }
         switch_to_generic_mem_tree();
-        let locals = CpuLocals::get();
-        locals.current_process = None;
+        CpuLocals::get_mut().current_process = None;
     }
 
     fn save_current_proc(&mut self, old_proc: &Arc<ProcessData>, on_stack_data: &StackCpuStateData) {

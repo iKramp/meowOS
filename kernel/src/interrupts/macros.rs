@@ -1,4 +1,4 @@
-use crate::proc::{interrupt_context_switch, save_and_release_current, StackCpuStateData};
+use crate::{acpi::cpu_locals::CpuLocals, proc::{StackCpuStateData, interrupt_context_switch, save_and_release_current}};
 
 use super::{disable_interrupts, enable_interrupts};
 
@@ -187,18 +187,20 @@ pub extern "C" fn general_interrupt_handler(
     atomic_int: u64,                                           //rsi
     main_handler: extern "C" fn(&mut InterruptProcessorState), //rdx
 ) {
-    let locals = crate::acpi::cpu_locals::CpuLocals::get();
+    let mut locals = CpuLocals::get_mut();
     let prev_atomic = locals.atomic_context;
     locals.int_depth += 1;
     locals.atomic_context |= atomic_int != 0;
+    let atomic_context = locals.atomic_context;
+    drop(locals);
 
-    if !locals.atomic_context {
+    if !atomic_context {
         enable_interrupts();
     }
-
     main_handler(proc_data);
 
     //proc is depth 0, root int is depth 1
+    let mut locals = CpuLocals::get_mut();
     if locals.int_depth > 1 || locals.atomic_context {
         disable_interrupts();
         locals.int_depth -= 1;
@@ -209,13 +211,17 @@ pub extern "C" fn general_interrupt_handler(
         //save current process state
         save_and_release_current(curr_proc, &StackCpuStateData::Interrupt(proc_data), None);
     }
+    drop(locals);
     interrupt_context_switch();
 
     //did not context switch -> PROC not initialized or some other "error"
     disable_interrupts();
+    let mut locals = CpuLocals::get_mut();
     locals.int_depth -= 1;
     locals.atomic_context = prev_atomic;
     locals.lock_info.assert_no_locks();
+    drop(locals);
+    core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
 }
 
 #[derive(Debug, Clone)]

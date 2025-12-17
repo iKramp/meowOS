@@ -24,7 +24,7 @@ fn nop_waker() -> Waker {
 }
 
 pub fn block_task<'a, T>(mut task: Pin<Box<dyn Future<Output = T> + 'a>>) -> T {
-    let locals = CpuLocals::get();
+    let mut locals = CpuLocals::get_mut();
     let before_blocking = locals.lock_info.is_blocking_task();
     locals.lock_info.blocking_task();
     let data = loop {
@@ -47,6 +47,15 @@ struct AsyncTaskInternal {
     proc_id: Option<Pid>,
     id: u64,
 }
+impl core::fmt::Debug for AsyncTaskInternal {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("AsyncTaskInternal")
+            .field("proc_id", &self.proc_id)
+            .field("id", &self.id)
+            .finish()
+    }
+}
+
 struct AsyncTaskHolder {
     task: AsyncTaskInternal,
     next_task: Option<Box<AsyncTaskHolder>>,
@@ -56,7 +65,8 @@ pub struct AsyncTaskData {
     task_id_counter: AtomicU64,
     task_list: NoIntSpinlock<Option<Box<AsyncTaskHolder>>>,
     tasks_to_wake: NoIntSpinlock<Vec<u64>>,
-    waiting_tasks: NoIntSpinlock<BTreeMap<u64, AsyncTaskInternal>>,
+    // waiting_tasks: NoIntSpinlock<BTreeMap<u64, AsyncTaskInternal>>,
+    waiting_tasks: NoIntSpinlock<Vec<(u64, AsyncTaskInternal)>>,
 }
 
 impl AsyncTaskData {
@@ -65,7 +75,8 @@ impl AsyncTaskData {
             task_id_counter: AtomicU64::new(0),
             task_list: NoIntSpinlock::new(None),
             tasks_to_wake: NoIntSpinlock::new(Vec::new()),
-            waiting_tasks: NoIntSpinlock::new(BTreeMap::new()),
+            // waiting_tasks: NoIntSpinlock::new(BTreeMap::new()),
+            waiting_tasks: NoIntSpinlock::new(Vec::new()),
         }
     }
 }
@@ -117,23 +128,41 @@ pub fn wake_task(task_id: u64, apic_id: u8) {
     to_wake.push(task_id);
 }
 
-fn sleep_task(task: AsyncTaskInternal, locals: &mut CpuLocals) {
+fn sleep_task(task: AsyncTaskInternal) {
     println!("Sleeping async task {}", task.id);
+    let locals = CpuLocals::get();
     let mut waiting_lock = lock_w_info!(locals.async_task_data.waiting_tasks);
-    waiting_lock.insert(task.id, task);
+    // waiting_lock.insert(task.id, task);
+    waiting_lock.push((task.id, task));
+    println!("num sleeping tasks after sleep: {}", waiting_lock.len());
+    drop(waiting_lock);
+    drop(locals);
 }
 
 fn wake_tasks_in_list(locals: &mut CpuLocals) {
     let mut wake_lock = lock_w_info!(locals.async_task_data.tasks_to_wake);
     let to_wake = core::mem::take(&mut *wake_lock);
+    println!("tasks to wake: {:?}", to_wake);
     drop(wake_lock);
 
     if !to_wake.is_empty() {
         let mut task_list = lock_w_info!(locals.async_task_data.task_list);
         let mut waiting_lock = lock_w_info!(locals.async_task_data.waiting_tasks);
+        println!("num sleeping tasks before wake: {:?}", waiting_lock.len());
+        println!("sleeping tasks before wake: {:?}", &*waiting_lock);
         for task_id in to_wake {
             println!("Requeue task {}", task_id);
-            if let Some(task) = waiting_lock.remove(&task_id) {
+            // if let Some(task) = waiting_lock(&task_id) {
+            //     let task = AsyncTaskHolder {
+            //         task,
+            //         next_task: task_list.take(),
+            //     };
+            //     *task_list = Some(Box::new(task));
+            // } else {
+            //     panic!("Tried to wake non-existing async task {}", task_id);
+            // }
+            if let Some(pos) = waiting_lock.iter().position(|(id, _)| *id == task_id) {
+                let (_, task) = waiting_lock.remove(pos);
                 let task = AsyncTaskHolder {
                     task,
                     next_task: task_list.take(),
@@ -149,12 +178,13 @@ fn wake_tasks_in_list(locals: &mut CpuLocals) {
 }
 
 pub fn process_tasks() {
-    let locals = CpuLocals::get();
+    let mut locals = CpuLocals::get_mut();
     locals.lock_info.assert_no_locks();
-    wake_tasks_in_list(locals);
+    wake_tasks_in_list(&mut locals);
     let mut task_list = lock_w_info!(locals.async_task_data.task_list);
     let mut tasks_to_process = task_list.take();
     drop(task_list);
+    drop(locals);
 
     let current_proc = None;
 
@@ -172,7 +202,7 @@ pub fn process_tasks() {
             proc = None;
         }
         switch_mem_tree(&mut current_proc.as_ref(), proc.as_ref());
-        process_single_task(*task, locals);
+        process_single_task(*task);
     }
     switch_to_generic_mem_tree();
 }
@@ -211,17 +241,17 @@ fn ros_waker(data: Box<WakerData>) -> Waker {
     unsafe { Waker::from_raw(ros_raw_waker(data)) }
 }
 
-fn process_single_task(mut task: AsyncTaskHolder, locals: &mut CpuLocals) {
+fn process_single_task(mut task: AsyncTaskHolder) {
     println!("Processing async task {}", task.task.id);
     let waker_data = Box::new(WakerData {
-        apic_id: locals.apic_id,
+        apic_id: CpuLocals::get().apic_id,
         task_id: task.task.id,
     });
     let result = task.task.task.as_mut().poll(&mut Context::from_waker(&ros_waker(waker_data)));
 
     match result {
         Poll::Pending => {
-            sleep_task(task.task, locals);
+            sleep_task(task.task);
         }
         Poll::Ready(_) => {}
     }

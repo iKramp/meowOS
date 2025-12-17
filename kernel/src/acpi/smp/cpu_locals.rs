@@ -1,4 +1,4 @@
-use core::mem::MaybeUninit;
+use core::{mem::MaybeUninit, sync::atomic::{AtomicBool, AtomicU16, Ordering}};
 use std::{
     boxed::Box,
     mem_utils::{VirtAddr, get_at_virtual_addr},
@@ -16,6 +16,63 @@ use crate::{
 };
 
 pub static mut CPU_LOCALS: MaybeUninit<Box<[VirtAddr]>> = MaybeUninit::uninit();
+
+struct CpuLocalGetState {
+    mut_borrow: AtomicBool,
+    immut_borrow: AtomicU16,
+}
+
+#[repr(transparent)]
+pub struct CpuLocalBinding {
+    cpu_locals: &'static mut CpuLocals,
+}
+
+#[repr(transparent)]
+pub struct CpuLocalBindingMut {
+    cpu_locals: &'static mut CpuLocals,
+}
+
+impl Drop for CpuLocalBinding {
+    fn drop(&mut self) {
+        self.cpu_locals.get_state.immut_borrow.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+impl Drop for CpuLocalBindingMut {
+    fn drop(&mut self) {
+        self.cpu_locals.get_state.mut_borrow.store(false, Ordering::Release);
+    }
+}
+
+impl<'a> CpuLocalBinding {
+    pub fn get(&'a self) -> &'a CpuLocals {
+        self.cpu_locals
+    }
+}
+impl<'a> CpuLocalBindingMut {
+    pub fn get(&'a mut self) -> &'a mut CpuLocals {
+        self.cpu_locals
+    }
+}
+
+impl std::ops::Deref for CpuLocalBinding {
+    type Target = CpuLocals;
+    fn deref(&self) -> &Self::Target {
+        self.get()
+    }
+}
+
+impl std::ops::DerefMut for CpuLocalBindingMut {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.get()
+    }
+}
+
+impl std::ops::Deref for CpuLocalBindingMut {
+    type Target = CpuLocals;
+    fn deref(&self) -> &Self::Target {
+        self.cpu_locals
+    }
+}
 
 #[repr(C)]
 pub struct CpuLocals {
@@ -36,10 +93,11 @@ pub struct CpuLocals {
     pub atomic_context: bool,
     pub async_task_data: AsyncTaskData,
     pub lock_info: LockInfo,
+    get_state: CpuLocalGetState,
 }
 
 pub fn init(platform_info: &PlatformInfo) {
-    let num_cpus = platform_info.application_processors.len() + 1;
+    let num_cpus = platform_info.max_apic_id as usize + 1;
     #[allow(clippy::slow_vector_initialization)] //it's non const ffs
     let mut vec = Vec::with_capacity(num_cpus);
     vec.resize(num_cpus, VirtAddr(0));
@@ -76,7 +134,7 @@ pub fn init_dummy_cpu_locals() {
     let bsp_local_ptr = add_cpu_locals(bsp_local);
     crate::msr::set_msr(0xC0000101, bsp_local_ptr.0);
 
-    set_lock_info_func(CpuLocals::get_lock_info);
+    set_lock_info_func(|| unsafe { CpuLocals::get_lock_info() });
 }
 
 pub fn add_cpu_locals(locals: super::cpu_locals::CpuLocals) -> VirtAddr {
@@ -107,22 +165,53 @@ impl CpuLocals {
             userspace_stack_base: 0,
             self_addr: VirtAddr(0), //will be set later
             lock_info: LockInfo::new(),
+            get_state: CpuLocalGetState {
+                mut_borrow: AtomicBool::new(false),
+                immut_borrow: AtomicU16::new(0),
+            },
         }
     }
 
-    pub fn get() -> &'static mut Self {
+    pub fn get() -> CpuLocalBinding {
         unsafe {
             let cpu_locals: *mut Self;
             core::arch::asm!(
                 "mov {cpu_locals}, gs:0",
                 cpu_locals = out(reg) cpu_locals
             );
-            &mut *cpu_locals
+            let immut_ref = &mut *cpu_locals;
+            immut_ref.get_state.immut_borrow.fetch_add(1, Ordering::AcqRel);
+            assert!(!immut_ref.get_state.mut_borrow.load(Ordering::Acquire), "CpuLocals already mutably borrowed");
+            CpuLocalBinding { cpu_locals: immut_ref }
         }
     }
 
-    pub fn get_lock_info() -> &'static mut LockInfo {
-        &mut Self::get().lock_info
+    pub fn get_mut() -> CpuLocalBindingMut {
+        unsafe {
+            let cpu_locals: *mut Self;
+            core::arch::asm!(
+                "mov {cpu_locals}, gs:0",
+                cpu_locals = out(reg) cpu_locals
+            );
+            let mut_ref = &mut *cpu_locals;
+            let prev_mut_borrow = mut_ref.get_state.mut_borrow.swap(true, Ordering::AcqRel);
+            assert!(!prev_mut_borrow && mut_ref.get_state.immut_borrow.load(Ordering::Acquire) == 0, "CpuLocals already borrowed");
+            CpuLocalBindingMut { cpu_locals: mut_ref }
+        }
+    }
+
+    ///# Safety
+    /// Ensure only 1 mutable reference at a time
+    pub unsafe fn get_lock_info() -> &'static mut LockInfo {
+        unsafe { 
+            let cpu_locals: *mut Self;
+            core::arch::asm!(
+                "mov {cpu_locals}, gs:0",
+                cpu_locals = out(reg) cpu_locals
+            );
+            let mut_ref = &mut *cpu_locals;
+            &mut mut_ref.lock_info
+        }
     }
 }
 
