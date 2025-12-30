@@ -17,6 +17,7 @@ pub enum ErrorCode {
     AlreadyMapped,
     NotMapped,
     InsufficientResources,
+    InvalidArgument,
 }
 
 impl Error for ErrorCode {}
@@ -37,7 +38,8 @@ impl core::fmt::Display for ErrorCode {
             ErrorCode::InvalidPointer => write!(f, "invalid poitner"),
             ErrorCode::AlreadyMapped => write!(f, "requested virtual address in mmap is already mapped"),
             ErrorCode::NotMapped => write!(f, "some address had to be mapped, but wasn't"),
-            ErrorCode::InsufficientResources => write!(f, "No resources (OOM, storage,...)")
+            ErrorCode::InsufficientResources => write!(f, "No resources (OOM, storage,...)"),
+            ErrorCode::InvalidArgument => write!(f, "Invalid argument"),
         }
     }
 }

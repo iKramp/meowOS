@@ -1,3 +1,5 @@
+use std::{fs::File, process::Stdio};
+
 fn main() {
     //demangle the kernel.map file
     //let _ = std::process::Command::new("rustfilt")
@@ -13,6 +15,7 @@ fn main() {
     let snapshot = true;
 
     let mut cmd = std::process::Command::new("qemu-system-x86_64");
+    cmd.arg("-debugcon").arg("stdio");
     cmd.arg("-d")
         .arg("cpu_reset")
         .arg("-D")
@@ -44,6 +47,10 @@ fn main() {
     }
     cmd.arg("-device").arg("ahci,id=ahci");
     cmd.arg("-device").arg("ide-hd,drive=test_disk,bus=ahci.0");
+
+    let log_file = File::create("qemu_serial.log").expect("Failed to create log file");
+
+    cmd.stdout(Stdio::from(log_file));
     let mut child = cmd.spawn().expect("Failed to start QEMU");
 
     if debug {

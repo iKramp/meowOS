@@ -283,6 +283,10 @@ unsafe impl core::alloc::GlobalAlloc for HeapWrapper {
         }
         let size = layout.size() as u64;
         let addr = lock_w_info!(self.heap).allocate(size);
+
+        //assert alignment
+        debug_assert!(addr.0 % (layout.align() as u64) == 0, "allocated address {:#x?} is not aligned to {}", addr, layout.align());
+
         addr.0 as *mut u8
     }
 
@@ -293,6 +297,7 @@ unsafe impl core::alloc::GlobalAlloc for HeapWrapper {
 
 ///WARNING this function only works for numbers <= 1024
 pub fn next_pow_2(mut num: u64) -> u64 {
+
     let mut first_bit = 0;
     let mut mask = 1_u64 << 9;
     for i in 54..64 {

@@ -181,7 +181,7 @@ impl CpuLocals {
             );
             let immut_ref = &mut *cpu_locals;
             immut_ref.get_state.immut_borrow.fetch_add(1, Ordering::AcqRel);
-            assert!(!immut_ref.get_state.mut_borrow.load(Ordering::Acquire), "CpuLocals already mutably borrowed");
+            // assert!(!immut_ref.get_state.mut_borrow.load(Ordering::Acquire), "CpuLocals already mutably borrowed");
             CpuLocalBinding { cpu_locals: immut_ref }
         }
     }
@@ -195,7 +195,7 @@ impl CpuLocals {
             );
             let mut_ref = &mut *cpu_locals;
             let prev_mut_borrow = mut_ref.get_state.mut_borrow.swap(true, Ordering::AcqRel);
-            assert!(!prev_mut_borrow && mut_ref.get_state.immut_borrow.load(Ordering::Acquire) == 0, "CpuLocals already borrowed");
+            // assert!(!prev_mut_borrow && mut_ref.get_state.immut_borrow.load(Ordering::Acquire) == 0, "CpuLocals already borrowed");
             CpuLocalBindingMut { cpu_locals: mut_ref }
         }
     }

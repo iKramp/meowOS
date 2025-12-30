@@ -43,6 +43,8 @@ use limine::LIMINE_BOOTLOADER_REQUESTS;
 use task_runner::block_task;
 use vfs::ResolvedPath;
 
+use crate::utils::byte_to_port;
+
 const PRIME_FINDER: &[u8] = include_bytes!("../../assets/prime_finder");
 const TIME_PRINTER: &[u8] = include_bytes!("../../assets/time_printer");
 const FILE_READER: &[u8] = include_bytes!("../../assets/file_reader");

@@ -1,6 +1,8 @@
 use std::arch::asm;
 use std::{lock_w_info, print, println, printlnc};
 
+use crate::utils::byte_to_port;
+
 use super::font::*;
 use super::vga_driver::VGA_BINDING;
 use std::sync::no_int_spinlock::*;
@@ -18,11 +20,12 @@ pub struct VgaText {
 impl VgaText {
     pub fn write_text(&mut self, text: &str) {
         for char in text.as_bytes() {
+            byte_to_port(0xe9, *char);
             if char == &b'\n' {
                 self.do_newline();
             } else {
                 unsafe {
-                    self.write_character(char);
+                    self.write_character(*char);
                 }
             }
         }
@@ -43,12 +46,27 @@ impl VgaText {
         }
     }
 
-    pub unsafe fn write_character(&mut self, mut character: &u8) {
-        if !(0x20..0x7f).contains(character) {
-            character = &0xfe
+    pub unsafe fn write_character(&mut self, character: u8) {
+        if !(0x20..0x7f).contains(&character) {
+            // character = &0xfe
+            let high_nibble = character >> 4;
+            let low_nibble = character & 0b1111;
+            fn transform_nibble(character: u8) -> u8 {
+                if character < 10 { b'0' + character } else { b'A' + character }
+            }
+
+            let high_char = transform_nibble(high_nibble);
+            let low_char = transform_nibble(low_nibble);
+            unsafe {
+                self.write_character(b'\\');
+                self.write_character(b'x');
+                self.write_character(high_char);
+                self.write_character(low_char);
+            }
         }
 
-        let character = &DEFAULT_FONT[*character as usize * 8..(*character as usize + 1) * 8];
+
+        let character = &DEFAULT_FONT[character as usize * 8..(character as usize + 1) * 8];
         let mut curr_row = self.line * CHAR_HEIGHT;
         for char_line in character {
             for i in 0..8 {

@@ -36,13 +36,11 @@ pub fn fread(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
         let Some(proc) = crate::proc::get_proc(proc.pid()) else {
             return; //proc was killed
         };
-        if read_result.is_err() {
+        let Ok(bytes_read) = read_result else {
             let proc_lock = proc.get();
             proc_lock.set_syscall_return(u64::MAX, 1);
             return;
-        }
-        let bytes_read = unsafe { read_result.unwrap_unchecked() };
-        let bytes_read = bytes_read.min(size); //disk may have read more than necessary
+        };
         //copy to user buffer
         let dst = buffer_ptr;
         let src = std::mem_utils::translate_phys_virt_addr(buffer_alloc).0 as *const u8;

@@ -1,5 +1,5 @@
 use std::{
-    boxed::Box, error::ErrorCode, lock_w_info, mem_utils::PhysAddr, printlnc, string::{String, ToString}, sync::{arc::Arc, no_int_spinlock::NoIntSpinlockGuard}, vec::Vec
+    boxed::Box, error::ErrorCode, lock_w_info, mem_utils::{PhysAddr, translate_phys_virt_addr}, println, printlnc, string::{String, ToString}, sync::{arc::Arc, no_int_spinlock::NoIntSpinlockGuard}, vec::Vec
 };
 
 use uuid::Uuid;
@@ -218,7 +218,7 @@ pub async fn get_dir_entries(file_handle: &FileHandle) -> Result<Box<[DirEntry]>
     let fs = vfs.mounted_filesystems.get_mut(&partition_id).ok_or(ErrorCode::NoEntry)?;
     let fs = fs.clone();
     drop(vfs);
-    Ok(fs.read_dir(file_handle.inode.index).await?)
+    fs.read_dir(file_handle.inode.index).await
 }
 
 pub async fn create_file(parent_dir: &mut FileHandle, name: &str, inode_type: InodeType) -> Result<(), ErrorCode> {
@@ -270,23 +270,84 @@ pub async fn write_file(file_handle: &mut FileHandle, content: &[PhysAddr], size
     Ok(res.1)
 }
 
-pub async fn read_file(file_handle: &mut FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, String> {
+pub async fn read_file(file_handle: &mut FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, ErrorCode> {
+    if file_handle.position % 4096 == 0 {
+        let res = unsafe { read_file_aligned(file_handle, buffer, file_handle.position, size).await }?;
+        file_handle.position += res.min(size);
+        Ok(res)
+    } else {
+        let offset = file_handle.position & !0xFFF;
+        let diff = file_handle.position - offset;
+        let aligned_size = size + diff;
+        let needs_new_page = aligned_size.div_ceil(4096) > buffer.len() as u64;
+        let new_buf = if needs_new_page {
+            let mut new_buf = buffer.to_vec();
+            new_buf.push(crate::memory::physical_allocator::allocate_frame());
+            Some(new_buf)
+        } else {
+            None
+        };
+        let buf_to_use = if let Some(ref new_buf) = new_buf {
+            new_buf.as_slice()
+        } else {
+            buffer
+        };
+
+        let res = unsafe { read_file_aligned(file_handle, buf_to_use, offset, aligned_size).await };
+        let Ok(bytes_read) = res else {
+            if needs_new_page {
+                unsafe { crate::memory::physical_allocator::deallocate_frame(*buf_to_use.last().expect("frame was just allocated")) };
+            }
+            return res;
+        };
+
+        let to_copy_first = 4096 - diff; //within current page
+        let to_copy_second = diff; //next page
+        let total_copies = buffer.len();
+        for i in 0..total_copies {
+            unsafe { core::ptr::copy((translate_phys_virt_addr(buf_to_use[i]).0 + diff) as *mut u8, translate_phys_virt_addr(buf_to_use[i]).0 as *mut u8, to_copy_first as usize) };
+            if i == total_copies - 1 && !needs_new_page {
+                break;
+            }
+            unsafe { core::ptr::copy_nonoverlapping(translate_phys_virt_addr(buf_to_use[i + 1]).0 as *mut u8, (translate_phys_virt_addr(buf_to_use[i]).0 + diff) as *mut u8, to_copy_second as usize) };
+        }
+
+        if needs_new_page {
+            unsafe { crate::memory::physical_allocator::deallocate_frame(*buf_to_use.last().expect("frame was just allocated")) };
+        }
+
+        file_handle.position += (bytes_read - diff).min(size);
+        Ok((bytes_read - diff).min(size))
+    }
+}
+
+///# Safety:
+///Caller must ensure offset is page aligned, and must advance file handle position accordingly
+///This function just checks permissons and performs the read
+pub async unsafe fn read_file_aligned(file_handle: &FileHandle, buffer: &[PhysAddr], offset: u64, size: u64) -> Result<u64, ErrorCode> {
     if !file_handle.file_flags.read() {
-        return Err("File opened in write-only mode".to_string());
+        return Err(ErrorCode::InsufficientPermissions);
+    }
+    if offset % 4096 != 0 {
+        return Err(ErrorCode::InvalidArgument);
     }
 
-    let inode = fs_tree::get_inode(file_handle.inode).ok_or("Inode not found")?;
+    let inode = fs_tree::get_inode(file_handle.inode).ok_or(ErrorCode::InodeNotPresent)?;
+
+    println!("operations::read_file_aligned: Inode {:X?}", inode);
+
     let mut vfs = lock_w_info!(VFS);
-    let device_details = vfs.devices.get(&inode.device).ok_or("Device not found")?;
+    let device_details = vfs.devices.get(&inode.device).ok_or(ErrorCode::NoEntry)?;
+    println!("operations::read_file_aligned: Device details {:X?}", device_details);
     let partition_id = device_details.partition;
-    let fs = vfs.mounted_filesystems.get_mut(&partition_id).ok_or("FS not found")?;
+    let fs = vfs.mounted_filesystems.get_mut(&partition_id).ok_or(ErrorCode::NoEntry)?;
     let fs = fs.clone();
     drop(vfs);
 
-    let offset = file_handle.position;
 
     let bytes_read = fs.read(inode.index, offset, size, buffer).await;
 
-    file_handle.position += bytes_read;
-    Ok(bytes_read)
+    println!("operations::read_file_aligned: Read {} bytes", bytes_read);
+
+    Ok(bytes_read.min(size))
 }

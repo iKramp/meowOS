@@ -4,7 +4,8 @@ use device_config::{MassStorageController, RegularPciDevice};
 
 use crate::{
     drivers::ahci::disk::AhciController,
-    interrupts::{handlers::apic_eoi, InterruptProcessorState}, task_runner::block_task,
+    interrupts::{InterruptProcessorState, handlers::apic_eoi},
+    task_runner::block_task,
 };
 
 pub mod device_config;
@@ -32,7 +33,13 @@ pub fn enumerate_devices() {
             for port in ports {
                 block_task(Box::pin(crate::vfs::add_disk(Box::new(port))));
             }
+        } else {
+            if matches!(class, device_config::PciClass::NetworkController(_)) {
+                println!("{:?}, {:?}", class, device);
+            }
+            panic!();
         }
+
         printlnc!((51, 153, 10), "Device configured");
     }
 }

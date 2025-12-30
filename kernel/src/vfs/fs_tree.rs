@@ -1,5 +1,5 @@
 use std::error::ErrorCode;
-use std::vec;
+use std::{println, vec};
 use std::{
     boxed::Box,
     collections::btree_map::BTreeMap,
@@ -12,6 +12,7 @@ use super::{DeviceId, Inode, InodeIdentifier, InodeIdentifierChain, ResolvedPath
 
 pub(super) static INODE_CACHE: NoIntSpinlock<InodeCache> = NoIntSpinlock::new(InodeCache::new());
 
+#[derive(Debug)]
 struct FsTreeNode {
     children: Vec<(Box<str>, InodeIdentifier)>,
 }
@@ -51,6 +52,7 @@ pub fn init(root: Inode) {
 
 pub fn get_inode(inode_index: InodeIdentifier) -> Option<Inode> {
     let cache = &mut lock_w_info!(INODE_CACHE);
+    println!("inode cache: {:?}", cache.inodes.values().collect::<Vec<_>>());
     cache.inodes.get(&inode_index).map(|(inode, _)| inode).cloned()
 }
 
