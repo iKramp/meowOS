@@ -18,7 +18,7 @@ fn main() {
         .expect("Failed to run objcopy on kernel.elf");
     assert!(status.success());
 
-    let status = Command::new(cargo_manifest_dir + "/make_disk.sh")
+    let status = Command::new(cargo_manifest_dir + "/scripts/make_disk.sh")
         .status()
         .expect("Failed to run make_disk.sh");
     assert!(status.success());

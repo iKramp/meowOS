@@ -55,7 +55,7 @@ Interprets GS-based CPU locals as type CpuLocals and prints fields.
 end
 
 
-source ./interrupt_macro_unwinder.py
+source ./scripts/interrupt_macro_unwinder.py
 
 b kernel::_start
 

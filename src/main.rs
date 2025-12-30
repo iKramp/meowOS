@@ -13,31 +13,31 @@ fn main() {
     let debug = true;
     let uefi = false;
     let snapshot = true;
+    let cores = 1;
 
     let mut cmd = std::process::Command::new("qemu-system-x86_64");
+    //general config
     cmd.arg("-debugcon").arg("stdio");
     cmd.arg("-d")
         .arg("cpu_reset")
         .arg("-D")
         .arg("./log.txt")
         .arg("-no-reboot");
-    if debug {
-        cmd.arg("-s");
-        cmd.arg("-S");
-    }
+
+    //cpu
     cmd.arg("-cpu").arg("host,invtsc");
     cmd.arg("-enable-kvm");
-    cmd.arg("-smp").arg("1");
-
-    #[cfg(test)]
-    {
-        cmd.arg("-device").arg("isa-debug-exit,iobase=0xf4,iosize=0x04");
-    }
+    cmd.arg("-smp").arg(cores.to_string());
 
     if uefi {
         cmd.arg("-bios").arg(ovmf_prebuilt::ovmf_pure_efi());
     }
+
+
+    //kernel image
     cmd.arg("-drive").arg("format=raw,file=kernel_build_files/image.iso");
+
+    //ahci disk
     if snapshot {
         cmd.arg("-drive")
             .arg("id=test_disk,format=raw,file=assets/ahci_disk.img,if=none,snapshot=on");
@@ -48,9 +48,21 @@ fn main() {
     cmd.arg("-device").arg("ahci,id=ahci");
     cmd.arg("-device").arg("ide-hd,drive=test_disk,bus=ahci.0");
 
-    let log_file = File::create("qemu_serial.log").expect("Failed to create log file");
+    //networking
+    cmd.arg("-netdev")
+        .arg("tap,id=net0,ifname=tap0,script=no,downscript=no")
+        .arg("-device").arg("e1000,netdev=net0");
 
+    //logging
+    let log_file = File::create("qemu_serial.log").expect("Failed to create log file");
     cmd.stdout(Stdio::from(log_file));
+
+    //debug
+    if debug {
+        cmd.arg("-s");
+        cmd.arg("-S");
+    }
+
     let mut child = cmd.spawn().expect("Failed to start QEMU");
 
     if debug {
