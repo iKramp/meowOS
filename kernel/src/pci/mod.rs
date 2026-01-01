@@ -17,6 +17,7 @@ pub fn enumerate_devices() {
         let class = device.get_class();
         let capabilities = device.get_capabilities_list();
         if !capabilities.iter().any(|cap| cap.id == 5) {
+            println!("skipping device {:#X?} because it doesn't have cap 5", class);
             continue;
         }
         printlnc!((51, 153, 10), "configuring pci device: {:#x?}", class);
