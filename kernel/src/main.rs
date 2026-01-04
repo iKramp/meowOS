@@ -16,7 +16,7 @@
 
 extern crate static_cond;
 
-use core::{ffi, time::Duration};
+use core::ffi;
 use std::{boxed::Box, println, printlnc};
 
 mod acpi;
@@ -31,7 +31,6 @@ mod limine;
 mod memory;
 mod msr;
 mod parsers;
-mod pci;
 mod proc;
 mod task_runner;
 #[allow(unused_imports)]
@@ -42,8 +41,6 @@ mod vga;
 use limine::LIMINE_BOOTLOADER_REQUESTS;
 use task_runner::block_task;
 use vfs::ResolvedPath;
-
-use crate::utils::byte_to_port;
 
 const PRIME_FINDER: &[u8] = include_bytes!("../../assets/prime_finder");
 const TIME_PRINTER: &[u8] = include_bytes!("../../assets/time_printer");
@@ -80,7 +77,7 @@ extern "C" fn _start() -> ! {
 
     acpi::init_acpi();
 
-    pci::enumerate_devices();
+    drivers::pci::enumerate_devices();
 
     std::thread::sleep(core::time::Duration::from_micros(11));
 

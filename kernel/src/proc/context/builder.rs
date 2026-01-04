@@ -3,6 +3,7 @@ use crate::proc::process_data::CpuStateType;
 use crate::proc::PROCESS_ID_COUNTER;
 use crate::proc::ProcessData;
 use crate::proc::SCHEDULER;
+use std::error::ErrorCode;
 use std::lock_w_info;
 use std::string::ToString;
 use std::sync::arc::Arc;
@@ -20,12 +21,12 @@ use super::info::ContextInfo;
 
 const DEFAULT_PROC_STACK_SIZE: usize = 0x4000; // 8KB
 
-pub fn create_process(context_info: &ContextInfo) -> Pid {
+pub fn create_process(context_info: &ContextInfo) -> Result<Pid, ErrorCode> {
     let pid = Pid(PROCESS_ID_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed));
     let is_32_bit = context_info.is_32_bit();
     let cmdline = context_info.cmdline().to_string().into_boxed_str();
     let rip = context_info.entry_point().0;
-    let memory_context = build_mem_context_for_new_proc(context_info);
+    let memory_context = build_mem_context_for_new_proc(context_info)?;
     let stack = memory_context
         .memory_regions
         .iter()
@@ -45,7 +46,7 @@ pub fn create_process(context_info: &ContextInfo) -> Pid {
     let mut scheduler_lock = lock_w_info!(SCHEDULER);
     let scheduler = unsafe { scheduler_lock.assume_init_mut() };
     scheduler.accept_new_process(pid, process_data);
-    pid
+    Ok(pid)
 }
 
 pub fn build_generic_memory_context(context: &ContextInfo) -> MemoryContext {
@@ -97,16 +98,19 @@ pub fn build_generic_memory_context(context: &ContextInfo) -> MemoryContext {
     }
 }
 
-pub fn build_mem_context_for_new_proc(context: &ContextInfo) -> MemoryContext {
+pub fn build_mem_context_for_new_proc(context: &ContextInfo) -> Result<MemoryContext, ErrorCode> {
     let mut generic_context = build_generic_memory_context(context);
     let stack_size_pages = DEFAULT_PROC_STACK_SIZE.div_ceil(0x1000) as u8; // convert to pages
 
     //add stack
-    add_stack(&mut generic_context, stack_size_pages);
-    generic_context
+    if let Err(e) = add_stack(&mut generic_context, stack_size_pages) {
+        tear_down_mem_context(&generic_context);
+        return Err(e);
+    }
+    Ok(generic_context)
 }
 
-pub fn add_stack(context: &mut MemoryContext, stack_size_pages: u8) {
+pub fn add_stack(context: &mut MemoryContext, stack_size_pages: u8) -> Result<(), ErrorCode> {
     let highest_userspace_addr: u64 = if context.is_32_bit {
         //highest address is 0xFFFF_FFFF, highest quarter is kernel on 32 bit applications
         //The kernel here will STILL be in higher half of 64(48) bit address space, but maybe
@@ -135,7 +139,15 @@ pub fn add_stack(context: &mut MemoryContext, stack_size_pages: u8) {
 
     //found a free stack at this address
     for page in (top_page - stack_reserve_pages + 2)..=top_page {
-        mem_tree.allocate_set_virtual(None, VirtAddr(page << 12));
+        match mem_tree.allocate_set_virtual(None, VirtAddr(page << 12)) {
+            Ok(_) => {}
+            Err(e) => {
+                for page in (top_page - stack_reserve_pages + 2)..page {
+                    mem_tree.deallocate(VirtAddr(page << 12));
+                }
+                return Err(e);
+            }
+        }
         let entry = mem_tree.get_page_table_entry_mut(VirtAddr(page << 12)).expect("page must exist after allocation");
         entry.set_writeable(true);
         entry.set_no_execute(true);
@@ -144,7 +156,15 @@ pub fn add_stack(context: &mut MemoryContext, stack_size_pages: u8) {
     //add a non-accessible page to catch stack overflows
     let overflow_page = top_page - stack_reserve_pages + 1;
     println!("allocating stack overflow page at {:#X}", overflow_page << 12);
-    mem_tree.allocate_set_virtual(None, VirtAddr(overflow_page << 12));
+    match mem_tree.allocate_set_virtual(None, VirtAddr(overflow_page << 12)) {
+        Ok(_) => {}
+        Err(e) => {
+            for page in (top_page - stack_reserve_pages + 2)..=top_page {
+                mem_tree.deallocate(VirtAddr(page << 12));
+            }
+            return Err(e);
+        }
+    }
     let entry = mem_tree.get_page_table_entry_mut(VirtAddr(overflow_page << 12)).expect("page must exist after allocation");
     entry.set_writeable(true);
     entry.set_no_execute(true);
@@ -156,6 +176,8 @@ pub fn add_stack(context: &mut MemoryContext, stack_size_pages: u8) {
         size_pages: stack_size_pages as u64,
     };
     context.memory_regions.push(stack);
+
+    Ok(())
 }
 
 pub fn build_generic_memory_tree() -> PageTree {
@@ -167,4 +189,8 @@ pub fn build_generic_memory_tree() -> PageTree {
     existing_page_tree.copy_higher_half(&mut new_page_tree);
 
     new_page_tree
+}
+
+pub fn tear_down_mem_context(_context: &MemoryContext) {
+    todo!("tear down mem context")
 }

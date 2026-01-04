@@ -25,6 +25,7 @@ fn main() {
         .arg("-no-reboot");
 
     //cpu
+    cmd.arg("-machine").arg("q35");
     cmd.arg("-cpu").arg("host,invtsc");
     cmd.arg("-enable-kvm");
     cmd.arg("-smp").arg(cores.to_string());
@@ -35,7 +36,8 @@ fn main() {
 
 
     //kernel image
-    cmd.arg("-drive").arg("format=raw,file=kernel_build_files/image.iso");
+    cmd.arg("-drive").arg("id=boot_cd,format=raw,file=kernel_build_files/image.iso,media=cdrom");
+    cmd.arg("-boot").arg("order=d");
 
     //ahci disk
     if snapshot {
@@ -51,7 +53,7 @@ fn main() {
     //networking
     cmd.arg("-netdev")
         .arg("tap,id=net0,ifname=tap0,script=no,downscript=no")
-        .arg("-device").arg("e1000,netdev=net0");
+        .arg("-device").arg("e1000e,netdev=net0");
 
     //logging
     let log_file = File::create("qemu_serial.log").expect("Failed to create log file");

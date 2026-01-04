@@ -3,7 +3,7 @@ use std::{boxed::Box, mem_utils::*};
 
 use reg_map::RegMap;
 
-use crate::{acpi::sdt::{AcpiSdtHeader, AcpiSdtHeaderPtr}, memory::heap};
+use crate::acpi::sdt::AcpiSdtHeader;
 
 pub trait RootSystemDescriptorTable {
     fn validate(&self) -> bool {
@@ -25,22 +25,14 @@ pub trait RootSystemDescriptorTable {
     fn print_signature(&self);
 }
 
-pub fn get_rsdt(rsdp: &super::rsdp::Rsdp) -> Box<dyn RootSystemDescriptorTable> {
+pub fn get_rsdt(rsdp: &super::rsdp::Rsdp) -> &'static dyn RootSystemDescriptorTable {
     unsafe {
         let address = rsdp.address();
         let virt_address = translate_phys_virt_addr(address);
 
-        let header_address = ensure_aligned::<AcpiSdtHeader>(virt_address);
-        let header = AcpiSdtHeaderPtr::from_ptr(header_address.0 as *mut _);
-        let table_size = header.length().read() as u64;
-
-        if header_address != virt_address {
-            crate::println!("RSDT/XSDT not aligned, copied to aligned address");
-            heap::HEAP.dealloc(header_address.0 as *mut u8, Layout::new::<AcpiSdtHeader>());
-        }
-
-        let virt_address = ensure_aligned_manual(virt_address, table_size, core::mem::align_of::<AcpiSdtHeader>() as u64);
-        
+        let table_ptr = virt_address.0 as *const AcpiSdtHeader;
+        let table_len = (table_ptr.byte_add(4) as *const u32).read_unaligned();
+        let virt_address = std::mem_utils::ensure_aligned_manual(virt_address, table_len as u64, 8);
 
         #[cfg(debug_assertions)]
         match rsdp {
@@ -49,25 +41,24 @@ pub fn get_rsdt(rsdp: &super::rsdp::Rsdp) -> Box<dyn RootSystemDescriptorTable> 
         }
 
         match rsdp {
-            super::rsdp::Rsdp::V1(_) => Box::new(RsdtPtr::from_ptr(virt_address.0 as *mut _)),
-            super::rsdp::Rsdp::V2(_) => Box::new(XsdtPtr::from_ptr(virt_address.0 as *mut _)),
+            super::rsdp::Rsdp::V1(_) => &mut *(virt_address.0 as *mut Rsdt),
+            super::rsdp::Rsdp::V2(_) => &mut *(virt_address.0 as *mut Xsdt),
         }
     }
 }
 
 #[repr(C)]
-#[derive(RegMap)]
 struct Rsdt {
     header: AcpiSdtHeader,
 }
 
-impl RootSystemDescriptorTable for RsdtPtr<'static> {
+impl RootSystemDescriptorTable for Rsdt {
     fn get_addr(&self) -> *const u8 {
-        self.as_ptr() as *const u8
+        self as *const Self as *const u8
     }
 
     fn length(&self) -> u32 {
-        self.header().length().read()
+        self.header.length
     }
     fn get_table(&self, signature: [u8; 4]) -> Option<PhysAddr> {
         unsafe {
@@ -112,23 +103,30 @@ impl RootSystemDescriptorTable for RsdtPtr<'static> {
         }
     }
     fn print_signature(&self) {
-        crate::println!("{:?}", self.header().signature().iter().map(|a| a.read() as char).collect::<std::Vec<char>>())
+        crate::println!(
+            "{:?}",
+            self.header
+                .signature
+                .iter()
+                .map(|a| *a as char)
+                .collect::<std::Vec<char>>()
+        )
     }
 }
 
 #[repr(C)]
-#[derive(Debug, RegMap)]
+#[derive(Debug)]
 struct Xsdt {
     header: AcpiSdtHeader,
 }
 
-impl RootSystemDescriptorTable for XsdtPtr<'static> {
+impl RootSystemDescriptorTable for Xsdt {
     fn get_addr(&self) -> *const u8 {
-        self.as_ptr() as *const u8
+        self as *const Self as *const u8
     }
 
     fn length(&self) -> u32 {
-        self.header().length().read()
+        self.header.length
     }
 
     fn get_table(&self, signature: [u8; 4]) -> Option<PhysAddr> {
@@ -175,6 +173,13 @@ impl RootSystemDescriptorTable for XsdtPtr<'static> {
     }
 
     fn print_signature(&self) {
-        crate::println!("{:?}", self.header().signature().iter().map(|a| a.read() as char).collect::<std::Vec<char>>())
+        crate::println!(
+            "{:?}",
+            self.header
+                .signature
+                .iter()
+                .map(|a| *a as char)
+                .collect::<std::Vec<char>>()
+        )
     }
 }

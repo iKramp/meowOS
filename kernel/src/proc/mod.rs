@@ -163,7 +163,7 @@ pub fn create_fallback_process() {
         "[fallback_process]".to_string().into_boxed_str(),
     )
     .expect("fallback can't error");
-    let pid = create_process(&fake_context);
+    let pid = create_process(&fake_context).expect("failed to create fallback process");
     assert_eq!(pid.0, 0);
     let mut scheduler_lock = lock_w_info!(SCHEDULER);
     let scheduler = unsafe { scheduler_lock.assume_init_mut() };

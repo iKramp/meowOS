@@ -18,6 +18,7 @@ pub enum ErrorCode {
     NotMapped,
     InsufficientResources,
     InvalidArgument,
+    Timeout,
 }
 
 impl Error for ErrorCode {}
@@ -40,6 +41,7 @@ impl core::fmt::Display for ErrorCode {
             ErrorCode::NotMapped => write!(f, "some address had to be mapped, but wasn't"),
             ErrorCode::InsufficientResources => write!(f, "No resources (OOM, storage,...)"),
             ErrorCode::InvalidArgument => write!(f, "Invalid argument"),
+            ErrorCode::Timeout => write!(f, "Operation timed out"),
         }
     }
 }

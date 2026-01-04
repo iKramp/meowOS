@@ -1,5 +1,5 @@
 use std::{
-    mem_utils::{PhysAddr, get_at_physical_addr},
+    mem_utils::{PhysAddr, get_at_virtual_addr},
     printlnc,
 };
 
@@ -92,7 +92,7 @@ impl Timer for HpetWrapper {
             let Some(hpet_table_phys_addr) = acpi::ACPI_TABLE_MAP.get("HPET") else {
                 return false;
             };
-            hpet_table = get_at_physical_addr::<acpi::HpetTable>(*hpet_table_phys_addr);
+            hpet_table = get_at_virtual_addr::<acpi::HpetTable>(*hpet_table_phys_addr);
         }
         let hpet_regs = hpet_table.get_addr();
         if !Self::get_registers(hpet_regs) {

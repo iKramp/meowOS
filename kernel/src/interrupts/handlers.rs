@@ -106,7 +106,8 @@ pub extern "C" fn general_protection_fault(proc_data: &mut InterruptProcessorSta
 
 pub extern "C" fn other_legacy_interrupt(_proc_data: &mut InterruptProcessorState) {
     printlnc!((0, 0, 255), "interrupt: OTHER LEGACY INTERRUPT");
-    legacy_eoi();
+    panic!();
+    // legacy_eoi();
 }
 
 #[inline]

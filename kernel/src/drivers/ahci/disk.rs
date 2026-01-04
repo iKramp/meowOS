@@ -3,18 +3,18 @@
 
 use core::{fmt::Debug, sync::atomic::AtomicU32, time::Duration};
 use std::{
-    boxed::Box, lock_w_info, mem_utils::{get_at_physical_addr, get_at_virtual_addr, memset_virtual_addr, PhysAddr, VirtAddr}, println, sync::no_int_spinlock::NoIntSpinlock, thread::sleep, vec::Vec
+    boxed::Box, error::ErrorCode, lock_w_info, mem_utils::{PhysAddr, VirtAddr, get_at_physical_addr, get_at_virtual_addr, memset_virtual_addr}, println, sync::no_int_spinlock::NoIntSpinlock, vec::Vec
 };
 
 use bitfield::bitfield;
+use reg_map::RegMap;
 
 use crate::{
     drivers::{
         ahci::fis::{D2HRegisterFis, IdentifyStructure, PioSetupFis},
-        disk::BlockDevice,
+        disk::BlockDevice, pci::{self, BarTrait},
     },
-    memory::{paging::LiminePat, physical_allocator, PAGE_TREE_ALLOCATOR},
-    pci::device_config::{self, Bar}, task_runner,
+    memory::{PAGE_TREE_ALLOCATOR, paging::LiminePat, physical_allocator}, task_runner,
 };
 
 use super::fis::{FisType, H2DRegFisPmport, H2DRegisterFis};
@@ -30,7 +30,7 @@ pub struct AhciDriver {}
 
 #[derive(Debug)]
 pub struct AhciController {
-    pub device: device_config::RegularPciDevice,
+    pub device: pci::LegacyPciDevice,
     pub abar: &'static mut GenericHostControl,
     pub ports: Vec<VirtualPort>,
     is_64_bit: bool,
@@ -39,8 +39,12 @@ pub struct AhciController {
 impl AhciController {
     //https://forum.osdev.org/viewtopic.php?t=40969
     pub fn init(mut self) -> Vec<VirtualPort> {
+        println!("AhciController::init: staring ahci init");
+        println!("AhciController::init: abar at {:p}", self.abar);
+        println!("AhciController::init: enabling bus mastering");
         self.device.enable_bus_mastering();
         let ghc = unsafe { (&raw const self.abar).read_volatile() };
+        println!("AhciController::init: ghc before init: {:#x?}", ghc);
 
         //enable AHCI
         ghc.ghc.SetAE(true);
@@ -87,9 +91,9 @@ impl AhciController {
 }
 
 impl AhciController {
-    pub fn new(device: device_config::RegularPciDevice) -> Self {
+    pub fn new(device: pci::LegacyPciDevice) -> Self {
         let abar = device.bars.iter().find(|bar| bar.get_index() == 5).expect("AHCI device not following AHCI spec").clone();
-        let Bar::Memory(_, addr, _) = abar else {
+        let pci::Bar::Memory(abar) = abar else {
             panic!("Abar is not memory mapped");
         };
 
@@ -103,7 +107,7 @@ impl AhciController {
             if ports_implemented & (1 << i) != 0 {
                 ports.push(VirtualPort {
                     index: i as u8,
-                    address: (addr.0 + 0x100 + (i as u64) * 0x80) as *mut u32,
+                    address: (abar.get_address().0 + 0x100 + (i as u64) * 0x80) as *mut u32,
                     command_list: VirtAddr(0),
                     fis: VirtAddr(0),
                     is_64_bit,
@@ -118,7 +122,7 @@ impl AhciController {
 
         Self {
             device,
-            abar: unsafe { &mut *(addr.0 as *mut GenericHostControl) },
+            abar: unsafe { &mut *(abar.get_address().0 as *mut GenericHostControl) },
             ports,
             is_64_bit,
         }
@@ -342,7 +346,10 @@ impl VirtualPort {
         //enable port interrupts here
         self.set_property(0x14, 0xFFFFFFFF);
 
-        self.send_identify();
+        if self.send_identify().is_err() {
+            println!("Port {} identify failed", self.index);
+            return false;
+        }
 
         unsafe {
             let register_fis = &raw const *get_at_virtual_addr::<D2HRegisterFis>(self.fis + 0x40);
@@ -357,7 +364,7 @@ impl VirtualPort {
         true
     }
 
-    fn send_identify(&mut self) {
+    fn send_identify(&mut self) -> Result<(), ErrorCode> {
         let mut pmport = H2DRegFisPmport(0);
         pmport.set_command(true);
         let ident_fis = H2DRegisterFis {
@@ -379,8 +386,16 @@ impl VirtualPort {
         let identify_cmd_index = self.get_command_index().expect("no command slots free during identify?????");
         self.build_command(false, &ident_fis, &[prdt], identify_cmd_index);
 
+        let now = std::time::Instant::now();
+
         let mut ci = self.get_property(0x38);
         while ci & (1 << identify_cmd_index) != 0 {
+            if now.elapsed().as_millis() > 500 {
+                println!("Identify command timeout");
+                self.clean_command(identify_cmd_index);
+                self.release_command_index(identify_cmd_index);
+                return Err(ErrorCode::Timeout);
+            }
             std::thread::sleep(Duration::from_micros(10));
             ci = self.get_property(0x38);
         }
@@ -398,6 +413,8 @@ impl VirtualPort {
             self.command_depth = data.queue_depth;
             assert!(data.sector_bytes == 512);
         }
+
+        Ok(())
     }
 
     ///PRDT cannot be more than a bit over 900MB. Just use multiple commands
