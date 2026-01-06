@@ -38,6 +38,7 @@ mod tests;
 mod utils;
 mod vfs;
 mod vga;
+mod printer;
 use limine::LIMINE_BOOTLOADER_REQUESTS;
 use task_runner::block_task;
 use vfs::ResolvedPath;
@@ -54,6 +55,7 @@ extern "C" fn _start() -> ! {
     }
 
     vga::init_vga_driver();
+    printer::init_printer();
     vga::clear_screen();
 
     let cmd_line_info = unsafe { &(*LIMINE_BOOTLOADER_REQUESTS.cmd_line_request.info) };

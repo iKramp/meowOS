@@ -3,7 +3,13 @@
 
 use core::{fmt::Debug, sync::atomic::AtomicU32, time::Duration};
 use std::{
-    boxed::Box, error::ErrorCode, lock_w_info, mem_utils::{PhysAddr, VirtAddr, get_at_physical_addr, get_at_virtual_addr, memset_virtual_addr}, println, sync::no_int_spinlock::NoIntSpinlock, vec::Vec
+    boxed::Box,
+    error::ErrorCode,
+    lock_w_info,
+    mem_utils::{PhysAddr, VirtAddr, get_at_physical_addr, get_at_virtual_addr, memset_virtual_addr},
+    print, println,
+    sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
+    vec::Vec,
 };
 
 use bitfield::bitfield;
@@ -12,9 +18,11 @@ use reg_map::RegMap;
 use crate::{
     drivers::{
         ahci::fis::{D2HRegisterFis, IdentifyStructure, PioSetupFis},
-        disk::BlockDevice, pci::{self, BarTrait},
+        disk::BlockDevice,
+        pci::{self},
     },
-    memory::{PAGE_TREE_ALLOCATOR, paging::LiminePat, physical_allocator}, task_runner,
+    memory::{PAGE_TREE_ALLOCATOR, paging::LiminePat, physical_allocator},
+    task_runner,
 };
 
 use super::fis::{FisType, H2DRegFisPmport, H2DRegisterFis};
@@ -31,116 +39,117 @@ pub struct AhciDriver {}
 #[derive(Debug)]
 pub struct AhciController {
     pub device: pci::LegacyPciDevice,
-    pub abar: &'static mut GenericHostControl,
-    pub ports: Vec<VirtualPort>,
+    pub ghc: GenericHostControlPtr<'static>,
     is_64_bit: bool,
 }
 
 impl AhciController {
-    //https://forum.osdev.org/viewtopic.php?t=40969
-    pub fn init(mut self) -> Vec<VirtualPort> {
-        println!("AhciController::init: staring ahci init");
-        println!("AhciController::init: abar at {:p}", self.abar);
-        println!("AhciController::init: enabling bus mastering");
-        self.device.enable_bus_mastering();
-        let ghc = unsafe { (&raw const self.abar).read_volatile() };
-        println!("AhciController::init: ghc before init: {:#x?}", ghc);
-
-        //enable AHCI
-        ghc.ghc.SetAE(true);
-        unsafe { (&raw mut self.abar.ghc).write_volatile(GlobalHBAControl(ghc.ghc.0)) };
-
-        //bios handoff??
-        if ghc.cap2.BOH() {
-            self.perform_bios_handoff();
-        } else {
-            println!("No bios handoff");
-        }
-
-        self.wait_for_idle_ports();
-
-        //reset HBA
-        ghc.ghc.SetHR(true);
-        unsafe { (&raw mut self.abar.ghc).write_volatile(GlobalHBAControl(ghc.ghc.0)) };
-        while ghc.ghc.HR() {
-            std::thread::sleep(Duration::from_micros(10));
-            ghc.ghc = unsafe { (&raw const self.abar.ghc).read_volatile() };
-        }
-
-        self.wait_for_idle_ports();
-
-        //enable AHCI again after reset
-        ghc.ghc.SetAE(true);
-        ghc.ghc.SetIE(true);
-        unsafe { (&raw mut self.abar.ghc).write_volatile(GlobalHBAControl(ghc.ghc.0)) };
-
-        let staggered_spin_up = ghc.cap.SSS();
-
-        let mut active_ports = Vec::new();
-        //loop and init ports
-        for port in &mut self.ports {
-            if port.init(self.is_64_bit, staggered_spin_up) {
-                active_ports.push(port.index);
-            }
-        }
-
-        self.ports.retain(|port| active_ports.contains(&port.index));
-
-        self.ports
-    }
-}
-
-impl AhciController {
     pub fn new(device: pci::LegacyPciDevice) -> Self {
-        let abar = device.bars.iter().find(|bar| bar.get_index() == 5).expect("AHCI device not following AHCI spec").clone();
+        let abar = device
+            .bars
+            .iter()
+            .find(|bar| bar.get_index() == 5)
+            .expect("AHCI device not following AHCI spec");
         let pci::Bar::Memory(abar) = abar else {
             panic!("Abar is not memory mapped");
         };
 
-        let ghc = abar.read_from_bar::<GenericHostControl>(0);
-        let is_64_bit = ghc.cap.S64A();
+        let ghc = unsafe { GenericHostControlPtr::from_ptr(abar.get_address().0 as *mut GenericHostControl) };
+        let is_64_bit = ghc.cap().read().S64A();
+
+        Self {
+            device,
+            ghc,
+            is_64_bit,
+        }
+    }
+
+    //https://forum.osdev.org/viewtopic.php?t=40969
+    pub fn init(self) -> Vec<VirtualPort> {
+        println!("AhciController::init: staring ahci init");
+        println!("AhciController::init: abar at {:p}", self.ghc.as_ptr());
+        println!("AhciController::init: enabling bus mastering");
+        self.device.enable_bus_mastering();
+        let ghc_dbg = unsafe { self.ghc.as_ptr().read_volatile() };
+        println!("@DBG AhciController::init: ghc before init: {:#x?}", ghc_dbg);
+        print!("@BOTH");
+        let self_arc = Arc::new(self);
 
         let mut ports = Vec::new();
-        let ports_implemented = ghc.pi;
+        let ports_implemented = self_arc.ghc.pi().read();
 
         for i in 0..32 {
             if ports_implemented & (1 << i) != 0 {
                 ports.push(VirtualPort {
                     index: i as u8,
-                    address: (abar.get_address().0 + 0x100 + (i as u64) * 0x80) as *mut u32,
+                    address: (self_arc.ghc.as_ptr() as u64 + 0x100 + (i as u64) * 0x80) as *mut u32,
                     command_list: VirtAddr(0),
                     fis: VirtAddr(0),
-                    is_64_bit,
+                    is_64_bit: self_arc.is_64_bit,
                     sectors: 0,
                     command_depth: 1,
                     device: 0,
                     commands_issued: AtomicU32::new(0),
                     address_lock: NoIntSpinlock::new(()),
+                    ahci_controller: self_arc.clone(),
                 });
             }
         }
 
-        Self {
-            device,
-            abar: unsafe { &mut *(abar.get_address().0 as *mut GenericHostControl) },
-            ports,
-            is_64_bit,
+
+        println!("ports implemented: {:#x}", self_arc.ghc.pi().read());
+
+        //enable AHCI
+        self_arc.ghc.ghc().write(self_arc.ghc.ghc().read().SetAE(true));
+
+        //bios handoff??
+        if self_arc.ghc.cap2().read().BOH() {
+            self_arc.perform_bios_handoff();
+        } else {
+            println!("No bios handoff");
         }
+
+        self_arc.wait_for_idle_ports(&ports);
+
+        //reset HBA
+        // ghc.ghc.SetHR(true);
+        // unsafe { (&raw mut self.abar.ghc).write_volatile(GlobalHBAControl(ghc.ghc.0)) };
+        self_arc.ghc.ghc().write(self_arc.ghc.ghc().read().SetHR(true));
+        while self_arc.ghc.ghc().read().HR() {
+            std::thread::sleep(Duration::from_micros(10));
+        }
+
+        self_arc.wait_for_idle_ports(&ports);
+
+        //enable AHCI again after reset
+        self_arc.ghc.ghc().write(self_arc.ghc.ghc().read().SetAE(true).SetIE(true));
+
+        let staggered_spin_up = self_arc.ghc.cap().read().SSS();
+
+        let mut active_ports = Vec::new();
+        //loop and init ports
+        for port in &mut ports {
+            if port.init(self_arc.is_64_bit, staggered_spin_up) {
+                active_ports.push(port.index);
+            }
+        }
+
+
+        ports.retain(|port| active_ports.contains(&port.index));
+        ports
     }
 
-    fn perform_bios_handoff(&mut self) {
+    fn perform_bios_handoff(&self) {
         let mut bohc = Bohc(0);
         bohc.SetOOS(true);
         println!("bohc: {:#x?}", bohc);
-        unsafe {
-            (&raw mut self.abar.bohc).write_volatile(bohc);
-        }
+        self.ghc.bohc().write(bohc);
         let start = std::time::Instant::now();
         loop {
-            let bohc = unsafe { (&raw mut self.abar.bohc).read_volatile() };
+            let bohc = self.ghc.bohc().read();
             if bohc.BB() {
                 loop {
-                    let bohc = unsafe { (&raw mut self.abar.bohc).read_volatile() };
+                    let bohc = self.ghc.bohc().read();
                     if !bohc.BB() || start.elapsed().as_secs() > 2 {
                         break;
                     }
@@ -157,8 +166,8 @@ impl AhciController {
         }
     }
 
-    fn wait_for_idle_ports(&self) {
-        for port in &self.ports {
+    fn wait_for_idle_ports(&self, ports: &Vec<VirtualPort>) {
+        for port in ports {
             let mut port_command = PortCommand(port.get_property(0x18));
             if port_command.ST() {
                 port_command.SetST(false);
@@ -202,6 +211,7 @@ pub struct VirtualPort {
     command_list: VirtAddr,
     command_depth: u16,
     device: u8,
+    ahci_controller: Arc<AhciController>,
 }
 
 // Safe because we set all the data once, then only modify data in Arc<AtomicU32> and using the lock
@@ -528,13 +538,12 @@ impl BlockDevice for VirtualPort {
             ..H2DRegisterFis::default()
         };
 
-
         let read_cmd_index = loop {
             match self.get_command_index() {
                 Some(cmd_index) => break cmd_index,
                 None => {
                     task_runner::yield_now().await;
-                },
+                }
             }
         };
         self.build_command(false, (&cfis).into(), &prdt, read_cmd_index);
@@ -593,7 +602,7 @@ impl BlockDevice for VirtualPort {
                 Some(cmd_index) => break cmd_index,
                 None => {
                     task_runner::yield_now().await;
-                },
+                }
             }
         };
         self.build_command(false, (&cfis).into(), &prdt, write_cmd_index);
@@ -689,7 +698,7 @@ struct Port {
     PxVS: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, RegMap)]
 #[repr(C)]
 pub struct GenericHostControl {
     cap: Capabilities,
@@ -707,6 +716,7 @@ pub struct GenericHostControl {
 }
 
 bitfield! {
+    #[derive(RegMap)]
     struct GlobalHBAControl(u32);
     impl Debug;
     AE, SetAE: 31;
@@ -717,6 +727,7 @@ bitfield! {
 }
 
 bitfield! {
+    #[derive(RegMap)]
     struct Capabilities(u32);
     impl Debug;
     S64A, _: 31;
@@ -724,6 +735,7 @@ bitfield! {
 }
 
 bitfield! {
+    #[derive(RegMap)]
     struct Capabilities2(u32);
     impl Debug;
     DESO, _: 5;
@@ -735,6 +747,7 @@ bitfield! {
 }
 
 bitfield! {
+    #[derive(RegMap)]
     struct Bohc(u32);
     impl Debug;
     BB, SetBB: 4;

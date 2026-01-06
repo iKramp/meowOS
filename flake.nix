@@ -32,6 +32,7 @@
         pkgs.rust-analyzer
         pkgs.clippy
         pkgs.xorriso
+        pkgs.cargo-expand
       ];
 
       shellHook = ''

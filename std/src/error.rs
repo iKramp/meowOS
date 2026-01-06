@@ -1,6 +1,5 @@
 use core::error::Error;
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorCode {
     Unknown,
@@ -19,6 +18,7 @@ pub enum ErrorCode {
     InsufficientResources,
     InvalidArgument,
     Timeout,
+    IllegalValue,
 }
 
 impl Error for ErrorCode {}
@@ -42,6 +42,7 @@ impl core::fmt::Display for ErrorCode {
             ErrorCode::InsufficientResources => write!(f, "No resources (OOM, storage,...)"),
             ErrorCode::InvalidArgument => write!(f, "Invalid argument"),
             ErrorCode::Timeout => write!(f, "Operation timed out"),
+            ErrorCode::IllegalValue => write!(f, "Illegal value"),
         }
     }
 }

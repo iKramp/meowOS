@@ -1,8 +1,6 @@
 use std::arch::asm;
 use std::{lock_w_info, print, println, printlnc};
 
-use crate::utils::byte_to_port;
-
 use super::font::*;
 use super::vga_driver::VGA_BINDING;
 use std::sync::no_int_spinlock::*;
@@ -20,7 +18,6 @@ pub struct VgaText {
 impl VgaText {
     pub fn write_text(&mut self, text: &str) {
         for char in text.as_bytes() {
-            byte_to_port(0xe9, *char);
             if char == &b'\n' {
                 self.do_newline();
             } else {
@@ -134,7 +131,7 @@ impl std::Print for VgaText {
 }
 
 #[used]
-pub static mut VGA_TEXT: NoIntSpinlock<VgaText> = NoIntSpinlock::new(VgaText {
+pub static VGA_TEXT: NoIntSpinlock<VgaText> = NoIntSpinlock::new(VgaText {
     background: (0, 0, 0),
     foreground: (255, 255, 255),
     height_lines: 0,
@@ -144,22 +141,18 @@ pub static mut VGA_TEXT: NoIntSpinlock<VgaText> = NoIntSpinlock::new(VgaText {
 });
 
 pub fn init_vga_text(width: usize, height: usize) {
-    unsafe {
-        let mut display = lock_w_info!(VGA_TEXT);
-        display.height_lines = height / (CHAR_HEIGHT);
-        display.width_chars = width / (CHAR_WIDTH);
-        std::set_print(core::ptr::addr_of_mut!(VGA_TEXT));
-    }
+    let mut display = lock_w_info!(VGA_TEXT);
+    display.height_lines = height / (CHAR_HEIGHT);
+    display.width_chars = width / (CHAR_WIDTH);
 }
 
 pub fn clear_screen() {
     super::vga_driver::clear_screen();
-    unsafe {
-        let mut display = lock_w_info!(VGA_TEXT);
-        display.line = 0;
-        display.char = 0;
-    }
+    let mut display = lock_w_info!(VGA_TEXT);
+    display.line = 0;
+    display.char = 0;
     let vga_buffer_addr = unsafe { VGA_BINDING.buffer };
+    drop(display);
     println!("VGA buffer address: {:#x?}", vga_buffer_addr);
 }
 

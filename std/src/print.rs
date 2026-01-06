@@ -2,12 +2,12 @@ use core::fmt::{Arguments, Write};
 
 use crate::{lock_w_info, sync::no_int_spinlock::*};
 
-pub static mut PRINT: Option<&mut NoIntSpinlock<dyn Print>> = None;
+pub static mut PRINT: Option<&NoIntSpinlock<dyn Print>> = None;
 
 ///# Safety
 ///printer must be a valid pointer
-pub unsafe fn set_print(printer: *mut NoIntSpinlock<dyn Print>) {
-    unsafe { PRINT = Some(&mut *printer) }
+pub unsafe fn set_print(printer: *const NoIntSpinlock<dyn Print>) {
+    unsafe { PRINT = Some(&*printer) }
 }
 
 pub trait Print: Write {
