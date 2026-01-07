@@ -2,9 +2,8 @@ use crate::{
     drivers::pci::{
         LegacyPciDevice, PciDevice, bar::{Bar, IOBar, MemoryBar}, capabilities::Capability, device_class::PciClass, port_access::{get_dword, set_dword}
     },
-    memory::{PAGE_TREE_ALLOCATOR, paging::LiminePat, physical_allocator},
 };
-use std::{error::ErrorCode, mem_utils::PhysAddr, println, vec::Vec};
+use std::{mem_utils::PhysAddr, println, vec::Vec};
 
 pub fn get_vendor_id(dev: &PciDevice) -> u16 {
     get_dword(0, dev) as u16
@@ -88,7 +87,8 @@ pub fn get_bar(index: u8, dev: &PciDevice) -> Option<(Bar, u8)> {
         let size: u64;
         let bars: u8;
         let prefetchable = (first_bar & 0b1000) != 0;
-        if first_bar & 0b100 != 0 {
+        let is_64_bit = (first_bar & 0b110) == 0b10;
+        if is_64_bit {
             let second_bar = get_dword(0x10 + index * 4 + 4, dev);
             let address = (first_bar & 0xFFFF_FFF0) as u64 | ((second_bar as u64) << 32);
             physical_bar_addr = PhysAddr(address);
@@ -105,7 +105,7 @@ pub fn get_bar(index: u8, dev: &PciDevice) -> Option<(Bar, u8)> {
         if num > 256 {
             return None
         }
-        Some((Bar::Memory(MemoryBar::new(index, 0x10 + index * 4, physical_bar_addr, size, prefetchable)), bars))
+        Some((Bar::Memory(MemoryBar::new(index, 0x10 + index * 4, physical_bar_addr, size, prefetchable, is_64_bit)), bars))
     } else {
         //io space bar
         let address = first_bar as u16 & 0xFFFC;

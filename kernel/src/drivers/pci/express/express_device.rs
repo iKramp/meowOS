@@ -29,12 +29,15 @@ impl PcieDevice {
     pub(super) fn load_bars(&mut self) {
         let mut bars = Vec::new();
 
-        for i in 0..6 {
+        let mut i = 0;
+        while i < 6 {
             let bar = configuration_space::get_bar(self, i as u8);
             let Some(bar) = bar else {
+                i += 1;
                 continue;
             };
             println!("Bar {}: {:#X?}", i, bar);
+            i += if bar.is_64_bit { 2 } else { 1 };
             bars.push(bar);
         }
         self.bars = bars;

@@ -89,7 +89,7 @@ pub fn ini_msix_interrupt(dev: FullPciDevType) -> Result<(), ErrorCode> {
 
         let msi_data = current_free_irq as u32;
 
-        set_table_entry(table_bar, table_offset, i, msi_addr, msi_data, 0);
+        set_table_entry(&table_bar, table_offset, i, msi_addr, msi_data, 0);
     }
 
     Ok(())

@@ -51,7 +51,7 @@ impl Print for Printer {
         for byte in b"\x1b[48;2;" {
             byte_to_port(0xe9, *byte);
         }
-        for byte in &num_to_chars(color.0) {
+        for byte in &num_to_chars(color.2) {
             byte_to_port(0xe9, *byte);
         }
         byte_to_port(0xe9, b';');
@@ -59,7 +59,7 @@ impl Print for Printer {
             byte_to_port(0xe9, *byte);
         }
         byte_to_port(0xe9, b';');
-        for byte in &num_to_chars(color.2) {
+        for byte in &num_to_chars(color.0) {
             byte_to_port(0xe9, *byte);
         }
         byte_to_port(0xe9, b'm');
@@ -71,7 +71,7 @@ impl Print for Printer {
         for byte in b"\x1b[38;2;" {
             byte_to_port(0xe9, *byte);
         }
-        for byte in &num_to_chars(color.0) {
+        for byte in &num_to_chars(color.2) {
             byte_to_port(0xe9, *byte);
         }
         byte_to_port(0xe9, b';');
@@ -79,7 +79,7 @@ impl Print for Printer {
             byte_to_port(0xe9, *byte);
         }
         byte_to_port(0xe9, b';');
-        for byte in &num_to_chars(color.2) {
+        for byte in &num_to_chars(color.0) {
             byte_to_port(0xe9, *byte);
         }
         byte_to_port(0xe9, b'm');

@@ -96,64 +96,58 @@ pub fn get_bar(dev: &PcieDevice, index: u8) -> Option<MemoryBar> {
         }
     }
 
-    let mut curr_bar_index = 0;
-    let mut curr_offset_index = 0;
-    loop {
-        if curr_offset_index >= 6 {
-            return None; //device doesn't have this bar
-        }
-
-        let curr_bar = unsafe { dev.config_space_addr.bars().idx_unchecked(curr_offset_index).read() };
-        let curr_bar_2 = unsafe { dev.config_space_addr.bars().idx_unchecked(curr_offset_index + 1).read() };
-
-        if curr_bar & 1 == 1 {
-            return None; //IO bar, not PCIe
-        }
-
-        let is_64_bit = (curr_bar >> 1) & 0b11 == 0b10;
-
-        if curr_bar_index != index {
-            curr_bar_index += 1;
-            curr_offset_index += if is_64_bit { 2 } else { 1 };
-            continue;
-        }
-
-        let prefetchable = (curr_bar >> 3) & 1 == 1;
-        let (mut size, addr) = if is_64_bit {
-            println!("bar is 64 bit");
-            unsafe { dev.config_space_addr.bars().idx_unchecked(curr_offset_index).write(u32::MAX) };
-            unsafe { dev.config_space_addr.bars().idx_unchecked(curr_offset_index + 1).write(u32::MAX) };
-
-            let bottom_bits = unsafe { dev.config_space_addr.bars().idx_unchecked(curr_offset_index).read() };
-            let top_bits = unsafe { dev.config_space_addr.bars().idx_unchecked(curr_offset_index + 1).read() };
-
-            unsafe { dev.config_space_addr.bars().idx_unchecked(curr_offset_index).write(curr_bar) };
-            unsafe { dev.config_space_addr.bars().idx_unchecked(curr_offset_index + 1).write(curr_bar_2) };
-
-            let size = ((top_bits as u64) << 32) | (bottom_bits as u64);
-            let addr = ((curr_bar_2 as u64) << 32) | (curr_bar as u64 & !0b1111);
-            (size, addr)
-        } else {
-            println!("bar is 32 bit");
-            unsafe { dev.config_space_addr.bars().idx_unchecked(curr_offset_index).write(u32::MAX) };
-
-            let bottom_bits = unsafe { dev.config_space_addr.bars().idx_unchecked(curr_offset_index).read() };
-
-            unsafe { dev.config_space_addr.bars().idx_unchecked(curr_offset_index).write(curr_bar) };
-
-            let size = bottom_bits as u64 | 0xFFFFFFFF00000000;
-            let addr = curr_bar as u64 & !0b1111;
-            (size, addr)
-        };
-
-        size &= !0b1111;
-        size = !size;
-        size += 1;
-        println!("Size of bar: {:X}, address of bar: {:X}", size, addr);
-        println!("first bar reg: {:X}", curr_bar);
-
-        return Some(MemoryBar::new(index, curr_offset_index as u8 + 0x10, PhysAddr(addr), size, prefetchable));
+    if index >= 6 {
+        return None; //device doesn't have this bar
     }
+
+    let curr_bar = unsafe { dev.config_space_addr.bars().idx_unchecked(index as usize).read() };
+    let curr_bar_2 = if index < 5 { 
+        unsafe { dev.config_space_addr.bars().idx_unchecked(index as usize + 1).read() }
+    } else {
+        0
+    };
+
+    if curr_bar & 1 == 1 {
+        return None; //IO bar, not PCIe
+    }
+
+    let is_64_bit = (curr_bar >> 1) & 0b11 == 0b10;
+
+    let prefetchable = (curr_bar >> 3) & 1 == 1;
+    let (mut size, addr) = if is_64_bit {
+        println!("bar is 64 bit");
+        unsafe { dev.config_space_addr.bars().idx_unchecked(index as usize).write(u32::MAX) };
+        unsafe { dev.config_space_addr.bars().idx_unchecked(index as usize + 1).write(u32::MAX) };
+
+        let bottom_bits = unsafe { dev.config_space_addr.bars().idx_unchecked(index as usize).read() };
+        let top_bits = unsafe { dev.config_space_addr.bars().idx_unchecked(index as usize + 1).read() };
+
+        unsafe { dev.config_space_addr.bars().idx_unchecked(index as usize).write(curr_bar) };
+        unsafe { dev.config_space_addr.bars().idx_unchecked(index as usize + 1).write(curr_bar_2) };
+
+        let size = ((top_bits as u64) << 32) | (bottom_bits as u64);
+        let addr = ((curr_bar_2 as u64) << 32) | (curr_bar as u64 & !0b1111);
+        (size, addr)
+    } else {
+        println!("bar is 32 bit");
+        unsafe { dev.config_space_addr.bars().idx_unchecked(index as usize).write(u32::MAX) };
+
+        let bottom_bits = unsafe { dev.config_space_addr.bars().idx_unchecked(index as usize).read() };
+
+        unsafe { dev.config_space_addr.bars().idx_unchecked(index as usize).write(curr_bar) };
+
+        let size = bottom_bits as u64 | 0xFFFFFFFF00000000;
+        let addr = curr_bar as u64 & !0b1111;
+        (size, addr)
+    };
+
+    size &= !0b1111;
+    size = !size;
+    size += 1;
+    println!("Size of bar: {:X}, address of bar: {:X}", size, addr);
+    println!("first bar reg: {:X}", curr_bar);
+
+    return Some(MemoryBar::new(index, index as u8 + 0x10, PhysAddr(addr), size, prefetchable, is_64_bit));
 }
 
 bitfield! {

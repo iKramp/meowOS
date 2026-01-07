@@ -5,7 +5,7 @@ use std::{
 use crate::{
     acpi::{BaseAddressAllocation, McfgTable},
     drivers::pci::{
-        FullPciDevType, PCI_CAP_PCIE_ID, PCI_CAP_POWER_MANAGEMENT_ID, PciDevice, capabilities, device_class::{NetworkController, PciClass}, device_codes::DeviceIdentification, express::{
+        FullPciDevType, PCI_CAP_PCIE_ID, PCI_CAP_POWER_MANAGEMENT_ID, PciDevice, capabilities::{self, msix::PCI_CAP_MSIX_ID}, device_class::{NetworkController, PciClass}, device_codes::DeviceIdentification, express::{
             configuration_space::{LegacyConfigSpaceT0, LegacyConfigSpaceT0Ptr},
             express_device::PcieDevice,
         }
@@ -63,6 +63,13 @@ pub fn init_pci_device(mut dev: PcieDevice) {
             println!("MSIX init error: {:?}, skipping device", e);
             return;
         }
+    } else {
+        let has_msi_x = dev
+            .capabilities
+            .iter()
+            .any(|cap| cap.id == PCI_CAP_MSIX_ID);
+        println!("@DBG MSI init success, has_msix={}", has_msi_x);
+        println!("@BOTH");
     }
     let conf_space = unsafe { dev.config_space_addr.as_ptr().read_volatile() };
 
