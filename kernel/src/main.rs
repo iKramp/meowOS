@@ -79,6 +79,8 @@ extern "C" fn _start() -> ! {
 
     acpi::init_acpi();
 
+    drivers::init_drivers();
+
     drivers::pci::enumerate_devices();
 
     std::thread::sleep(core::time::Duration::from_micros(11));

@@ -1,20 +1,36 @@
 use std::{
-    mem_utils::{PhysAddr, VirtAddr, translate_phys_virt_addr}, print, println, vec::Vec
+    lock_w_info,
+    mem_utils::{PhysAddr, VirtAddr, translate_phys_virt_addr},
+    print, println, printlnc,
+    sync::no_int_spinlock::NoIntSpinlock,
+    vec::Vec,
 };
 
 use crate::{
     acpi::{BaseAddressAllocation, McfgTable},
     drivers::pci::{
-        FullPciDevType, PCI_CAP_PCIE_ID, PCI_CAP_POWER_MANAGEMENT_ID, PciDevice, capabilities::{self, msix::PCI_CAP_MSIX_ID}, device_class::{NetworkController, PciClass}, device_codes::DeviceIdentification, express::{
+        FullPciDevType, PCI_CAP_PCIE_ID, PCI_CAP_POWER_MANAGEMENT_ID, PciDevice, capabilities::{self, msix::PCI_CAP_MSIX_ID},
+        device_class::PciClass,
+        device_codes::PciDeviceNumericId,
+        express::{
             configuration_space::{LegacyConfigSpaceT0, LegacyConfigSpaceT0Ptr},
             express_device::PcieDevice,
-        }
+        },
     },
     memory::{PAGE_TREE_ALLOCATOR, paging::LiminePat},
 };
 
 mod configuration_space;
 pub mod express_device;
+
+type PcieDevDriverInitFn = ((PciClass, PciDeviceNumericId), fn(PcieDevice));
+
+static LEGACY_PCI_DRIVERS: NoIntSpinlock<Vec<PcieDevDriverInitFn>> = NoIntSpinlock::new(Vec::new());
+
+pub(in crate::drivers) fn add_pcie_driver(dev_type: (PciClass, PciDeviceNumericId), init_fn: fn(PcieDevice)) {
+    let mut drivers = lock_w_info!(LEGACY_PCI_DRIVERS);
+    drivers.push((dev_type, init_fn));
+}
 
 pub fn configure_devices() {
     let Some(mcfg_table) = crate::acpi::get_table::<McfgTable>("MCFG") else {
@@ -37,8 +53,6 @@ pub fn configure_devices() {
     for device in devices {
         init_pci_device(device);
     }
-
-    todo!("finish pcie")
 }
 
 pub fn init_pci_device(mut dev: PcieDevice) {
@@ -71,25 +85,29 @@ pub fn init_pci_device(mut dev: PcieDevice) {
         println!("@DBG MSI init success, has_msix={}", has_msi_x);
         println!("@BOTH");
     }
-    let conf_space = unsafe { dev.config_space_addr.as_ptr().read_volatile() };
 
-    let mut identification = DeviceIdentification::new(
-        dev.config_space_addr.vendor_id().read(),
-        dev.config_space_addr.device_id().read(),
-        dev.config_space_addr.subsystem_vendor_id().read(),
-        dev.config_space_addr.subsystem_id().read(),
-    );
+    let identification = PciDeviceNumericId {
+        vendor_id: Some(dev.config_space_addr.vendor_id().read()),
+        device_id: Some(dev.config_space_addr.device_id().read()),
+        subvendor_id: Some(dev.config_space_addr.subsystem_vendor_id().read()),
+        subdevice_id: Some(dev.config_space_addr.subsystem_id().read()),
+    };
 
-    crate::drivers::pci::device_codes::get_device_identification(&mut identification);
+    let identification = crate::drivers::pci::device_codes::get_device_identification(identification);
+    println!("@DBG init_pci_device: Device identification: {:#X?}", identification);
+    println!("@VGA init_pci_device: Vendor name: {}", identification.vendor_name);
+    println!("@VGA init_pci_device: Device name: {}", identification.device_name);
+    println!("@VGA init_pci_device: Subsys name: {}", identification.subsystem_name);
+    print!("@BOTH");
 
-    println!("{:#X?}", identification);
+    if let Some(driver_init_fn) = find_driver(class.clone(), &identification.id) {
+        println!("init_pci_device: Found driver for device {:#X?}", class);
+        driver_init_fn(dev);
+    } else {
+        println!("init_pci_device: No driver found for device {:#X?}", class);
+    }
 
-    let is_ethernet = matches!(class, PciClass::NetworkController(NetworkController::EthernetController));
-    println!(
-        "Device configured: is_ethernet={}, config space={:#X?}",
-        is_ethernet,
-        conf_space
-    );
+    printlnc!((51, 153, 10), "Device configured");
 }
 
 fn scan_pcie_bus(allocations: &[&'static BaseAddressAllocation]) -> Vec<PcieDevice> {
@@ -164,4 +182,45 @@ fn map_config_space(phys_addr: PhysAddr) -> VirtAddr {
     page_entry.set_pat(LiminePat::UC);
 
     pci_dev_virt
+}
+
+fn find_driver(dev_class: PciClass, identification: &PciDeviceNumericId) -> Option<fn(PcieDevice)> {
+    let drivers = lock_w_info!(LEGACY_PCI_DRIVERS);
+    for ((driver_dev_class, driver_dev_id), driver) in drivers.iter() {
+        if dev_class != *driver_dev_class {
+            continue;
+        }
+        let matches_vendor = match identification.vendor_id {
+            Some(vendor_id) => match driver_dev_id.vendor_id {
+                Some(driver_vendor_id) => vendor_id == driver_vendor_id,
+                None => true,
+            },
+            None => true,
+        };
+        let matches_device = match identification.device_id {
+            Some(device_id) => match driver_dev_id.device_id {
+                Some(driver_device_id) => device_id == driver_device_id,
+                None => true,
+            },
+            None => true,
+        };
+        let matches_subvendor = match identification.subvendor_id {
+            Some(subvendor_id) => match driver_dev_id.subvendor_id {
+                Some(driver_subvendor_id) => subvendor_id == driver_subvendor_id,
+                None => true,
+            },
+            None => true,
+        };
+        let matches_subdevice = match identification.subdevice_id {
+            Some(subdevice_id) => match driver_dev_id.subdevice_id {
+                Some(driver_subdevice_id) => subdevice_id == driver_subdevice_id,
+                None => true,
+            },
+            None => true,
+        };
+        if matches_vendor && matches_device && matches_subvendor && matches_subdevice {
+            return Some(*driver);
+        }
+    }
+    None
 }

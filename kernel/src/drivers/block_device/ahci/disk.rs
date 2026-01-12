@@ -17,12 +17,14 @@ use reg_map::RegMap;
 
 use crate::{
     drivers::{
-        ahci::fis::{D2HRegisterFis, IdentifyStructure, PioSetupFis},
-        disk::BlockDevice,
+        block_device::{
+            ahci::fis::{D2HRegisterFis, IdentifyStructure, PioSetupFis},
+            disk::BlockDevice,
+        },
         pci::{self},
     },
     memory::{PAGE_TREE_ALLOCATOR, paging::LiminePat, physical_allocator},
-    task_runner,
+    task_runner::{self, block_task},
 };
 
 use super::fis::{FisType, H2DRegFisPmport, H2DRegisterFis};
@@ -43,8 +45,16 @@ pub struct AhciController {
     is_64_bit: bool,
 }
 
+pub(super) fn ahci_driver_init(device: pci::LegacyPciDevice) {
+    let controller = AhciController::new(device);
+    let ports = controller.init();
+    for port in ports {
+        block_task(Box::pin(crate::vfs::add_disk(Box::new(port))));
+    }
+}
+
 impl AhciController {
-    pub fn new(device: pci::LegacyPciDevice) -> Self {
+    fn new(device: pci::LegacyPciDevice) -> Self {
         let abar = device
             .bars
             .iter()
@@ -65,7 +75,7 @@ impl AhciController {
     }
 
     //https://forum.osdev.org/viewtopic.php?t=40969
-    pub fn init(self) -> Vec<VirtualPort> {
+    fn init(self) -> Vec<VirtualPort> {
         println!("AhciController::init: staring ahci init");
         println!("AhciController::init: abar at {:p}", self.ghc.as_ptr());
         println!("AhciController::init: enabling bus mastering");
@@ -196,7 +206,7 @@ impl AhciController {
 }
 
 #[derive(Debug)]
-pub struct VirtualPort {
+struct VirtualPort {
     // commands_issued_addr_lock: Arc<(AtomicU32, NoIntSpinlock<()>)>,
     commands_issued: AtomicU32,
     is_64_bit: bool,

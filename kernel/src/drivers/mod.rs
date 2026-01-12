@@ -1,5 +1,10 @@
-pub mod ahci;
-pub mod disk;
+pub mod block_device;
 pub mod gpt;
-pub mod rfs;
+pub mod filesystem;
 pub mod pci;
+pub mod net_device;
+
+pub fn init_drivers() {
+    block_device::init_drivers();
+    net_device::init_drivers();
+}

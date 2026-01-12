@@ -1,7 +1,7 @@
 use core::fmt::Debug;
 use std::{boxed::Box, error::ErrorCode, mem_utils::PhysAddr, sync::arc::Arc};
 
-use crate::drivers::disk::{DirEntry, MountedPartition};
+use crate::drivers::block_device::disk::{DirEntry, MountedPartition};
 
 use super::{Inode, InodeIndex, InodeType};
 

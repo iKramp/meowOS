@@ -3,9 +3,10 @@ use uuid::Uuid;
 use super::{
     DirEntry, Inode, InodeBitmask, InodeSize, SuperBlock,
     btree::{BtreeNode, Key},
+    MountedPartition,
+    BLOCK_SIZE_SECTORS
 };
 use crate::{
-    drivers::{disk::MountedPartition, rfs::BLOCK_SIZE_SECTORS},
     memory::{PAGE_TREE_ALLOCATOR, paging::LiminePat, physical_allocator},
     vfs::{self, FileSystem, FileSystemFactory, InodeIndex, InodeType, ROOT_INODE_INDEX},
 };
@@ -1077,7 +1078,7 @@ impl FileSystem for Rfs {
         Ok(())
     }
 
-    async fn read_dir(&self, inode_index: InodeIndex) -> Result<Box<[crate::drivers::disk::DirEntry]>, ErrorCode> {
+    async fn read_dir(&self, inode_index: InodeIndex) -> Result<Box<[crate::drivers::block_device::disk::DirEntry]>, ErrorCode> {
         let inode_lock = self.inode_lock.lock().await;
 
         let root = unsafe { self.get_node(self.root_block).await.1.virt };
@@ -1115,7 +1116,7 @@ impl FileSystem for Rfs {
             };
             let name = name.trim_matches('\0');
             let name = Box::from(name);
-            entries.push(crate::drivers::disk::DirEntry {
+            entries.push(crate::drivers::block_device::disk::DirEntry {
                 inode: dir_entry.inode as u64,
                 name,
             });

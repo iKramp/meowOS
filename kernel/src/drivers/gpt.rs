@@ -18,7 +18,7 @@ use crate::{
     vfs::VFS,
 };
 
-use super::disk::{BlockDevice, Partition, PartitionSchemeDriver};
+use super::block_device::disk::{BlockDevice, Partition, PartitionSchemeDriver};
 
 pub struct GPTDriver {}
 

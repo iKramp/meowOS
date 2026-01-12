@@ -1,18 +1,23 @@
 use core::fmt::Debug;
 use std::{error::ErrorCode, println};
 
-use crate::{drivers::pci::express::express_device::PcieDevice, interrupts::{InterruptProcessorState, handlers::apic_eoi}};
+use crate::interrupts::{InterruptProcessorState, handlers::apic_eoi};
 
 mod bar;
+mod capabilities;
 mod device_class;
+mod device_codes;
 mod express;
 mod legacy;
-mod capabilities;
 mod port_access;
-mod device_codes;
 
 pub use bar::*;
+pub use express::express_device::PcieDevice;
 pub use legacy::legacy_device::LegacyPciDevice;
+pub(super) use legacy::add_legacy_pci_driver;
+pub(super) use express::add_pcie_driver;
+pub(super) use device_class::*;
+pub(super) use device_codes::PciDeviceNumericId;
 
 pub(super) const PCI_CAP_POWER_MANAGEMENT_ID: u8 = 0x1;
 pub(super) const PCI_CAP_PCIE_ID: u8 = 0x10;
@@ -27,7 +32,7 @@ struct PciDevice {
 
 enum FullPciDevType<'a> {
     Legacy(&'a LegacyPciDevice),
-    Express(&'a PcieDevice)
+    Express(&'a PcieDevice),
 }
 
 impl PciDevice {
@@ -43,7 +48,6 @@ impl PciDevice {
         })
     }
 }
-
 
 pub fn enumerate_devices() {
     legacy::configure_devices();

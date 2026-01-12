@@ -5,7 +5,7 @@ use std::{
 use uuid::Uuid;
 
 use crate::drivers::{
-    disk::{BlockDevice, DirEntry, MountedPartition, PartitionSchemeDriver},
+    block_device::disk::{BlockDevice, DirEntry, MountedPartition, PartitionSchemeDriver},
     gpt::GPTDriver,
 };
 

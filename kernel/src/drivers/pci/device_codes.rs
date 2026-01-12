@@ -3,46 +3,41 @@ use std::{error::ErrorCode, format, print, println};
 
 static DEVICE_CODES: &str = include_str!("../../../../assets/pci.ids");
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::drivers) struct PciDeviceNumericId {
+    pub vendor_id: Option<u16>,
+    pub device_id: Option<u16>,
+    pub subvendor_id: Option<u16>,
+    pub subdevice_id: Option<u16>,
+}
+
 #[derive(Debug)]
 pub(super) struct DeviceIdentification {
-    pub vendor_id: u16,
-    pub device_id: u16,
-    pub subvendor_id: u16,
-    pub subdevice_id: u16,
+    pub id: PciDeviceNumericId,
     pub vendor_name: &'static str,
     pub device_name: &'static str,
     pub subsystem_name: &'static str,
 }
 
-impl DeviceIdentification {
-    pub fn new(vendor_id: u16, device_id: u16, subvendor_id: u16, subdevice_id: u16) -> Self {
-        Self {
-            vendor_id,
-            device_id,
-            subvendor_id,
-            subdevice_id,
-            vendor_name: "",
-            device_name: "",
-            subsystem_name: "",
-        }
-    }
-}
+pub fn get_device_identification(id_struct: PciDeviceNumericId) -> DeviceIdentification {
+    let mut identification = DeviceIdentification {
+        id: id_struct,
+        vendor_name: "Unknown Vendor",
+        device_name: "Unknown Device",
+        subsystem_name: "Unknown Subsystem",
+    };
 
-pub fn get_device_identification(id_struct: &mut DeviceIdentification) {
-    let _res = get_device_identification_inner(id_struct); //it's fine if we get Err, not all
+    let _res = get_device_identification_inner(&mut identification); //it's fine if we get Err, not all
     //devices have subsystems
     print!("@BOTH");
+    identification
 }
 
 fn get_device_identification_inner(id_struct: &mut DeviceIdentification) -> Result<(), ErrorCode> {
-    let vendor_str = format!("{:x}", id_struct.vendor_id);
-    let device_str = format!("{:x}", id_struct.device_id);
-    let subsystem_str = format!("{:x} {:x}", id_struct.subvendor_id, id_struct.subdevice_id);
+    let vendor_str = format!("{:x}", id_struct.id.vendor_id.ok_or(ErrorCode::NoEntry)?);
 
     print!("@DBG");
     println!("vendor str: {}", vendor_str);
-    println!("device str: {}", device_str);
-    println!("subsystem str: {}", subsystem_str);
 
     let file_lines = DEVICE_CODES.split('\n').filter(|line| !line.starts_with("#"));
     let lines_total = file_lines.clone().count();
@@ -63,6 +58,9 @@ fn get_device_identification_inner(id_struct: &mut DeviceIdentification) -> Resu
         .unwrap_or(lines_total - vendor_line)
         .add(vendor_line + 1);
     println!("get_device_identification: next vendor line {:#X}", next_vendor_line);
+
+    let device_str = format!("{:x}", id_struct.id.device_id.ok_or(ErrorCode::NoEntry)?);
+    println!("device str: {}", device_str);
 
     let device_line = file_lines
         .clone()
@@ -85,6 +83,12 @@ fn get_device_identification_inner(id_struct: &mut DeviceIdentification) -> Resu
         .add(device_line + 1);
     println!("get_device_identification: next device line {:#X}", next_device_line);
 
+    let subsystem_str = format!(
+        "{:x} {:x}",
+        id_struct.id.subvendor_id.ok_or(ErrorCode::NoEntry)?,
+        id_struct.id.subdevice_id.ok_or(ErrorCode::NoEntry)?
+    );
+    println!("subsystem str: {}", subsystem_str);
     let subsystem_line = file_lines
         .clone()
         .skip(device_line + 1)

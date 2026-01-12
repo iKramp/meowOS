@@ -8,7 +8,7 @@ use std::{
 
 use uuid::Uuid;
 
-use crate::drivers::disk::DirEntry;
+use crate::drivers::block_device::disk::DirEntry;
 
 use super::{
     filesystem_trait::{FileSystem, FileSystemFactory}, DeviceId, InodeIndex, InodeType, ROOT_INODE_INDEX
@@ -39,7 +39,7 @@ impl DtmpfsFactory {
 
 #[async_trait::async_trait]
 impl FileSystemFactory for DtmpfsFactory {
-    async fn mount(&self, _partition: crate::drivers::disk::MountedPartition) -> Arc<dyn FileSystem + Send> {
+    async fn mount(&self, _partition: crate::drivers::block_device::disk::MountedPartition) -> Arc<dyn FileSystem + Send> {
         let mut inodes = BTreeMap::new();
         inodes.insert(ROOT_INODE_INDEX, DtmpfsNode { children: Vec::new() });
         let fs = Dtmpfs {
@@ -66,7 +66,7 @@ impl FileSystem for Dtmpfs {
         let mut entries = Vec::new();
         if let Some(node) = inner.inodes.get(&inode) {
             for (name, child_inode) in &node.children {
-                entries.push(crate::drivers::disk::DirEntry {
+                entries.push(crate::drivers::block_device::disk::DirEntry {
                     name: name.clone().into_boxed_str(),
                     inode: *child_inode,
                 });

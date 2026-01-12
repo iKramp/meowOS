@@ -7,12 +7,12 @@ use crate::drivers::pci::{
     express::{LegacyConfigSpaceT0, LegacyConfigSpaceT0Ptr, configuration_space},
 };
 
-pub(in crate::drivers::pci) struct PcieDevice {
+pub struct PcieDevice {
     device: PciDevice,
     pub(in crate::drivers::pci) config_space_addr: configuration_space::LegacyConfigSpaceT0Ptr<'static>,
     pub bars: Vec<MemoryBar>,
-    pub capabilities: Vec<Capability>,
-    pub extended_capabilities: Vec<ExtendedCapability>,
+    pub(in crate::drivers::pci) capabilities: Vec<Capability>,
+    pub(in crate::drivers::pci) extended_capabilities: Vec<ExtendedCapability>,
 }
 
 impl PcieDevice {

@@ -6,7 +6,7 @@ mod btree;
 mod rfs;
 pub use rfs::*;
 
-use super::disk::Partition;
+use crate::drivers::block_device::disk::{Partition, MountedPartition};
 
 const BLOCK_SIZE_SECTORS: usize = 8;
 const VIRTUAL_ONLY: bool = true;

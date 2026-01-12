@@ -3,10 +3,9 @@ use std::{lock_w_info, print};
 use std::{sync::no_int_spinlock::NoIntSpinlock, vec::Vec};
 use std::boxed::Box;
 
-use crate::drivers::disk::DirEntry;
 use crate::vfs::{DeviceId, InodeType};
 
-use super::VfsAdapterTrait;
+use super::{VfsAdapterTrait, DirEntry};
 
 
 

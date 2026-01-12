@@ -5,8 +5,8 @@ use std::{
 use uuid::Uuid;
 
 use crate::drivers::{
-    disk::{BlockDevice, Partition},
-    rfs::RfsFactory,
+    block_device::disk::{BlockDevice, Partition},
+    filesystem::rfs::RfsFactory,
 };
 
 mod adapters;

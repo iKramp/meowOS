@@ -1,15 +1,33 @@
-use std::{boxed::Box, print, println, printlnc, vec::Vec};
+use std::{lock_w_info, print, println, printlnc, sync::no_int_spinlock::NoIntSpinlock, vec::Vec};
 
-use crate::{drivers::{ahci::disk::AhciController, pci::{FullPciDevType, LegacyPciDevice, PCI_CAP_PCIE_ID, PciDevice, capabilities, device_class::{self, MassStorageController}, device_codes::DeviceIdentification, port_access}}, task_runner::block_task};
+use crate::{
+    drivers::pci::{
+        FullPciDevType, LegacyPciDevice, PCI_CAP_PCIE_ID, PciDevice, capabilities, device_class::PciClass,
+        device_codes::PciDeviceNumericId, port_access,
+    },
+};
 
-pub(super) mod legacy_device;
 pub(super) mod config_space;
+pub(super) mod legacy_device;
+
+type LegacyPciDevDriverInitFn = ((PciClass, PciDeviceNumericId), fn(LegacyPciDevice));
+
+static LEGACY_PCI_DRIVERS: NoIntSpinlock<Vec<LegacyPciDevDriverInitFn>> =
+    NoIntSpinlock::new(Vec::new());
+
+pub(in crate::drivers) fn add_legacy_pci_driver(dev_type: (PciClass, PciDeviceNumericId), init_fn: fn(LegacyPciDevice)) {
+    let mut drivers = lock_w_info!(LEGACY_PCI_DRIVERS);
+    drivers.push((dev_type, init_fn));
+}
 
 pub fn configure_devices() {
     let devices = scan_pci_bus();
 
     for device in devices {
-        println!("pci::enumerate_devices: Found device at {:02x}:{:02x}.{:x}", device.bus, device.device, device.function);
+        println!(
+            "pci::enumerate_devices: Found device at {:02x}:{:02x}.{:x}",
+            device.bus, device.device, device.function
+        );
 
         let device = LegacyPciDevice::new(device);
         if device.capabilities.iter().any(|cap| cap.id == PCI_CAP_PCIE_ID) {
@@ -22,7 +40,6 @@ pub fn configure_devices() {
             init_pci_device(device);
         }
     }
-
 }
 
 fn init_pci_device(dev: LegacyPciDevice) {
@@ -46,29 +63,25 @@ fn init_pci_device(dev: LegacyPciDevice) {
         }
     }
 
-    let mut identification = DeviceIdentification::new(
-        config_space::get_vendor_id(&dev.device),
-        config_space::get_device_id(&dev.device),
-        config_space::get_subsystem_vendor_id(&dev.device),
-        config_space::get_subsystem_id(&dev.device),
-    );
+    let identification = PciDeviceNumericId {
+        vendor_id: Some(config_space::get_vendor_id(&dev.device)),
+        device_id: Some(config_space::get_device_id(&dev.device)),
+        subvendor_id: Some(config_space::get_subsystem_vendor_id(&dev.device)),
+        subdevice_id: Some(config_space::get_subsystem_id(&dev.device)),
+    };
 
-    crate::drivers::pci::device_codes::get_device_identification(&mut identification);
+    let identification = crate::drivers::pci::device_codes::get_device_identification(identification);
     println!("@DBG init_pci_device: Device identification: {:#X?}", identification);
     println!("@VGA init_pci_device: Vendor name: {}", identification.vendor_name);
     println!("@VGA init_pci_device: Device name: {}", identification.device_name);
     println!("@VGA init_pci_device: Subsys name: {}", identification.subsystem_name);
     print!("@BOTH");
 
-    if matches!(
-        class,
-        device_class::PciClass::MassStorageController(MassStorageController::SerialATAController)
-    ) {
-        let ahci_disk = AhciController::new(dev);
-        let ports = ahci_disk.init();
-        for port in ports {
-            block_task(Box::pin(crate::vfs::add_disk(Box::new(port))));
-        }
+    if let Some(driver_init_fn) = find_driver(class.clone(), &identification.id) {
+        println!("init_pci_device: Found driver for device {:#X?}", class);
+        driver_init_fn(dev);
+    } else {
+        println!("init_pci_device: No driver found for device {:#X?}", class);
     }
 
     printlnc!((51, 153, 10), "Device configured");
@@ -97,3 +110,43 @@ fn scan_pci_bus() -> Vec<PciDevice> {
     devices
 }
 
+fn find_driver(dev_class: PciClass, identification: &PciDeviceNumericId) -> Option<fn(LegacyPciDevice)> {
+    let drivers = lock_w_info!(LEGACY_PCI_DRIVERS);
+    for ((driver_dev_class, driver_dev_id), driver) in drivers.iter() {
+        if dev_class != *driver_dev_class {
+            continue;
+        }
+        let matches_vendor = match identification.vendor_id {
+            Some(vendor_id) => match driver_dev_id.vendor_id {
+                Some(driver_vendor_id) => vendor_id == driver_vendor_id,
+                None => true,
+            },
+            None => true,
+        };
+        let matches_device = match identification.device_id {
+            Some(device_id) => match driver_dev_id.device_id {
+                Some(driver_device_id) => device_id == driver_device_id,
+                None => true,
+            },
+            None => true,
+        };
+        let matches_subvendor = match identification.subvendor_id {
+            Some(subvendor_id) => match driver_dev_id.subvendor_id {
+                Some(driver_subvendor_id) => subvendor_id == driver_subvendor_id,
+                None => true,
+            },
+            None => true,
+        };
+        let matches_subdevice = match identification.subdevice_id {
+            Some(subdevice_id) => match driver_dev_id.subdevice_id {
+                Some(driver_subdevice_id) => subdevice_id == driver_subdevice_id,
+                None => true,
+            },
+            None => true,
+        };
+        if matches_vendor && matches_device && matches_subvendor && matches_subdevice {
+            return Some(*driver);
+        }
+    }
+    None
+}

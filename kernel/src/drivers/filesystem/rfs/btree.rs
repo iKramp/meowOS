@@ -1,13 +1,13 @@
-use std::{boxed::Box, mem_utils::{PhysAddr, VirtAddr}};
+use std::{
+    boxed::Box,
+    mem_utils::{PhysAddr, VirtAddr},
+};
 
-use super::{AllocatedBlock, Rfs, BLOCK_SIZE_SECTORS};
-use crate::{
-    drivers::disk::MountedPartition,
-    memory::{
-        PAGE_TREE_ALLOCATOR,
-        paging::{self, PageTree},
-        physical_allocator,
-    },
+use super::{AllocatedBlock, BLOCK_SIZE_SECTORS, MountedPartition, Rfs};
+use crate::memory::{
+    PAGE_TREE_ALLOCATOR,
+    paging,
+    physical_allocator,
 };
 
 ///Takes up exactly 1 block or physical frame
@@ -146,7 +146,8 @@ impl BtreeNode {
             block,
             key,
             fs_data,
-        ).await;
+        )
+        .await;
         match rebalance_result {
             RebalanceResult::None => None,
             RebalanceResult::Merge(_) => {
@@ -456,7 +457,14 @@ impl BtreeNode {
         for i in (0..341).rev() {
             if BtreeNode::get_key(node, i).index != 0 {
                 let child_index = i + 1;
-                return Box::pin(BtreeNode::take_biggest_from_child(node, block, child_index, parent_block, fs_data)).await;
+                return Box::pin(BtreeNode::take_biggest_from_child(
+                    node,
+                    block,
+                    child_index,
+                    parent_block,
+                    fs_data,
+                ))
+                .await;
             }
         }
         unreachable!("This should never happen, as the node would have to have 0 children");
@@ -510,7 +518,11 @@ impl BtreeNode {
 
     async fn merge(node: VirtAddr, block: u32, parent_block: u32, fs_data: &Rfs) -> MergeDirection {
         let parent = unsafe { fs_data.get_node(parent_block).await.1.virt };
-        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }.children.iter().position(|&x| x == block).expect("block must be a child of parent");
+        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }
+            .children
+            .iter()
+            .position(|&x| x == block)
+            .expect("block must be a child of parent");
         let (left_node, right_node, separator, direction, right_block, left_block);
         if self_index == 0 {
             left_block = block;
@@ -745,7 +757,11 @@ impl BtreeNode {
         while right_ptr >= 0 {
             if key_inserted {
                 BtreeNode::set_key(new_virt, right_ptr as usize, BtreeNode::get_key(node, left_ptr as usize));
-                BtreeNode::set_child(new_virt, right_ptr as usize + 1, BtreeNode::get_child(node, left_ptr as usize + 1));
+                BtreeNode::set_child(
+                    new_virt,
+                    right_ptr as usize + 1,
+                    BtreeNode::get_child(node, left_ptr as usize + 1),
+                );
                 BtreeNode::set_key(node, left_ptr as usize, Key::empty());
                 BtreeNode::set_child(node, left_ptr as usize + 1, 0);
                 right_ptr -= 1;
@@ -755,7 +771,11 @@ impl BtreeNode {
             let left_key = BtreeNode::get_key(node, left_ptr as usize);
             if left_key.index > key.index {
                 BtreeNode::set_key(new_virt, right_ptr as usize, left_key);
-                BtreeNode::set_child(new_virt, right_ptr as usize + 1, BtreeNode::get_child(node, left_ptr as usize + 1));
+                BtreeNode::set_child(
+                    new_virt,
+                    right_ptr as usize + 1,
+                    BtreeNode::get_child(node, left_ptr as usize + 1),
+                );
                 BtreeNode::set_key(node, left_ptr as usize, Key::empty());
                 BtreeNode::set_child(node, left_ptr as usize + 1, 0);
                 right_ptr -= 1;
@@ -795,7 +815,11 @@ impl BtreeNode {
 
     async fn rotate_left_take(node: VirtAddr, block: u32, parent_block: u32, fs_data: &Rfs, leaf: bool) -> bool {
         let parent = unsafe { fs_data.get_node(parent_block).await.1.virt };
-        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }.children.iter().position(|&x| x == block).expect("block must be a child of parent");
+        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }
+            .children
+            .iter()
+            .position(|&x| x == block)
+            .expect("block must be a child of parent");
         if self_index == 0 {
             return false;
         }
@@ -835,7 +859,8 @@ impl BtreeNode {
         }
 
         //set parent's key to left sibling's last key
-        unsafe { &mut *(parent.0 as *mut BtreeNode) }.keys[self_index - 1] = BtreeNode::get_key(left_sibling.1.virt, last_key_index);
+        unsafe { &mut *(parent.0 as *mut BtreeNode) }.keys[self_index - 1] =
+            BtreeNode::get_key(left_sibling.1.virt, last_key_index);
 
         //set self first child to left sibling's last child
         if !leaf {
@@ -857,11 +882,19 @@ impl BtreeNode {
 
     async fn rotate_right_take(node: VirtAddr, block: u32, parent_block: u32, fs_data: &Rfs, leaf: bool) -> bool {
         let parent = unsafe { fs_data.get_node(parent_block).await.1.virt };
-        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }.children.iter().position(|&x| x == block).expect("block must be a child of parent");
-        if unsafe { *(*(parent.0 as *const BtreeNode) ).children.get_unchecked(self_index + 1) } == 0 {
+        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }
+            .children
+            .iter()
+            .position(|&x| x == block)
+            .expect("block must be a child of parent");
+        if unsafe { *(*(parent.0 as *const BtreeNode)).children.get_unchecked(self_index + 1) } == 0 {
             return false;
         }
-        let right_sibling = unsafe { fs_data.get_node((*(parent.0 as *const BtreeNode)).children[self_index + 1]).await };
+        let right_sibling = unsafe {
+            fs_data
+                .get_node((*(parent.0 as *const BtreeNode)).children[self_index + 1])
+                .await
+        };
         let right_key = BtreeNode::get_key(parent, self_index);
 
         let sibling_has_elements = BtreeNode::get_key(right_sibling.1.virt, 170).index != 0;
@@ -893,13 +926,21 @@ impl BtreeNode {
         //shift right sibling's elements to the left
         let mut ptr: i32 = 0;
         while ptr < 340 {
-                BtreeNode::set_key(right_sibling.1.virt, ptr as usize, BtreeNode::get_key(right_sibling.1.virt, ptr as usize + 1));
+            BtreeNode::set_key(
+                right_sibling.1.virt,
+                ptr as usize,
+                BtreeNode::get_key(right_sibling.1.virt, ptr as usize + 1),
+            );
             ptr += 1;
         }
         if !leaf {
             let mut ptr: i32 = 0;
             while ptr < 341 {
-                BtreeNode::set_child(right_sibling.1.virt, ptr as usize, BtreeNode::get_child(right_sibling.1.virt, ptr as usize + 1));
+                BtreeNode::set_child(
+                    right_sibling.1.virt,
+                    ptr as usize,
+                    BtreeNode::get_child(right_sibling.1.virt, ptr as usize + 1),
+                );
                 ptr += 1;
             }
         }
@@ -917,7 +958,11 @@ impl BtreeNode {
 
     async fn rotate_left_give(block: u32, parent_block: u32, fs_data: &Rfs, leaf: bool) -> bool {
         let parent = unsafe { fs_data.get_node(parent_block).await.1.virt };
-        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }.children.iter().position(|&x| x == block).expect("block must be a child of parent");
+        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }
+            .children
+            .iter()
+            .position(|&x| x == block)
+            .expect("block must be a child of parent");
         if self_index == 0 {
             return false;
         }
@@ -928,8 +973,12 @@ impl BtreeNode {
 
     async fn rotate_right_give(block: u32, parent_block: u32, fs_data: &Rfs, leaf: bool) -> bool {
         let parent = unsafe { fs_data.get_node(parent_block).await.1.virt };
-        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }.children.iter().position(|&x| x == block).expect("block must be a child of parent");
-        if self_index == 341 || unsafe { *(*(parent.0 as *const BtreeNode) ).children.get_unchecked(self_index + 1) } == 0 {
+        let self_index = unsafe { &*(parent.0 as *const BtreeNode) }
+            .children
+            .iter()
+            .position(|&x| x == block)
+            .expect("block must be a child of parent");
+        if self_index == 341 || unsafe { *(*(parent.0 as *const BtreeNode)).children.get_unchecked(self_index + 1) } == 0 {
             return false;
         }
         let right_sibling_block = unsafe { &*(parent.0 as *const BtreeNode) }.children[self_index + 1];

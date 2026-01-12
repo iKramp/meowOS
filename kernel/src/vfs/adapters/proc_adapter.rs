@@ -1,6 +1,6 @@
-use crate::{drivers::disk::DirEntry, vfs::InodeType};
+use crate::vfs::InodeType;
 
-use super::VfsAdapterTrait;
+use super::{DirEntry, VfsAdapterTrait};
 use std::{boxed::Box, error::ErrorCode};
 
 #[derive(Debug)]
