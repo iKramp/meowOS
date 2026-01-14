@@ -22,7 +22,6 @@ pub(super) fn init_driver() {
 
 fn init_e1000e(dev: pci::PcieDevice) {
     panic!("E1000e driver not implemented yet");
-
 }
 
 struct E1000eDevice {
