@@ -23,7 +23,7 @@ pub(super) struct ExtendedCapability {
 }
 
 bitfield! {
-    #[derive(RegMap, Clone, Copy)]
+    #[derive(RegMap)]
     pub(super) struct ExtendedCapVersionPointer(u16);
     impl Debug;
     pub cap_version, _: 3, 0;

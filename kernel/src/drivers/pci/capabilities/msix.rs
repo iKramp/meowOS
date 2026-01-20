@@ -1,6 +1,6 @@
 use std::{error::ErrorCode, mem_utils::VirtAddr, vec::Vec};
 
-use crate::drivers::pci::{BarTrait, FullPciDevType, MemoryBar, capabilities::CapAddr, legacy, port_access};
+use crate::drivers::pci::{BarTrait, FullPciDevType, MemoryBar, capabilities::CapAddr, legacy, port_access, set_interrupt_handler};
 
 pub(in crate::drivers::pci) const PCI_CAP_MSIX_ID: u8 = 0x11;
 
@@ -16,6 +16,7 @@ pub fn ini_msix_interrupt(dev: FullPciDevType) -> Result<(), ErrorCode> {
     let capabilities;
     let bars: Vec<&MemoryBar>;
     let cap_addr;
+    let device_id;
     match dev {
         FullPciDevType::Legacy(legacy_pci_device) => {
             let command = legacy::config_space::get_command(&legacy_pci_device.device);
@@ -42,7 +43,8 @@ pub fn ini_msix_interrupt(dev: FullPciDevType) -> Result<(), ErrorCode> {
                 legacy_pci_device.device.device,
                 legacy_pci_device.device.function,
                 msix_cap.pointer,
-            ))
+            ));
+            device_id = legacy_pci_device.device;
         }
         FullPciDevType::Express(pcie_device) => {
             let mut command = pcie_device.config_space_addr.command().read();
@@ -56,6 +58,7 @@ pub fn ini_msix_interrupt(dev: FullPciDevType) -> Result<(), ErrorCode> {
                 .ok_or(ErrorCode::NoEntry)?;
             let ptr = pcie_device.config_space_addr.as_ptr() as u64 + msix_cap.pointer as u64;
             cap_addr = CapAddr::Memory(VirtAddr(ptr));
+            device_id = pcie_device.device;
         }
     }
 
@@ -90,6 +93,7 @@ pub fn ini_msix_interrupt(dev: FullPciDevType) -> Result<(), ErrorCode> {
         let msi_data = current_free_irq as u32;
 
         set_table_entry(&table_bar, table_offset, i, msi_addr, msi_data, 0);
+        set_interrupt_handler(current_free_irq, device_id);
     }
 
     Ok(())

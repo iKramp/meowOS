@@ -8,7 +8,7 @@ use crate::drivers::pci::{
 };
 
 pub struct PcieDevice {
-    device: PciDevice,
+    pub(in crate::drivers::pci) device: PciDevice,
     pub(in crate::drivers::pci) config_space_addr: configuration_space::LegacyConfigSpaceT0Ptr<'static>,
     pub bars: Vec<MemoryBar>,
     pub(in crate::drivers::pci) capabilities: Vec<Capability>,
@@ -36,7 +36,8 @@ impl PcieDevice {
                 i += 1;
                 continue;
             };
-            println!("Bar {}: {:#X?}", i, bar);
+            println!("@DBG Bar {}: {:#X?}", i, bar);
+            println!("@BOTH");
             i += if bar.is_64_bit { 2 } else { 1 };
             bars.push(bar);
         }

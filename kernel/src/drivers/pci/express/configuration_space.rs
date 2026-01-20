@@ -113,6 +113,8 @@ pub fn get_bar(dev: &PcieDevice, index: u8) -> Option<MemoryBar> {
 
     let is_64_bit = (curr_bar >> 1) & 0b11 == 0b10;
 
+    println!("@DBG");
+
     let prefetchable = (curr_bar >> 3) & 1 == 1;
     let (mut size, addr) = if is_64_bit {
         println!("bar is 64 bit");
@@ -147,7 +149,9 @@ pub fn get_bar(dev: &PcieDevice, index: u8) -> Option<MemoryBar> {
     println!("Size of bar: {:X}, address of bar: {:X}", size, addr);
     println!("first bar reg: {:X}", curr_bar);
 
-    return Some(MemoryBar::new(index, index as u8 + 0x10, PhysAddr(addr), size, prefetchable, is_64_bit));
+    println!("@BOTH");
+
+    Some(MemoryBar::new(index, index + 0x10, PhysAddr(addr), size, prefetchable, is_64_bit))
 }
 
 bitfield! {

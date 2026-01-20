@@ -8,7 +8,6 @@ use crate::memory::physical_allocator::is_on_ram;
 use super::{mem_utils::*, physical_allocator};
 
 bitfield! {
-    #[derive(Clone, Copy)]
     pub struct PageTableEntry(u64);
     pub present, set_present: 0;
     pub writeable, set_writeable: 1;

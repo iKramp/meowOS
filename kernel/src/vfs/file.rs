@@ -13,7 +13,7 @@ pub struct FileHandle {
 }
 
 bitfield! {
-    #[derive(Clone, Copy, PartialEq, Eq)]
+    #[derive(PartialEq, Eq)]
     pub struct FileFlags(u8);
     impl Debug;
     pub read, set_read: 0;

@@ -1,7 +1,11 @@
+use crate::interrupts::general_interrupt_handler;
 use core::fmt::Debug;
 use std::{error::ErrorCode, println};
 
-use crate::interrupts::{InterruptProcessorState, handlers::apic_eoi};
+use crate::{
+    handler,
+    interrupts::{InterruptProcessorState, handlers::apic_eoi},
+};
 
 mod bar;
 mod capabilities;
@@ -12,17 +16,17 @@ mod legacy;
 mod port_access;
 
 pub use bar::*;
-pub use express::express_device::PcieDevice;
-pub use legacy::legacy_device::LegacyPciDevice;
-pub(super) use legacy::add_legacy_pci_driver;
-pub(super) use express::add_pcie_driver;
 pub(super) use device_class::*;
 pub(super) use device_codes::PciDeviceNumericId;
+pub(super) use express::add_pcie_driver;
+pub use express::express_device::PcieDevice;
+pub(super) use legacy::add_legacy_pci_driver;
+pub use legacy::legacy_device::LegacyPciDevice;
 
 pub(super) const PCI_CAP_POWER_MANAGEMENT_ID: u8 = 0x1;
 pub(super) const PCI_CAP_PCIE_ID: u8 = 0x10;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct PciDevice {
     group: u16,
     bus: u8,
@@ -54,13 +58,28 @@ pub fn enumerate_devices() {
     express::configure_devices();
 }
 
-pub static mut PCI_DEVICE_INTERRUPTS: [(u8, u8, u8); 256] = [(255, 255, 255); 256];
+pub static mut PCI_DEVICE_INTERRUPTS: [PciDevice; 256] = [PciDevice {
+    group: 0,
+    bus: 0,
+    device: 0,
+    function: 0,
+}; 256];
 
 //pci interrupt handler
 pub extern "C" fn pci_interrupt(_proc_data: &mut InterruptProcessorState) {
     println!("PCI interrupt. HOW THE HELL DO I KNOW WHAT DEVICE THIS IS FOR?");
     apic_eoi();
     panic!("PCI interrupt received");
+}
+
+fn set_interrupt_handler(index: u8, device: PciDevice) {
+    let entry = crate::interrupts::idt::Entry::new(handler!(pci_interrupt));
+    unsafe {
+        crate::interrupts::idt::IDT.set(entry, index as usize);
+    }
+    unsafe {
+        PCI_DEVICE_INTERRUPTS[index as usize] = device;
+    }
 }
 
 pub trait PCIDriver: Debug {

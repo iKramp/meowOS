@@ -1,7 +1,7 @@
 use core::sync;
 use std::{error::ErrorCode, mem_utils::VirtAddr, println};
 
-use crate::drivers::pci::{FullPciDevType, capabilities::CapAddr, legacy, port_access};
+use crate::drivers::pci::{FullPciDevType, capabilities::CapAddr, legacy, port_access, set_interrupt_handler};
 
 pub(in crate::drivers::pci) const PCI_CAP_MSI_ID: u8 = 0x5;
 
@@ -14,6 +14,7 @@ pub fn init_msi_interrupt(dev: FullPciDevType) -> Result<(), ErrorCode> {
     //disable INTx# interrupts (pins?)
     let capabilities;
     let cap_addr;
+    let device_id;
     match dev {
         FullPciDevType::Legacy(legacy_pci_device) => {
             let command = legacy::config_space::get_command(&legacy_pci_device.device);
@@ -26,7 +27,8 @@ pub fn init_msi_interrupt(dev: FullPciDevType) -> Result<(), ErrorCode> {
                 legacy_pci_device.device.device,
                 legacy_pci_device.device.function,
                 msi_cap.pointer,
-            ))
+            ));
+            device_id = legacy_pci_device.device;
         }
         FullPciDevType::Express(pcie_device) => {
             let mut command = pcie_device.config_space_addr.command().read();
@@ -36,6 +38,7 @@ pub fn init_msi_interrupt(dev: FullPciDevType) -> Result<(), ErrorCode> {
             let msi_cap = capabilities.iter().find(|cap| cap.id == 5).ok_or(ErrorCode::NoEntry)?;
             let ptr = pcie_device.config_space_addr.as_ptr() as u64 + msi_cap.pointer as u64;
             cap_addr = CapAddr::Memory(VirtAddr(ptr));
+            device_id = pcie_device.device;
         }
     }
 
@@ -65,6 +68,12 @@ pub fn init_msi_interrupt(dev: FullPciDevType) -> Result<(), ErrorCode> {
         if res.is_err() {
             continue;
         }
+
+        for i in current_free_irq..current_free_irq + requested_interrupts {
+            set_interrupt_handler(i, device_id);
+        }
+
+
         set_msi_address(is_64_capable, &cap_addr);
         let data_dword_offset = if is_64_capable { 0xC } else { 0x8 };
         let data_dword = cap_addr.get_dword(data_dword_offset);

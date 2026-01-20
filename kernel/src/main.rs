@@ -39,6 +39,7 @@ mod utils;
 mod vfs;
 mod vga;
 mod printer;
+mod rand;
 use limine::LIMINE_BOOTLOADER_REQUESTS;
 use task_runner::block_task;
 use vfs::ResolvedPath;
@@ -53,6 +54,8 @@ extern "C" fn _start() -> ! {
     unsafe {
         core::arch::asm!("mov {}, rsp", out(reg) stack_pointer);
     }
+
+    rand::init_rand();
 
     vga::init_vga_driver();
     printer::init_printer();

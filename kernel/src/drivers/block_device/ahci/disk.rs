@@ -110,7 +110,7 @@ impl AhciController {
         println!("ports implemented: {:#x}", self_arc.ghc.pi().read());
 
         //enable AHCI
-        self_arc.ghc.ghc().write(self_arc.ghc.ghc().read().SetAE(true));
+        self_arc.ghc.ghc().write(*self_arc.ghc.ghc().read().SetAE(true));
 
         //bios handoff??
         if self_arc.ghc.cap2().read().BOH() {
@@ -122,9 +122,7 @@ impl AhciController {
         self_arc.wait_for_idle_ports(&ports);
 
         //reset HBA
-        // ghc.ghc.SetHR(true);
-        // unsafe { (&raw mut self.abar.ghc).write_volatile(GlobalHBAControl(ghc.ghc.0)) };
-        self_arc.ghc.ghc().write(self_arc.ghc.ghc().read().SetHR(true));
+        self_arc.ghc.ghc().write(*self_arc.ghc.ghc().read().SetHR(true));
         while self_arc.ghc.ghc().read().HR() {
             std::thread::sleep(Duration::from_micros(10));
         }
@@ -132,7 +130,7 @@ impl AhciController {
         self_arc.wait_for_idle_ports(&ports);
 
         //enable AHCI again after reset
-        self_arc.ghc.ghc().write(self_arc.ghc.ghc().read().SetAE(true).SetIE(true));
+        self_arc.ghc.ghc().write(*self_arc.ghc.ghc().read().SetAE(true).SetIE(true));
 
         let staggered_spin_up = self_arc.ghc.cap().read().SSS();
 

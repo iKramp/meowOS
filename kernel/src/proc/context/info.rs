@@ -6,7 +6,6 @@ use crate::proc::MemoryContext;
 pub const MAX_PROC_STACK_SIZE_PAGES: usize = 0x4; // 16KB
 
 bitfield! {
-    #[derive(Copy, Clone)]
     pub struct MemoryRegionFlags(u32);
     impl Debug;
     pub is_writeable, set_is_writeable: 0;
