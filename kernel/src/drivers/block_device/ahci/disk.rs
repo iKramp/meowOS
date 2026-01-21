@@ -142,6 +142,9 @@ impl AhciController {
             }
         }
 
+        self_arc.ghc.is().write(0); //clear all interrupts
+        self_arc.ghc.ghc().write(*self_arc.ghc.ghc().read().SetIE(true)); //enable global interrupts
+
 
         ports.retain(|port| active_ports.contains(&port.index));
         ports
@@ -560,6 +563,10 @@ impl BlockDevice for VirtualPort {
             command_index: read_cmd_index,
         }
         .await;
+        println!("port interrupt status register: {:X?}", self.get_property(0x10));
+        println!("HBA interrupt status register: {:X?}", self.ahci_controller.ghc.is().read());
+        println!("enabled interrupts: {:X?}", self.ahci_controller.ghc.ghc().read().IE());
+        println!("enabled port interrupts: {:X?}", self.get_property(0x14));
 
         self.clean_command(read_cmd_index);
         self.release_command_index(read_cmd_index);
@@ -620,6 +627,10 @@ impl BlockDevice for VirtualPort {
             command_index: write_cmd_index,
         }
         .await;
+
+        //check for interrupt
+        println!("port interrupt status register: {:X?}", self.get_property(0x10));
+        println!("HBA interrupt status register: {:X?}", self.ahci_controller.ghc.is().read());
 
         self.clean_command(write_cmd_index);
         self.release_command_index(write_cmd_index);
