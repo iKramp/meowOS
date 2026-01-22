@@ -1,7 +1,5 @@
-use core::cell::OnceCell;
 use std::{
-    mem_utils::{PhysAddr, VirtAddr},
-    vec::Vec,
+    mem_utils::{PhysAddr, VirtAddr}, sync::once_lock::OnceLock, vec::Vec
 };
 
 use crate::memory::{PAGE_TREE_ALLOCATOR, paging::LiminePat};
@@ -24,7 +22,7 @@ pub struct MemoryBar {
     pub offset_in_conf_space: u8,
     phys_address: PhysAddr,
     prefetchable: bool,
-    address: OnceCell<VirtAddr>,
+    address: OnceLock<VirtAddr>,
     pub size: u64,
     pub is_64_bit: bool,
 }
@@ -67,7 +65,7 @@ impl MemoryBar {
     pub fn new(index: u8, offset_in_conf_space: u8, address: PhysAddr, size: u64, prefetchable: bool, is_64_bit: bool) -> Self {
         Self {
             index,
-            address: OnceCell::new(),
+            address: OnceLock::new(),
             phys_address: address,
             prefetchable,
             size,

@@ -76,7 +76,7 @@ fn sleep_duration(duration: Duration) {
     }
 
     let interrupts_enabled = (rflags & (1 << 9)) != 0;
-    if interrupts_enabled && duration.as_micros() > 20 { //experimental testing :3
+    if interrupts_enabled && duration.as_micros() > 20 {
         set_timeout(duration);
         unsafe { core::arch::asm!("hlt") };
     } else {

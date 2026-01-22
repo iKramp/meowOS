@@ -1,4 +1,4 @@
-use std::{mem_utils::PhysAddr, println, vec::Vec};
+use std::{mem_utils::PhysAddr, print, println, vec::Vec};
 
 use bitfield::bitfield;
 use reg_map::RegMap;
@@ -9,7 +9,6 @@ use crate::{
         capabilities::{Capability, CapabilityPtr, ExtendedCapability, ExtendedCapabilityPtr},
         express::express_device::PcieDevice,
     },
-    memory::{PAGE_TREE_ALLOCATOR, paging::LiminePat, physical_allocator},
 };
 
 #[derive(Debug, RegMap)]
@@ -40,6 +39,9 @@ pub(in crate::drivers::pci) struct LegacyConfigSpaceT0 {
     max_lat: u8,
 }
 
+// Safety: No sync so must be behind a lock when used across threads
+unsafe impl Send for LegacyConfigSpaceT0Ptr<'_> {}
+
 pub fn get_capabilities_list(dev: &PcieDevice) -> Vec<Capability> {
     let mut capabilities = Vec::new();
     let mut pointer = dev.config_space_addr.cap_pointer().read();
@@ -58,19 +60,25 @@ pub fn get_capabilities_list(dev: &PcieDevice) -> Vec<Capability> {
 }
 
 pub fn get_extended_capabilities_list(dev: &PcieDevice) -> Vec<ExtendedCapability> {
+    print!("@DBG");
     let pointer = dev.config_space_addr.as_ptr() as u64 + 0x100;
     let mut ext_capabilities = Vec::new();
     let mut cap = unsafe { ExtendedCapabilityPtr::from_ptr(pointer as *mut ExtendedCapability) };
+    println!("initial pointer is {:p}", cap.as_ptr());
     if cap.id().read() == 0 {
         return ext_capabilities;
     }
     loop {
+        println!("reading pointer {:p}", cap.as_ptr());
         let cap_read = ExtendedCapability {
             id: cap.id().read(),
             version_and_pointer: cap.version_and_pointer().read(),
         };
+        println!("{:?}", cap_read);
         ext_capabilities.push(cap_read);
         if cap_read.version_and_pointer.next_offset() == 0 {
+            println!("no next cap");
+            print!("@BOTH");
             return ext_capabilities;
         } else {
             cap = unsafe {

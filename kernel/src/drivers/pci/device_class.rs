@@ -1,7 +1,7 @@
 #![allow(clippy::enum_variant_names)]
 #![allow(clippy::needless_range_loop)]
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub enum PciClass {
     Unclassified(Unclassified),
     MassStorageController(MassStorageController),
@@ -188,13 +188,13 @@ impl PciClass {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub enum Unclassified {
     NonVgaCompatibleDevice,
     VgaCompatibleDevice,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub enum MassStorageController {
     SCSIController,
     IDEController,
@@ -208,7 +208,7 @@ pub enum MassStorageController {
     Other,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub enum NetworkController {
     EthernetController,
     TokenRingController,
@@ -222,7 +222,7 @@ pub enum NetworkController {
     Other,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub enum DisplayController {
     VGACompatibleController,
     XGAController,
@@ -230,7 +230,7 @@ pub enum DisplayController {
     Other,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub enum MultimediaController {
     MultimediaVideoController,
     MultimediaAudioController,
@@ -239,14 +239,14 @@ pub enum MultimediaController {
     Other,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub enum MemoryController {
     RAMController,
     FlashController,
     Other,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub enum BridgeDevice {
     HostBridge,
     ISAbridge,
@@ -262,7 +262,7 @@ pub enum BridgeDevice {
     Other,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub enum SimpleCommunicationController {
     SerialController,
     ParallelController,
@@ -273,7 +273,7 @@ pub enum SimpleCommunicationController {
     Other,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub enum BaseSystemPeripheral {
     Pic,
     DMAController,
@@ -285,7 +285,7 @@ pub enum BaseSystemPeripheral {
     Other,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub enum InputDeviceController {
     KeyboardController,
     DigitizerPen,
@@ -295,7 +295,7 @@ pub enum InputDeviceController {
     Other,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub enum Processor {
     I386,
     I486,
@@ -307,7 +307,7 @@ pub enum Processor {
     Other,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub enum SerialBusController {
     FireWireController,
     ACCESSBusController,
@@ -320,7 +320,7 @@ pub enum SerialBusController {
     Other,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub enum WirelessController {
     IRController,
     ConsumerIRController,
@@ -331,7 +331,7 @@ pub enum WirelessController {
     Other,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub enum SatelliteCommunicationController {
     TVController,
     AudioController,
@@ -339,14 +339,14 @@ pub enum SatelliteCommunicationController {
     DataController,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub enum EncryptionController {
     NetworkAndComputingEncryptionDevice,
     EntertainmentEncryptionDevice,
     Other,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub enum SignalProcessingController {
     DPIOmodule,
     PerformanceCounters,

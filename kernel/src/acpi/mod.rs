@@ -67,7 +67,7 @@ pub fn read_tables() {
             );
             let header = std::mem_utils::get_at_virtual_addr::<sdt::AcpiSdtHeader>(table_virt);
             let signature = std::str::from_utf8(&header.signature).expect("signatures are ascii, error in mem read");
-            println!("Found ACPI table: {} at physical address {}", signature, table.0);
+            println!("Found ACPI table: {} at physical address {:X}", signature, table.0);
             ACPI_TABLE_MAP.insert(signature, table_virt);
         }
     }

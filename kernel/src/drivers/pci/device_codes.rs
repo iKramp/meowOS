@@ -3,12 +3,34 @@ use std::{error::ErrorCode, format, print, println};
 
 static DEVICE_CODES: &str = include_str!("../../../../assets/pci.ids");
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq, PartialOrd, Ord)]
 pub(in crate::drivers) struct PciDeviceNumericId {
     pub vendor_id: Option<u16>,
     pub device_id: Option<u16>,
     pub subvendor_id: Option<u16>,
     pub subdevice_id: Option<u16>,
+}
+
+impl PartialEq for PciDeviceNumericId {
+    fn eq(&self, other: &Self) -> bool {
+        let vnd_eq = match (self.vendor_id, other.vendor_id) {
+            (Some(a), Some(b)) => a == b,
+            _ => true,
+        };
+        let dev_eq = match (self.device_id, other.device_id) {
+            (Some(a), Some(b)) => a == b,
+            _ => true,
+        };
+        let subvnd_eq = match (self.subvendor_id, other.subvendor_id) {
+            (Some(a), Some(b)) => a == b,
+            _ => true,
+        };
+        let subdev_eq = match (self.subdevice_id, other.subdevice_id) {
+            (Some(a), Some(b)) => a == b,
+            _ => true,
+        };
+        vnd_eq && dev_eq && subvnd_eq && subdev_eq
+    }
 }
 
 #[derive(Debug)]

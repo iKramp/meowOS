@@ -21,7 +21,7 @@ use crate::{
             ahci::fis::{D2HRegisterFis, IdentifyStructure, PioSetupFis},
             disk::BlockDevice,
         },
-        pci::{self},
+        pci::{self, LegacyPciDriver},
     },
     memory::{PAGE_TREE_ALLOCATOR, paging::LiminePat, physical_allocator},
     task_runner::{self, block_task},
@@ -36,25 +36,30 @@ const WRITE_DMA: u8 = 0x35;
 static OPERATIONS: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Debug, Clone)]
-pub struct AhciDriver {}
+pub struct AhciDriver;
+
+impl LegacyPciDriver for AhciDriver {
+    fn init(&mut self, dev: &pci::LegacyPciDevice) {
+        dev.enable_bus_mastering();
+        let controller = AhciController::new(dev);
+        let ports = controller.init();
+        for port in ports {
+            block_task(Box::pin(crate::vfs::add_disk(Box::new(port))));
+        }
+    }
+    fn deinit(&mut self, _dev: &pci::LegacyPciDevice) {
+        todo!("deinit for ahci not implemented yet")
+    }
+}
 
 #[derive(Debug)]
 pub struct AhciController {
-    pub device: pci::LegacyPciDevice,
     pub ghc: GenericHostControlPtr<'static>,
     is_64_bit: bool,
 }
 
-pub(super) fn ahci_driver_init(device: pci::LegacyPciDevice) {
-    let controller = AhciController::new(device);
-    let ports = controller.init();
-    for port in ports {
-        block_task(Box::pin(crate::vfs::add_disk(Box::new(port))));
-    }
-}
-
 impl AhciController {
-    fn new(device: pci::LegacyPciDevice) -> Self {
+    fn new(device: &pci::LegacyPciDevice) -> Self {
         let abar = device
             .bars
             .iter()
@@ -68,7 +73,6 @@ impl AhciController {
         let is_64_bit = ghc.cap().read().S64A();
 
         Self {
-            device,
             ghc,
             is_64_bit,
         }
@@ -79,7 +83,6 @@ impl AhciController {
         println!("AhciController::init: staring ahci init");
         println!("AhciController::init: abar at {:p}", self.ghc.as_ptr());
         println!("AhciController::init: enabling bus mastering");
-        self.device.enable_bus_mastering();
         let ghc_dbg = unsafe { self.ghc.as_ptr().read_volatile() };
         println!("@DBG AhciController::init: ghc before init: {:#x?}", ghc_dbg);
         print!("@BOTH");
@@ -110,7 +113,7 @@ impl AhciController {
         println!("ports implemented: {:#x}", self_arc.ghc.pi().read());
 
         //enable AHCI
-        self_arc.ghc.ghc().write(*self_arc.ghc.ghc().read().SetAE(true));
+        self_arc.ghc.ghc().write(*self_arc.ghc.ghc().read().SetAE(true).SetIE(false));
 
         //bios handoff??
         if self_arc.ghc.cap2().read().BOH() {
@@ -127,10 +130,10 @@ impl AhciController {
             std::thread::sleep(Duration::from_micros(10));
         }
 
-        self_arc.wait_for_idle_ports(&ports);
-
         //enable AHCI again after reset
-        self_arc.ghc.ghc().write(*self_arc.ghc.ghc().read().SetAE(true).SetIE(true));
+        self_arc.ghc.ghc().write(*self_arc.ghc.ghc().read().SetAE(true).SetIE(false));
+
+        self_arc.wait_for_idle_ports(&ports);
 
         let staggered_spin_up = self_arc.ghc.cap().read().SSS();
 
@@ -563,10 +566,6 @@ impl BlockDevice for VirtualPort {
             command_index: read_cmd_index,
         }
         .await;
-        println!("port interrupt status register: {:X?}", self.get_property(0x10));
-        println!("HBA interrupt status register: {:X?}", self.ahci_controller.ghc.is().read());
-        println!("enabled interrupts: {:X?}", self.ahci_controller.ghc.ghc().read().IE());
-        println!("enabled port interrupts: {:X?}", self.get_property(0x14));
 
         self.clean_command(read_cmd_index);
         self.release_command_index(read_cmd_index);
@@ -627,10 +626,6 @@ impl BlockDevice for VirtualPort {
             command_index: write_cmd_index,
         }
         .await;
-
-        //check for interrupt
-        println!("port interrupt status register: {:X?}", self.get_property(0x10));
-        println!("HBA interrupt status register: {:X?}", self.ahci_controller.ghc.is().read());
 
         self.clean_command(write_cmd_index);
         self.release_command_index(write_cmd_index);

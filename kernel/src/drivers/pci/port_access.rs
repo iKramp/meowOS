@@ -1,10 +1,10 @@
-use crate::{drivers::pci::PciDevice, utils::{dword_from_port, dword_to_port}};
+use crate::{drivers::pci::PciDeviceLocation, utils::{dword_from_port, dword_to_port}};
 
 
 const CONFIG_ADDRESS: u16 = 0x0CF8;
 const CONFIG_DATA: u16 = 0x0CFC;
 
-pub fn get_dword(offset: u8, dev: &PciDevice) -> u32 {
+pub fn get_dword(offset: u8, dev: &PciDeviceLocation) -> u32 {
     let config_address = get_config_address(true, dev.bus, dev.device, dev.function, offset);
     get_dword_from_addr(config_address)
 }
@@ -14,7 +14,7 @@ pub fn get_dword_from_addr(conf_addr: u32) -> u32 {
     dword_from_port(CONFIG_DATA)
 }
 
-pub fn set_dword(offset: u8, value: u32, dev: &PciDevice) {
+pub fn set_dword(offset: u8, value: u32, dev: &PciDeviceLocation) {
     let config_address = get_config_address(true, dev.bus, dev.device, dev.function, offset);
     set_dword_at_addr(config_address, value);
 }

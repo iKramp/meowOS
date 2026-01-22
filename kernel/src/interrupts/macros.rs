@@ -7,6 +7,7 @@ macro_rules! handler {
     (
         $name:ident $(, $flag:ident )* $(,)?
     ) => {{
+        use $crate::interrupts::general_interrupt_handler;
         #[naked]
         extern "C" fn wrapper() -> ! {
             //TODO: any kind of change here should be matched with the one in dispatcher.rs

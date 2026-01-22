@@ -14,7 +14,7 @@ use crate::drivers::{
         registers::PhyAddress,
         transmit::{TX_DESC_COUNT, TransmitDescriptor},
     },
-    pci::{self, BarTrait, NetworkController, PciClass, PciDeviceNumericId},
+    pci::{self, BarTrait},
 };
 
 mod init;
@@ -27,18 +27,18 @@ mod statistics;
 mod transmit;
 
 pub(super) fn init_driver() {
-    crate::drivers::pci::add_pcie_driver(
-        (
-            PciClass::NetworkController(NetworkController::EthernetController),
-            PciDeviceNumericId {
-                vendor_id: Some(0x8086), //Intel
-                device_id: Some(0x10D3), //82574L
-                subvendor_id: None,      //Intel again, but there is no subdevice so don't care
-                subdevice_id: None,
-            },
-        ),
-        init_e1000e,
-    );
+    // crate::drivers::pci::add_pcie_driver(
+    //     (
+    //         PciClass::NetworkController(NetworkController::EthernetController),
+    //         PciDeviceNumericId {
+    //             vendor_id: Some(0x8086), //Intel
+    //             device_id: Some(0x10D3), //82574L
+    //             subvendor_id: None,      //Intel again, but there is no subdevice so don't care
+    //             subdevice_id: None,
+    //         },
+    //     ),
+    //     init_e1000e,
+    // );
 }
 
 fn init_e1000e(dev: pci::PcieDevice) {

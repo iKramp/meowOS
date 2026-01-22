@@ -1,16 +1,15 @@
-use std::vec::Vec;
+use std::{print, println, vec::Vec};
 
-use crate::drivers::pci::{PciDevice, bar::Bar, capabilities::Capability, legacy::config_space};
+use crate::drivers::pci::{InterruptType, PciDeviceLocation, PciDeviceNumericId, bar::Bar, common_info::CommonInfo, legacy::config_space};
 
 #[derive(Debug)]
 pub struct LegacyPciDevice {
-    pub(in crate::drivers::pci) device: PciDevice,
     pub bars: Vec<Bar>,
-    pub(in crate::drivers::pci) capabilities: Vec<Capability>,
+    pub(in crate::drivers::pci) common: CommonInfo,
 }
 
 impl LegacyPciDevice {
-    pub(super) fn new(device: PciDevice) -> Self {
+    pub(super) fn new(device: PciDeviceLocation) -> Self {
         let mut bars = Vec::new();
         let mut i = 0;
 
@@ -28,17 +27,39 @@ impl LegacyPciDevice {
             }
         }
         config_space::set_command(command, &device);
+
+        let class = config_space::get_class(&device);
+
+        let identification = PciDeviceNumericId {
+            vendor_id: Some(config_space::get_vendor_id(&device)),
+            device_id: Some(config_space::get_device_id(&device)),
+            subvendor_id: Some(config_space::get_subsystem_vendor_id(&device)),
+            subdevice_id: Some(config_space::get_subsystem_id(&device)),
+        };
+        let identification_strings = crate::drivers::pci::device_codes::get_device_identification(identification.clone());
+        println!("@DBG init_pci_device: Device identification: {:#X?}", identification_strings);
+        println!("@VGA init_pci_device: Vendor name: {}", identification_strings.vendor_name);
+        println!("@VGA init_pci_device: Device name: {}", identification_strings.device_name);
+        println!("@VGA init_pci_device: Subsys name: {}", identification_strings.subsystem_name);
+        print!("@BOTH");
+
         let mut dev = Self {
-            device,
             bars,
-            capabilities: Vec::new(),
+            common: CommonInfo {
+                class,
+                identification,
+                identification_strings,
+                device,
+                capabilities: Vec::new(),
+                int_type: InterruptType::Uninitialized,
+            },
         };
         config_space::load_capabilities_list(&mut dev);
         dev
     }
 
     pub fn enable_bus_mastering(&self) {
-        let command = config_space::get_command(&self.device);
-        config_space::set_command(command | 0b100, &self.device);
+        let command = config_space::get_command(&self.common.device);
+        config_space::set_command(command | 0b100, &self.common.device);
     }
 }
