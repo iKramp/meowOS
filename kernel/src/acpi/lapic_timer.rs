@@ -2,15 +2,18 @@ use core::time::Duration;
 use std::{println, time::Instant};
 
 use crate::{
-    acpi::apic::LapicRegistersPtr, handler, interrupts::{
+    acpi::apic::LapicRegistersPtr,
+    handler,
+    interrupts::{
         TIMER_DESIRED_FREQUENCY,
         handlers::apic_timer_tick,
         idt::{Entry, IDT},
-    }
+    },
 };
 
 static mut TIMER_CONF: u32 = 0;
 static mut FREQUENCY: u64 = 0;
+const LAPIC_TIMER_INT_VEC: u8 = 252;
 
 pub(super) fn setup_timer_ap(lapic_registers: &LapicRegistersPtr) {
     unsafe {
@@ -47,13 +50,13 @@ pub(super) fn activate_timer(lapic_registers: &LapicRegistersPtr) {
 
     println!("Ticks: {}", ticks);
 
-    unsafe { IDT.set(Entry::new(handler!(apic_timer_tick)), 32) };
+    unsafe { IDT.set(Entry::new(handler!(apic_timer_tick)), LAPIC_TIMER_INT_VEC as usize) };
 
     let initial_count = ticks_counted * 100 / TIMER_DESIRED_FREQUENCY;
     println!("Initial count: {} or {:x}", initial_count, initial_count);
 
     timer_conf &= !0xFF_u32;
-    timer_conf |= 32; //set correct interrupt vector
+    timer_conf |= LAPIC_TIMER_INT_VEC as u32; //set correct interrupt vector
     lapic_registers.lvt_timer().bytes().write(timer_conf);
     lapic_registers.initial_count().bytes().write(0);
 
@@ -77,6 +80,7 @@ fn sleep_duration(duration: Duration) {
     let interrupts_enabled = (rflags & (1 << 9)) != 0;
     let is_root = crate::acpi::cpu_locals::CpuLocals::get().int_depth == 1;
     const ENABLE_LAPIC_SLEEP: bool = false;
+
     if interrupts_enabled && duration.as_micros() > 20 && is_root && ENABLE_LAPIC_SLEEP {
         set_timeout(duration);
         unsafe { core::arch::asm!("hlt") };
@@ -84,7 +88,6 @@ fn sleep_duration(duration: Duration) {
         let start = Instant::now();
         while Instant::now() - start < duration {}
     }
-
 }
 
 pub fn set_timeout(duration: Duration) {

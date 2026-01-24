@@ -119,7 +119,15 @@ extern "C" fn _start() -> ! {
     //     process_tasks();
     // }
 
-    proc::init();
+    // proc::init();
+
+    let mut counter = 0;
+    loop {
+        println!("RustOs is running! Counter: {}", counter);
+        counter += 1;
+        drivers::net_device::e1000e::print_ptrs();
+        std::thread::sleep(core::time::Duration::from_secs(1));
+    }
 
     //start first proc
     unsafe { core::arch::asm!("int 254") };

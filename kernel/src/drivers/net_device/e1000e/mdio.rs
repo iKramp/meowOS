@@ -47,6 +47,15 @@ pub(super) fn write(mdic_ptr: &MDICPtr, phy: PhyAddress, reg: u32, data: u16) ->
     Ok(())
 }
 
+pub(super) fn modify<F>(mdic_ptr: &MDICPtr, phy: PhyAddress, reg: u32, f: F) -> Result<(), ErrorCode>
+where
+    F: FnOnce(u16) -> u16,
+{
+    let val = read(mdic_ptr, phy, reg)?;
+    let new_val = f(val);
+    write(mdic_ptr, phy, reg, new_val)
+}
+
 pub(super) fn select_page(mdic_ptr: &MDICPtr, phy: PhyAddress, page: u8) -> Result<(), ErrorCode> {
     write(mdic_ptr, phy, 22, page.into())
 }

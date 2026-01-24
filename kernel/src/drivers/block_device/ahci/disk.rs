@@ -68,7 +68,7 @@ impl LegacyPciDriver for AhciDriver {
     }
     fn service_interrupt(&mut self, _dev: &pci::LegacyPciDevice) {
         let controller = unsafe { self.controller.assume_init_ref() };
-        println!("@DBG controller at interrupt: {:#X?}", controller);
+        println!("@DBG AHCI controller interrupt received");
         print!("@BOTH");
         controller.service_interrupt();
     }

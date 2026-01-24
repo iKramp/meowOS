@@ -67,6 +67,10 @@ bitfield! {
     #[derive(RegMap)]
     pub struct RXDCTL(u32);
     impl Debug;
+    pub gran, set_gran: 24;
+    pub wthresh, set_wthresh: 21,16;
+    pub htresh, set_hthresh: 13,8;
+    pub pthresh, set_pthresh: 5,0;
 }
 
 bitfield! {

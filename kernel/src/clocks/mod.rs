@@ -11,7 +11,7 @@ mod rtc;
 mod tsc;
 
 static mut SELECTED_TIMER: MaybeUninit<Box<dyn Timer>> = MaybeUninit::uninit();
-const TIMER_INTERRUPT_VECTOR: usize = 35;
+const TIMER_INTERRUPT_VECTOR: usize = 251;
 
 trait Timer {
     fn init(&mut self) -> bool;

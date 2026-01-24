@@ -1,6 +1,6 @@
 #![allow(clippy::unusual_byte_groupings, static_mut_refs)]
 
-use crate::interrupts::{disable_pic_completely, general_interrupt_handler};
+use crate::interrupts::disable_pic_completely;
 use core::mem::MaybeUninit;
 use std::mem_utils::PhysAddr;
 
@@ -180,7 +180,9 @@ pub struct LapicRegisters {
 
 impl LapicRegistersPtr<'_> {
     pub fn send_ipi(&mut self, delivery_mode: u8, destination: u8, vector: u8) {
-        self.interrupt_command_register_32_64().bytes().write((destination as u32) << 24);
+        self.interrupt_command_register_32_64()
+            .bytes()
+            .write((destination as u32) << 24);
         self.interrupt_command_register_0_32()
             .bytes()
             .write((vector as u32) | ((delivery_mode as u32) << 8));

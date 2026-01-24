@@ -25,4 +25,6 @@ iso/
 
 *.log
 
+*.pcap
+
 result

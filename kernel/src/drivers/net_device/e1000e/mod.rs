@@ -14,7 +14,7 @@ use crate::drivers::{
         registers::PhyAddress,
         transmit::{TX_DESC_COUNT, TransmitDescriptor},
     },
-    pci::{self, BarTrait},
+    pci::{self, BarTrait, NetworkController, PciClass, PcieDriver},
 };
 
 mod init;
@@ -27,31 +27,51 @@ mod statistics;
 mod transmit;
 
 pub(super) fn init_driver() {
-    // crate::drivers::pci::add_pcie_driver(
-    //     (
-    //         PciClass::NetworkController(NetworkController::EthernetController),
-    //         PciDeviceNumericId {
-    //             vendor_id: Some(0x8086), //Intel
-    //             device_id: Some(0x10D3), //82574L
-    //             subvendor_id: None,      //Intel again, but there is no subdevice so don't care
-    //             subdevice_id: None,
-    //         },
-    //     ),
-    //     init_e1000e,
-    // );
+    crate::drivers::pci::register_express_pci_driver(
+        PciClass::NetworkController(NetworkController::EthernetController),
+        Some(0x8086), //Intel
+        Some(0x10D3), //82574L
+        None,
+        None,
+        || Box::new(E1000eDriver),
+    );
 }
 
-fn init_e1000e(dev: pci::PcieDevice) {
+struct E1000eDriver;
+
+impl PcieDriver for E1000eDriver {
+    fn init(&mut self, dev: &pci::PcieDevice) {
+        init_e1000e(dev);
+    }
+
+    fn deinit(&mut self, dev: &pci::PcieDevice) {
+
+    }
+
+    fn remove_device(&mut self) {
+        todo!()
+    }
+
+    fn service_interrupt(&mut self, dev: &pci::PcieDevice) {
+        todo!()
+    }
+}
+
+pub static mut E1000E_DEVICE: Option<E1000eDevice> = None;
+
+fn init_e1000e(dev: &pci::PcieDevice) {
+    println!("Initializing e1000e device");
     let Ok(mut e1000e_device) = E1000eDevice::new(dev) else {
         println!("e1000e device has incorrect bars");
         return;
     };
     init::init(&mut e1000e_device);
-    std::mem::forget(e1000e_device); //leak the device for now
+    unsafe {
+        E1000E_DEVICE = Some(e1000e_device);
+    }
 }
 
 struct E1000eDevice<'a> {
-    device: pci::PcieDevice,
     memory_bar: VirtAddr,
     flash_bar: VirtAddr,
     registers: registers::E1000eRegistersPtr<'a>, //same value as memory_bar but typed
@@ -64,7 +84,7 @@ struct E1000eDevice<'a> {
 }
 
 impl E1000eDevice<'_> {
-    pub fn new(device: pci::PcieDevice) -> Result<Self, ErrorCode> {
+    pub fn new(device: &pci::PcieDevice) -> Result<Self, ErrorCode> {
         let mem_bar = device
             .bars
             .iter()
@@ -92,7 +112,6 @@ impl E1000eDevice<'_> {
         }
 
         Ok(Self {
-            device,
             memory_bar,
             flash_bar,
             registers,
@@ -103,6 +122,27 @@ impl E1000eDevice<'_> {
             receive_queue: None,
             transmit_queue: None,
         })
+    }
+
+    fn print_ptrs(&self) {
+        let rx_head = self.registers.rx_descriptor_queue_info().rdh().read();
+        let rx_tail = self.registers.rx_descriptor_queue_info().rdt().read();
+        let tx_head = self.registers.tx_descriptor_queue_info().tdh().read();
+        let tx_tail = self.registers.tx_descriptor_queue_info().tdt().read();
+        println!("RX Head: {}, RX Tail: {}", rx_head, rx_tail);
+        println!("TX Head: {}, TX Tail: {}", tx_head, tx_tail);
+
+        //status registers
+        let status = self.registers.icr().read();
+        println!("interrupt Register: 0x{:X}", status.0);
+    }
+}
+
+pub fn print_ptrs() {
+    unsafe {
+        if let Some(dev) = &E1000E_DEVICE {
+            dev.print_ptrs();
+        }
     }
 }
 

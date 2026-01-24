@@ -3,6 +3,7 @@ use crate::{
     memory::{paging::PageTree, physical_allocator},
     rand,
 };
+use core::sync::atomic::Ordering;
 use std::{
     boxed::Box,
     mem_utils::{PhysAddr, VirtAddr, translate_virt_phys_addr},
@@ -26,7 +27,7 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
     let mac_reg = dev.registers.rx_add().idx(0);
     let mac = mac_reg.ral().read() as u64 | ((mac_reg.rah().read() as u64) << 32);
     println!("MAC address read from hardware: {:012X}", mac);
-    if mac == 0 {
+    if mac & (1 << 63) == 0 {
         let random_mac = generate_random_mac();
         println!(
             "No MAC address found in hardware, generating random MAC: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
@@ -101,6 +102,8 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
         descriptor.vlan_tag = 0;
     }
 
+    core::sync::atomic::fence(Ordering::SeqCst);
+
     dev.receive_queue = Some((rx_queue, (rx_queue_virt, rx_queue_phy)));
 
     dev.registers.rx_descriptor_queue_info().rdbal().write(rx_queue_phy.0 as u32);
@@ -108,6 +111,13 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
     dev.registers.rx_descriptor_queue_info().rdlen().write(queue_size_bytes as u32);
     dev.registers.rx_descriptor_queue_info().rdh().write(0);
     dev.registers.rx_descriptor_queue_info().rdt().write((RX_DESC_COUNT - 1) as u32);
+
+    dev.registers.rxdctl().write(*dev.registers.rxdctl().read()
+        .set_gran(true)
+        .set_pthresh(32)
+        .set_hthresh(32)
+        .set_wthresh(1)
+    );
 }
 
 pub fn enable_receive(dev: &mut E1000eDevice) {

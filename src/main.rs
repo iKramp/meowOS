@@ -11,7 +11,7 @@ fn main() {
     //general config
     cmd.arg("-debugcon").arg("stdio");
     cmd.arg("-d")
-        .arg("int,cpu_reset")
+        .arg("cpu_reset")
         .arg("-D")
         .arg("./log.txt")
         .arg("-no-reboot")
@@ -47,7 +47,8 @@ fn main() {
     //networking
     cmd.arg("-netdev")
         .arg("tap,id=net0,ifname=tap0,script=no,downscript=no")
-        .arg("-device").arg("e1000e,netdev=net0");
+        .arg("-device").arg("e1000e,netdev=net0")
+        .arg("-object").arg("filter-dump,id=f1,netdev=net0,file=packets.pcap");
 
     //logging
     let log_file = File::create("qemu_serial.log").expect("Failed to create log file");
