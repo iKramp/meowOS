@@ -1,14 +1,6 @@
 use std::{fs::File, process::Stdio};
 
 fn main() {
-    //demangle the kernel.map file
-    //let _ = std::process::Command::new("rustfilt")
-    //    .arg("-i")
-    //    .arg("/home/nejc/dev/meowOS/kernel.map")
-    //    .arg("-o")
-    //    .arg("/home/nejc/dev/meowOS/kernel.map");
-    //
-
     //chose whether to debug with GDB
     let debug = true;
     let uefi = false;
@@ -19,13 +11,15 @@ fn main() {
     //general config
     cmd.arg("-debugcon").arg("stdio");
     cmd.arg("-d")
-        .arg("cpu_reset")
+        .arg("int,cpu_reset")
         .arg("-D")
         .arg("./log.txt")
-        .arg("-no-reboot");
+        .arg("-no-reboot")
+        .arg("-no-shutdown");
 
     //cpu
     cmd.arg("-machine").arg("q35");
+    // cmd.arg("-cpu").arg("Skylake-Client");
     cmd.arg("-cpu").arg("host,invtsc");
     cmd.arg("-enable-kvm");
     cmd.arg("-smp").arg(cores.to_string());

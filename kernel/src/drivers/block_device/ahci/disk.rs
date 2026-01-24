@@ -1,15 +1,15 @@
 #![allow(non_snake_case)]
 #![allow(clippy::identity_op)]
 
-use core::{fmt::Debug, sync::atomic::AtomicU32, time::Duration};
+use core::{array, cell::UnsafeCell, fmt::Debug, mem::MaybeUninit, ops::DerefMut, sync::atomic::{AtomicU8, AtomicU32}, task::Waker, time::Duration};
 use std::{
     boxed::Box,
     error::ErrorCode,
     lock_w_info,
     mem_utils::{PhysAddr, VirtAddr, get_at_physical_addr, get_at_virtual_addr, memset_virtual_addr},
     print, println,
-    sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
-    vec::Vec,
+    sync::{arc::Arc, no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
+    vec::Vec, w_lock_w_info,
 };
 
 use bitfield::bitfield;
@@ -35,26 +35,49 @@ const WRITE_DMA: u8 = 0x35;
 
 static OPERATIONS: AtomicU32 = AtomicU32::new(0);
 
-#[derive(Debug, Clone)]
-pub struct AhciDriver;
+#[derive(Debug)]
+pub struct AhciDriver {
+    controller: MaybeUninit<AhciController>,
+}
+
+impl AhciDriver {
+    pub(super) fn new() -> Self {
+        Self {
+            controller: MaybeUninit::uninit(),
+        }
+    }
+}
 
 impl LegacyPciDriver for AhciDriver {
     fn init(&mut self, dev: &pci::LegacyPciDevice) {
         dev.enable_bus_mastering();
-        let controller = AhciController::new(dev);
-        let ports = controller.init();
-        for port in ports {
-            block_task(Box::pin(crate::vfs::add_disk(Box::new(port))));
+        let mut controller = AhciController::new(dev);
+        controller.init(dev);
+        println!("@DBG AHCI controller initialized: {:#x?}", controller);
+        for port in controller.ports.iter() {
+            block_task(Box::pin(crate::vfs::add_disk(port.clone())));
         }
+        print!("@BOTH");
+        self.controller = MaybeUninit::new(controller);
     }
     fn deinit(&mut self, _dev: &pci::LegacyPciDevice) {
         todo!("deinit for ahci not implemented yet")
+    }
+    fn remove_device(&mut self) {
+        todo!("remove_device for ahci not implemented yet")
+    }
+    fn service_interrupt(&mut self, _dev: &pci::LegacyPciDevice) {
+        let controller = unsafe { self.controller.assume_init_ref() };
+        println!("@DBG controller at interrupt: {:#X?}", controller);
+        print!("@BOTH");
+        controller.service_interrupt();
     }
 }
 
 #[derive(Debug)]
 pub struct AhciController {
-    pub ghc: GenericHostControlPtr<'static>,
+    pub ghc: RWSpinlock<GenericHostControlPtr<'static>>,
+    ports: Vec<Arc<VirtualPort>>,
     is_64_bit: bool,
 }
 
@@ -73,97 +96,100 @@ impl AhciController {
         let is_64_bit = ghc.cap().read().S64A();
 
         Self {
-            ghc,
+            ghc: RWSpinlock::new(ghc),
+            ports: Vec::new(),
             is_64_bit,
         }
     }
 
     //https://forum.osdev.org/viewtopic.php?t=40969
-    fn init(self) -> Vec<VirtualPort> {
+    fn init(&mut self, _device: &pci::LegacyPciDevice) {
+        let ghc_lock = w_lock_w_info!(self.ghc);
         println!("AhciController::init: staring ahci init");
-        println!("AhciController::init: abar at {:p}", self.ghc.as_ptr());
+        println!("AhciController::init: abar at {:p}", ghc_lock.as_ptr());
         println!("AhciController::init: enabling bus mastering");
-        let ghc_dbg = unsafe { self.ghc.as_ptr().read_volatile() };
+        let ghc_dbg = unsafe { ghc_lock.as_ptr().read_volatile() };
         println!("@DBG AhciController::init: ghc before init: {:#x?}", ghc_dbg);
         print!("@BOTH");
-        let self_arc = Arc::new(self);
 
         let mut ports = Vec::new();
-        let ports_implemented = self_arc.ghc.pi().read();
+        let ports_implemented = ghc_lock.pi().read();
 
         for i in 0..32 {
             if ports_implemented & (1 << i) != 0 {
                 ports.push(VirtualPort {
                     index: i as u8,
-                    address: (self_arc.ghc.as_ptr() as u64 + 0x100 + (i as u64) * 0x80) as *mut u32,
+                    address: (ghc_lock.as_ptr() as u64 + 0x100 + (i as u64) * 0x80) as *mut u32,
                     command_list: VirtAddr(0),
                     fis: VirtAddr(0),
-                    is_64_bit: self_arc.is_64_bit,
+                    is_64_bit: self.is_64_bit,
                     sectors: 0,
                     command_depth: 1,
                     device: 0,
                     commands_issued: AtomicU32::new(0),
                     address_lock: NoIntSpinlock::new(()),
-                    ahci_controller: self_arc.clone(),
+                    task_wakers: array::from_fn(|_| NoIntSpinlock::new(None))
                 });
             }
         }
 
-
-        println!("ports implemented: {:#x}", self_arc.ghc.pi().read());
+        println!("ports implemented: {:#x}", ghc_lock.pi().read());
 
         //enable AHCI
-        self_arc.ghc.ghc().write(*self_arc.ghc.ghc().read().SetAE(true).SetIE(false));
+        ghc_lock.ghc().write(*ghc_lock.ghc().read().SetAE(true).SetIE(false));
 
         //bios handoff??
-        if self_arc.ghc.cap2().read().BOH() {
-            self_arc.perform_bios_handoff();
+        if ghc_lock.cap2().read().BOH() {
+            self.perform_bios_handoff();
         } else {
             println!("No bios handoff");
         }
 
-        self_arc.wait_for_idle_ports(&ports);
+        self.wait_for_idle_ports(&ports);
 
         //reset HBA
-        self_arc.ghc.ghc().write(*self_arc.ghc.ghc().read().SetHR(true));
-        while self_arc.ghc.ghc().read().HR() {
+        ghc_lock.ghc().write(*ghc_lock.ghc().read().SetHR(true));
+        while ghc_lock.ghc().read().HR() {
             std::thread::sleep(Duration::from_micros(10));
         }
 
         //enable AHCI again after reset
-        self_arc.ghc.ghc().write(*self_arc.ghc.ghc().read().SetAE(true).SetIE(false));
+        ghc_lock.ghc().write(*ghc_lock.ghc().read().SetAE(true).SetIE(false));
 
-        self_arc.wait_for_idle_ports(&ports);
+        self.wait_for_idle_ports(&ports);
 
-        let staggered_spin_up = self_arc.ghc.cap().read().SSS();
+        let staggered_spin_up = ghc_lock.cap().read().SSS();
 
         let mut active_ports = Vec::new();
         //loop and init ports
         for port in &mut ports {
-            if port.init(self_arc.is_64_bit, staggered_spin_up) {
+            if port.init(self.is_64_bit, staggered_spin_up) {
                 active_ports.push(port.index);
             }
         }
+        println!("@DBG Active ports: {:#x?}", active_ports);
 
-        self_arc.ghc.is().write(0); //clear all interrupts
-        self_arc.ghc.ghc().write(*self_arc.ghc.ghc().read().SetIE(true)); //enable global interrupts
-
+        ghc_lock.is().write(0); //clear all interrupts
+        ghc_lock.ghc().write(*ghc_lock.ghc().read().SetIE(true)); //enable global interrupts
 
         ports.retain(|port| active_ports.contains(&port.index));
-        ports
+        println!("@DBG Final ports: {:#x?}", ports);
+        self.ports = ports.into_iter().map(Arc::new).collect();
+        print!("@BOTH");
     }
 
     fn perform_bios_handoff(&self) {
+        let ghc_lock = w_lock_w_info!(self.ghc);
         let mut bohc = Bohc(0);
         bohc.SetOOS(true);
         println!("bohc: {:#x?}", bohc);
-        self.ghc.bohc().write(bohc);
+        ghc_lock.bohc().write(bohc);
         let start = std::time::Instant::now();
         loop {
-            let bohc = self.ghc.bohc().read();
+            let bohc = ghc_lock.bohc().read();
             if bohc.BB() {
                 loop {
-                    let bohc = self.ghc.bohc().read();
+                    let bohc = ghc_lock.bohc().read();
                     if !bohc.BB() || start.elapsed().as_secs() > 2 {
                         break;
                     }
@@ -207,12 +233,29 @@ impl AhciController {
             }
         }
     }
+
+    fn service_interrupt(&self) {
+        let ghc_lock = w_lock_w_info!(self.ghc);
+        let is = ghc_lock.is().read();
+        println!("@DBG AHCI Controller interrupt serviced, IS: {:#x}", is);
+        print!("@BOTH");
+        for port in &self.ports {
+            if is & (1 << port.index) != 0 {
+                //handle port interrupt
+                port.service_interrupt();
+            }
+        }
+        ghc_lock.is().write(is); //clear interrupts
+        ghc_lock.is().read(); //read to ensure write arrived
+        drop(ghc_lock);
+    }
 }
 
 #[derive(Debug)]
 struct VirtualPort {
     // commands_issued_addr_lock: Arc<(AtomicU32, NoIntSpinlock<()>)>,
     commands_issued: AtomicU32,
+    task_wakers: [NoIntSpinlock<Option<Waker>>; 32],
     is_64_bit: bool,
     index: u8,
     //use lock
@@ -225,7 +268,6 @@ struct VirtualPort {
     command_list: VirtAddr,
     command_depth: u16,
     device: u8,
-    ahci_controller: Arc<AhciController>,
 }
 
 // Safe because we set all the data once, then only modify data in Arc<AtomicU32> and using the lock
@@ -239,15 +281,20 @@ struct CommandMetadata {
 
 impl VirtualPort {
     pub fn get_command_index(&self) -> Option<u8> {
-        let pos = self
-            .commands_issued
-            .load(core::sync::atomic::Ordering::Acquire)
-            .trailing_ones() as u8;
-        if pos >= self.command_depth as u8 {
-            return None;
-        }
+        let mut index = u8::MAX;
+        self.commands_issued.fetch_update(
+            core::sync::atomic::Ordering::AcqRel,
+            core::sync::atomic::Ordering::Acquire,
+            |current| {
+                index = current.trailing_ones() as u8;
+                if index >= self.command_depth as u8 {
+                    return None;
+                }
+                Some(current | (1 << index))
+            },
+        ).ok()?;
 
-        Some(pos)
+        Some(index)
     }
 
     pub fn release_command_index(&self, index: u8) {
@@ -365,15 +412,15 @@ impl VirtualPort {
             task_file_data = TaskFileData(self.get_property(0x20));
         }
 
-        //clear interrupt status
-        self.set_property(0x10, 0xFFFFFFFF);
-        //enable port interrupts here
-        self.set_property(0x14, 0xFFFFFFFF);
-
         if self.send_identify().is_err() {
             println!("Port {} identify failed", self.index);
             return false;
         }
+
+        //clear interrupt status
+        self.set_property(0x10, 0xFFFFFFFF);
+        //enable port interrupts here (only register fis)
+        self.set_property(0x14, 1);
 
         unsafe {
             let register_fis = &raw const *get_at_virtual_addr::<D2HRegisterFis>(self.fis + 0x40);
@@ -508,6 +555,36 @@ impl VirtualPort {
         let ci = self.get_property(0x38);
         drop(lock);
         ci & (1 << command_slot) == 0
+    }
+
+    fn service_interrupt(&self) {
+        let lock = lock_w_info!(self.address_lock);
+        let is = self.get_property(0x10);
+        self.set_property(0x10, is); //clear interrupts
+        self.get_property(0x10); //read to ensure write arrived
+        let in_service = self.get_property(0x38);
+        let issued = self.commands_issued.load(core::sync::atomic::Ordering::Acquire);
+        let completed = issued & !in_service;
+        self.commands_issued.fetch_and(!completed, core::sync::atomic::Ordering::AcqRel);
+        drop(lock);
+
+        let serr = self.get_property(0x30);
+        if serr != 0 {
+            println!("Port {} SERR: {:#x}", self.index, serr);
+            self.set_property(0x30, serr); //clear errors
+            self.get_property(0x30); //read to ensure write arrived
+        }
+
+        // TODO: check register fis for errors
+
+        for i in 0..self.command_depth {
+            if completed & (1 << i) != 0 {
+                let mut waker_lock = lock_w_info!(self.task_wakers[i as usize]);
+                if let Some(waker) = waker_lock.deref_mut().take() {
+                    waker.wake();
+                }
+            }
+        }
     }
 }
 
@@ -649,10 +726,13 @@ impl Future for CommandWaiter<'_> {
     type Output = ();
 
     fn poll(self: core::pin::Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> core::task::Poll<Self::Output> {
+        let waker = cx.waker().clone();
+        let cmd_index = self.command_index as usize;
+        *lock_w_info!(self.port.task_wakers[cmd_index]) = Some(waker);
         if self.port.is_command_ready(self.command_index) {
+            *lock_w_info!(self.port.task_wakers[cmd_index]) = None;
             core::task::Poll::Ready(())
         } else {
-            cx.waker().wake_by_ref();
             core::task::Poll::Pending
         }
     }
@@ -728,6 +808,8 @@ pub struct GenericHostControl {
     ///WARNING! containes RWC field
     bohc: Bohc,
 }
+
+unsafe impl Send for GenericHostControlPtr<'_> {}
 
 bitfield! {
     #[derive(RegMap)]

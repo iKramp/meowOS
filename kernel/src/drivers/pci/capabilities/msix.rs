@@ -1,6 +1,6 @@
 use std::{error::ErrorCode, mem_utils::VirtAddr, vec::Vec};
 
-use crate::drivers::pci::{BarTrait, FullPciDevType, InterruptType, MemoryBar, capabilities::CapAddr, legacy, port_access, set_interrupt_stub};
+use crate::drivers::pci::{BarTrait, FullPciDevType, MemoryBar, capabilities::CapAddr, legacy, port_access};
 
 pub(in crate::drivers::pci) const PCI_CAP_MSIX_ID: u8 = 0x11;
 
@@ -11,7 +11,7 @@ fn set_table_entry(bar: &MemoryBar, bar_off: u32, entry_index: u32, msg_addr: u6
     bar.write_to_bar(&vector_control, bar_off as u64 + (entry_index as u64) * 16 + 12);
 }
 
-pub fn ini_msix_interrupt(dev: &FullPciDevType) -> Result<(), ErrorCode> {
+pub fn ini_msix_interrupt(dev: &FullPciDevType, msi_irq: u8) -> Result<(), ErrorCode> {
     //disable INTx# interrupts (pins?)
     let capabilities = &dev.get_common().capabilities;
     let msix_cap = capabilities
@@ -78,14 +78,11 @@ pub fn ini_msix_interrupt(dev: &FullPciDevType) -> Result<(), ErrorCode> {
     let redirection_hint = 0; //0 for no hint, 1 for hint
 
     for i in 0..table_size {
-        let current_free_irq =
-            crate::interrupts::idt::CUSTOM_INTERRUPT_VECTOR.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         let msi_addr = (0xFFE << 20) | ((destination_id as u64) << 12) | (redirection_hint << 3) | (destination_mode << 2);
 
-        let msi_data = current_free_irq as u32;
+        let msi_data = msi_irq as u32;
 
         set_table_entry(&table_bar, table_offset, i, msi_addr, msi_data, 0);
-        set_interrupt_stub(current_free_irq);
     }
 
     Ok(())

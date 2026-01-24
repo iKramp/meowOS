@@ -1,3 +1,5 @@
+use std::println;
+
 use crate::{acpi::cpu_locals::CpuLocals, proc::{StackCpuStateData, interrupt_context_switch, save_and_release_current}};
 
 use super::{disable_interrupts, enable_interrupts};
@@ -198,6 +200,7 @@ pub extern "C" fn general_interrupt_handler(
     if !atomic_context {
         enable_interrupts();
     }
+
     main_handler(proc_data);
 
     //proc is depth 0, root int is depth 1

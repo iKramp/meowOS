@@ -12,6 +12,7 @@
 #![feature(slice_index_methods)]
 #![feature(new_range_api)]
 #![feature(rustc_attrs)]
+#![feature(unsafe_cell_access)]
 #![allow(internal_features)]
 
 extern crate static_cond;
@@ -82,9 +83,18 @@ extern "C" fn _start() -> ! {
 
     acpi::init_acpi();
 
+    // let mut counter = 0;
+    //
+    // loop {
+    //     println!("Counting {}", counter);
+    //     counter += 1;
+    //     let now = std::time::Instant::now();
+    //     while std::time::Instant::now() - now < core::time::Duration::from_secs(1) {}
+    // }
+
     drivers::init_drivers();
 
-    drivers::pci::enumerate_devices();
+    drivers::pci::init();
 
     std::thread::sleep(core::time::Duration::from_micros(11));
 

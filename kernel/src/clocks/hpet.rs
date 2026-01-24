@@ -1,34 +1,46 @@
+use core::{mem::MaybeUninit, sync::atomic::AtomicU64};
 use std::{
-    mem_utils::{PhysAddr, get_at_virtual_addr},
+    mem_utils::{PhysAddr, VirtAddr, get_at_virtual_addr},
     printlnc,
 };
 
 use bitfield::bitfield;
+use reg_map::RegMap;
 
 use crate::{
     acpi,
+    clocks::TIMER_INTERRUPT_VECTOR,
     memory::{PAGE_TREE_ALLOCATOR, paging::LiminePat},
 };
 
 use super::Timer;
 
-pub(super) static mut HPET: HpetWrapper = HpetWrapper {
-    registers: core::ptr::null_mut(),
-    is_64_bit: false,
-    started: std::time::UNIX_EPOCH,
-    cmp_value: 0,
-};
-
 pub(super) struct HpetWrapper {
-    registers: *mut HpetRegisters,
+    registers: MaybeUninit<HpetRegistersPtr<'static>>,
     started: std::time::Instant,
     is_64_bit: bool,
     cmp_value: u64,
+    seconds_since: AtomicU64,
+    last_main_count: AtomicU64,
+    allocated_page: VirtAddr,
 }
 
 impl HpetWrapper {
-    fn get_registers(reg_phys_addr: PhysAddr) -> bool {
+    pub const fn new() -> Self {
+        Self {
+            registers: MaybeUninit::uninit(),
+            started: std::time::UNIX_EPOCH,
+            is_64_bit: false,
+            cmp_value: 0,
+            seconds_since: AtomicU64::new(0),
+            last_main_count: AtomicU64::new(0),
+            allocated_page: VirtAddr(0),
+        }
+    }
+
+    fn get_registers(&mut self, reg_phys_addr: PhysAddr) -> bool {
         let virt_addr = unsafe { PAGE_TREE_ALLOCATOR.allocate(Some(reg_phys_addr), false) };
+        self.allocated_page = virt_addr;
         let entry = unsafe {
             PAGE_TREE_ALLOCATOR
                 .get_page_table_entry_mut(virt_addr)
@@ -36,7 +48,8 @@ impl HpetWrapper {
         };
         entry.set_pat(LiminePat::UC);
 
-        let general_cap = unsafe { (virt_addr.0 as *const GeneralCap).read_volatile() };
+        let registers = unsafe { HpetRegistersPtr::from_ptr(virt_addr.0 as *mut HpetRegisters) };
+        let general_cap = registers.general_capabilities().read();
         let period_femptosecs = general_cap.counter_clk_period();
         let counter_size_bits = 32 * (1 + general_cap.count_size_cap() as u64);
         let counter_size = 2_u64.pow(counter_size_bits as u32 - 1);
@@ -54,39 +67,56 @@ impl HpetWrapper {
 
         let periods_in_second = 10_u64.pow(15) / period_femptosecs;
 
-        unsafe {
-            HPET.registers = virt_addr.0 as *mut HpetRegisters;
-            HPET.is_64_bit = general_cap.count_size_cap();
-            HPET.cmp_value = periods_in_second;
-        }
+        self.registers = MaybeUninit::new(registers);
+        self.is_64_bit = general_cap.count_size_cap();
+        self.cmp_value = periods_in_second;
         true
     }
 
     fn start_timer(&mut self) -> bool {
-        unsafe {
-            let timer_conf = self.registers.byte_offset(0x40) as *mut TimerConfig;
-            (timer_conf.byte_offset(0x8) as *mut u64).write_volatile(self.cmp_value);
-            let mut conf_reg = (timer_conf as *mut TimerConfAndCap).read_volatile();
-            if !conf_reg.periodic_capable() {
-                return false;
-            }
-            conf_reg.set_int_type(false); //edge triggered
-            conf_reg.set_int_enable(true); //enable interrupts
-            conf_reg.set_type(true); //periodic
-            const IO_APIC_ROUTE: u8 = 0x3; //with offset 32, is interrupt 35
-            conf_reg.set_int_route(IO_APIC_ROUTE as u64); //route to IO APIC
-            (timer_conf as *mut TimerConfAndCap).write_volatile(conf_reg);
-
-            let mut gen_conf = (self.registers.byte_offset(0x10) as *mut GeneralConfig).read_volatile();
-            gen_conf.set_enabled(true);
-            (self.registers.byte_offset(0x10) as *mut GeneralConfig).write_volatile(gen_conf);
+        let self_regs = unsafe { self.registers.assume_init_ref() };
+        let timer_conf = self_regs.timer_0();
+        timer_conf.cmp_value().write(self.cmp_value);
+        let mut conf_reg = timer_conf.conf_and_cap().read();
+        if !conf_reg.periodic_capable() {
+            return false;
         }
+        conf_reg.set_int_type(false); //edge triggered
+        conf_reg.set_int_enable(true); //enable interrupts
+        conf_reg.set_type(true); //periodic
+        const IO_APIC_ROUTE: u8 = TIMER_INTERRUPT_VECTOR as u8 - 32;
+        conf_reg.set_int_route(IO_APIC_ROUTE as u64); //route to IO APIC
+        timer_conf.conf_and_cap().write(conf_reg);
+
+        let mut gen_conf = self_regs.general_configuration().read();
+        gen_conf.set_enabled(true);
+        self_regs.general_configuration().write(gen_conf);
         true
     }
 }
 
+impl Drop for HpetWrapper {
+    fn drop(&mut self) {
+        if self.allocated_page.0 == 0 {
+            return;
+        }
+
+        let self_regs = unsafe { self.registers.assume_init_ref() };
+
+        //disable timer
+        let mut gen_conf = self_regs.general_configuration().read();
+        gen_conf.set_enabled(false);
+        self_regs.general_configuration().write(gen_conf);
+
+        //free allocated page
+        unsafe {
+            PAGE_TREE_ALLOCATOR.deallocate(self.allocated_page);
+        }
+    }
+}
+
 impl Timer for HpetWrapper {
-    fn start(&self, now: std::time::Instant) -> bool {
+    fn init(&mut self) -> bool {
         let hpet_table;
         unsafe {
             let Some(hpet_table_phys_addr) = acpi::ACPI_TABLE_MAP.get("HPET") else {
@@ -95,20 +125,47 @@ impl Timer for HpetWrapper {
             hpet_table = get_at_virtual_addr::<acpi::HpetTable>(*hpet_table_phys_addr);
         }
         let hpet_regs = hpet_table.get_addr();
-        if !Self::get_registers(hpet_regs) {
+        if !self.get_registers(hpet_regs) {
             return false;
         }
-        unsafe {
-            HPET.started = now;
-            HPET.start_timer()
-        }
+        self.start_timer()
     }
 
     fn get_time(&self) -> std::time::Instant {
-        todo!()
+        let self_regs = unsafe { self.registers.assume_init_ref() };
+        let last_main_count = self.last_main_count.load(core::sync::atomic::Ordering::Relaxed);
+
+        let prev_seconds = 0;
+        let mut new_seconds = self.seconds_since.load(core::sync::atomic::Ordering::SeqCst);
+        let mut main_cnt = 0;
+        while prev_seconds != new_seconds {
+            main_cnt = if self.is_64_bit {
+                self_regs.main_counter_value().read()
+            } else {
+                self_regs.main_counter_value().read() & 0xFFFFFFFF
+            };
+            new_seconds = self.seconds_since.load(core::sync::atomic::Ordering::SeqCst);
+        }
+
+        let timer_0_cnt = (main_cnt.wrapping_sub(last_main_count)) % self.cmp_value;
+        let nanos = (timer_0_cnt * 1_000_000_000) / self.cmp_value;
+        std::time::Instant::from_duration_since_epoch(core::time::Duration::new(
+            new_seconds,
+            nanos as u32,
+        ))
+    }
+
+    fn calibrate(&mut self, now: std::time::Instant) {
+        self.started = now;
+    }
+
+    fn service_interrupt(&self) {
+        self.seconds_since.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+        self.last_main_count.fetch_add(self.cmp_value, core::sync::atomic::Ordering::SeqCst);
     }
 }
 
+#[derive(RegMap)]
 #[repr(C)]
 struct HpetRegisters {
     general_capabilities: GeneralCap,
@@ -127,6 +184,7 @@ struct HpetRegisters {
 }
 
 bitfield! {
+    #[derive(RegMap)]
     struct GeneralCap(u64);
     impl Debug;
     rev_id, _: 7, 0;
@@ -138,6 +196,7 @@ bitfield! {
 }
 
 bitfield! {
+    #[derive(RegMap)]
     struct GeneralConfig(u64);
     enabled, set_enabled: 0;
     ///legacy routing to IRQ2 in IO APIC. Don't do this
@@ -145,12 +204,14 @@ bitfield! {
 }
 
 bitfield! {
+    #[derive(RegMap)]
     struct IntStatus(u64);
     timer_0, clear_timer_0: 0;
     timer_1, clear_timer_1: 1;
     timer_2, clear_timer_2: 2;
 }
 
+#[derive(RegMap)]
 #[repr(C)]
 struct TimerConfig {
     conf_and_cap: TimerConfAndCap,
@@ -160,6 +221,7 @@ struct TimerConfig {
 }
 
 bitfield! {
+    #[derive(RegMap)]
     struct TimerConfAndCap(u64);
     impl Debug;
     ///0: edge tiggered

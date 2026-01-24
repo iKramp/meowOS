@@ -10,12 +10,15 @@ pub(super) struct TscWrapper {
     ticks_on_start: u64,
     ticks_per_second: u64,
 }
-
-pub(super) static mut TSC_WRAPPER: TscWrapper = TscWrapper {
-    start: std::time::UNIX_EPOCH,
-    ticks_on_start: 0,
-    ticks_per_second: 0,
-};
+impl TscWrapper {
+    pub const fn new() -> Self {
+        TscWrapper {
+            start: std::time::UNIX_EPOCH,
+            ticks_on_start: 0,
+            ticks_per_second: 0,
+        }
+    }
+}
 
 impl TscWrapper {
     pub fn get_ticks() -> u64 {
@@ -30,7 +33,7 @@ impl TscWrapper {
 }
 
 impl Timer for TscWrapper {
-    fn start(&self, now: std::time::Instant) -> bool {
+    fn init(&mut self) -> bool {
         //check availability of TSC
         let leaf_1_edx = if let Some(leaf) = cpuid::get_cpuid_leaf(1) {
             leaf.edx
@@ -65,25 +68,26 @@ impl Timer for TscWrapper {
             crate::interrupts::trigger_pit_eoi();
             let ticks_counted = tsc_end - tsc_start;
             println!("TSC ticks counted: {}", ticks_counted);
-            TSC_WRAPPER.ticks_per_second = ticks_counted * 1000 / 5; // 5 milliseconds
+            self.ticks_per_second = ticks_counted * 1000 / 5; // 5 milliseconds
         }
-        unsafe {
-            TSC_WRAPPER.start = now;
-            TSC_WRAPPER.ticks_on_start = tsc_start;
-        }
+            self.ticks_on_start = tsc_start;
 
         true
     }
 
     fn get_time(&self) -> std::time::Instant {
         let ticks = TscWrapper::get_ticks();
-        let tps = unsafe { TSC_WRAPPER.ticks_per_second };
-        let ticks_on_start = unsafe { TSC_WRAPPER.ticks_on_start };
+        let tps = self.ticks_per_second;
+        let ticks_on_start = self.ticks_on_start;
         let elapsed = ticks - ticks_on_start;
         let seconds = elapsed / tps;
         let secons_ticks = seconds * tps;
         let nanos = ((elapsed - secons_ticks) * 1_000_000_000) / tps;
         let since_start = core::time::Duration::new(seconds, nanos as u32);
-        unsafe { TSC_WRAPPER.start + since_start }
+        self.start + since_start
+    }
+
+    fn calibrate(&mut self, now: std::time::Instant) {
+        self.start = now;
     }
 }

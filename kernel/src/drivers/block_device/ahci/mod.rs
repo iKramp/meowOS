@@ -1,3 +1,4 @@
+use core::mem::MaybeUninit;
 use std::boxed::Box;
 
 use crate::drivers::pci::{MassStorageController, PciClass};
@@ -12,6 +13,6 @@ pub(super) fn init_driver() {
         None,
         None,
         None,
-        || Box::new(disk::AhciDriver),
+        || Box::new(disk::AhciDriver::new()),
     );
 }

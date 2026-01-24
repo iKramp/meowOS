@@ -1,19 +1,19 @@
-use core::sync;
 use std::{error::ErrorCode, mem_utils::VirtAddr, println};
 
 use crate::{
     acpi,
-    drivers::pci::{FullPciDevType, InterruptType, capabilities::CapAddr, legacy, port_access, set_interrupt_stub},
+    drivers::pci::{FullPciDevType, capabilities::CapAddr, legacy, port_access},
 };
 
 pub(in crate::drivers::pci) const PCI_CAP_MSI_ID: u8 = 0x5;
 
-pub fn init_msi_interrupt(dev: &FullPciDevType) -> Result<(), ErrorCode> {
+pub fn init_msi_interrupt(dev: &FullPciDevType, msi_irq: u8) -> Result<(), ErrorCode> {
     //disable INTx# interrupts (pins?)
     println!("Initializing MSI interrupt");
     let capabilities = &dev.get_common().capabilities;
-    let msi_cap = capabilities.iter().find(|cap| cap.id == 5).ok_or(ErrorCode::NoEntry)?.clone();
+    let msi_cap = capabilities.iter().find(|cap| cap.id == 5).ok_or(ErrorCode::NoEntry)?;
 
+    #[allow(clippy::needless_late_init)] //bruh useless lint
     let cap_addr;
     match dev {
         FullPciDevType::Legacy(legacy_pci_device, _) => {
@@ -51,10 +51,8 @@ pub fn init_msi_interrupt(dev: &FullPciDevType) -> Result<(), ErrorCode> {
     let requested_interrupts = 1 << requested_interrupts_power;
     println!("Requested interrupts: {}", requested_interrupts);
 
-    println!("granting onlt 1 interrupt womp womp");
+    println!("granting only 1 interrupt womp womp");
     message_control |= 0 << 4; //give only 1 interrupt
-    let msi_irq = crate::interrupts::idt::CUSTOM_INTERRUPT_VECTOR.fetch_add(1, sync::atomic::Ordering::SeqCst);
-    set_interrupt_stub(msi_irq);
 
     let message_address = (0xFEE << 20) | ((acpi::get_platform_info().boot_processor.apic_id as u32) << 12) | (1 << 3); //destination mode physical APIC
     let message_data = msi_irq as u16;
@@ -97,8 +95,4 @@ fn set_msi_address(is_64_bit: bool, cap_addr: &CapAddr) {
     if is_64_bit {
         cap_addr.set_dword(8, high_address);
     }
-}
-
-pub(in crate::drivers::pci) fn get_vector(dev: &FullPciDevType) -> u8 {
-    todo!()
 }

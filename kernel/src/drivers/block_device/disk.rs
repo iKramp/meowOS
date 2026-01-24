@@ -1,5 +1,5 @@
 use core::fmt::Debug;
-use std::{boxed::Box, mem_utils::PhysAddr, string::String, vec::Vec};
+use std::{boxed::Box, mem_utils::PhysAddr, string::String, sync::arc::Arc, vec::Vec};
 
 use uuid::Uuid;
 
@@ -13,15 +13,15 @@ pub trait BlockDevice: Debug + Send + Sync {
 
 #[async_trait::async_trait]
 pub trait PartitionSchemeDriver {
-    async fn guid(&self, disk: &mut dyn BlockDevice) -> Uuid;
+    async fn guid(&self, disk: &dyn BlockDevice) -> Uuid;
     ///returns a vector of partition guids (not filesystem ids) and partition objects
-    async fn partitions(&self, disk: &mut dyn BlockDevice) -> Vec<(Uuid, Partition)>;
+    async fn partitions(&self, disk: &dyn BlockDevice) -> Vec<(Uuid, Partition)>;
 }
 
 //Make sure this is ALWAYS send + sync
 #[derive(Debug)]
 pub struct MountedPartition {
-    pub disk: &'static dyn BlockDevice,
+    pub disk: Arc<dyn BlockDevice>,
     pub partition: Partition,
 }
 
@@ -35,7 +35,7 @@ pub struct Partition {
 }
 
 impl MountedPartition {
-    pub fn new(disk: &'static dyn BlockDevice, partition: Partition) -> Self {
+    pub fn new(disk: Arc<dyn BlockDevice>, partition: Partition) -> Self {
         Self { disk, partition }
     }
 

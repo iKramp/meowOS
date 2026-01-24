@@ -38,9 +38,6 @@ impl LegacyPciDevice {
         };
         let identification_strings = crate::drivers::pci::device_codes::get_device_identification(identification.clone());
         println!("@DBG init_pci_device: Device identification: {:#X?}", identification_strings);
-        println!("@VGA init_pci_device: Vendor name: {}", identification_strings.vendor_name);
-        println!("@VGA init_pci_device: Device name: {}", identification_strings.device_name);
-        println!("@VGA init_pci_device: Subsys name: {}", identification_strings.subsystem_name);
         print!("@BOTH");
 
         let mut dev = Self {

@@ -1,5 +1,5 @@
 use std::{
-    boxed::Box, error::ErrorCode, lock_w_info, mem_utils::{PhysAddr, translate_phys_virt_addr}, println, printlnc, string::{String, ToString}, sync::{arc::Arc, no_int_spinlock::NoIntSpinlockGuard}, vec::Vec
+    boxed::Box, error::ErrorCode, lock_w_info, mem_utils::{PhysAddr, translate_phys_virt_addr}, print, println, printlnc, string::{String, ToString}, sync::{arc::Arc, no_int_spinlock::NoIntSpinlockGuard}, vec::Vec
 };
 
 use uuid::Uuid;
@@ -13,16 +13,16 @@ use super::{
     file::{FileFlags, FileHandle}, filesystem_trait::FileSystem, fs_tree::{self}, resolve_path, DeviceDetails, InodeIdentifierChain, InodeType, ResolvedPath, ResolvedPathBorrowed, Vfs, ROOT_INODE_INDEX, VFS, VFS_ADAPTER_DEVICE
 };
 
-pub async fn add_disk(mut disk: Box<dyn BlockDevice + Send>) {
+pub async fn add_disk(disk: Arc<dyn BlockDevice>) -> Uuid {
     //for now only GPT
     let gpt_driver = GPTDriver {};
-    let guid = gpt_driver.guid(&mut *disk).await;
-    let partitions = gpt_driver.partitions(&mut *disk).await;
+    let disk_uuid = gpt_driver.guid(disk.get()).await;
+    let partitions = gpt_driver.partitions(disk.get()).await;
     let partition_guids: Vec<Uuid> = partitions.iter().map(|(guid, _)| *guid).collect();
 
     let mut vfs = lock_w_info!(VFS);
 
-    vfs.disks.insert(guid, (disk, partition_guids));
+    vfs.disks.insert(disk_uuid, (disk, partition_guids));
 
     for partition in partitions {
         let device = partition.1.device;
@@ -30,11 +30,13 @@ pub async fn add_disk(mut disk: Box<dyn BlockDevice + Send>) {
         vfs.devices.insert(
             device,
             DeviceDetails {
-                drive: guid,
+                drive: disk_uuid,
                 partition: partition.0,
             },
         );
     }
+
+    disk_uuid
 }
 
 //called after unmounting all partitions or when it was forcibly removed
@@ -103,8 +105,7 @@ pub async fn mount_blkdev_partition(part_id: Uuid, mountpoint: ResolvedPath) -> 
     let Some(disk) = vfs.disks.get_mut(&drive_id) else {
         return Err(ErrorCode::NoEntry);
     };
-    let disk = &raw mut *disk.0;
-    let cloned_disk: &'static mut dyn BlockDevice = unsafe { &mut *disk };
+    let disk_cloned = disk.0.clone();
 
     let Some(fs_factory) = vfs.filesystem_driver_factories.get(&partition.fs_type).cloned() else {
         return Err(ErrorCode::UnsupportedFilesystem);
@@ -112,7 +113,7 @@ pub async fn mount_blkdev_partition(part_id: Uuid, mountpoint: ResolvedPath) -> 
     drop(vfs);
 
     let mounted_partition = MountedPartition {
-        disk: cloned_disk,
+        disk: disk_cloned,
         partition,
     };
     let fs = fs_factory.mount(mounted_partition).await;
@@ -334,11 +335,13 @@ pub async unsafe fn read_file_aligned(file_handle: &FileHandle, buffer: &[PhysAd
 
     let inode = fs_tree::get_inode(file_handle.inode).ok_or(ErrorCode::InodeNotPresent)?;
 
-    println!("operations::read_file_aligned: Inode {:X?}", inode);
+    println!("@DBG operations::read_file_aligned: Inode {:X?}", inode);
+    print!("@BOTH");
 
     let mut vfs = lock_w_info!(VFS);
     let device_details = vfs.devices.get(&inode.device).ok_or(ErrorCode::NoEntry)?;
-    println!("operations::read_file_aligned: Device details {:X?}", device_details);
+    println!("@DBG operations::read_file_aligned: Device details {:X?}", device_details);
+    print!("@BOTH");
     let partition_id = device_details.partition;
     let fs = vfs.mounted_filesystems.get_mut(&partition_id).ok_or(ErrorCode::NoEntry)?;
     let fs = fs.clone();
@@ -347,7 +350,8 @@ pub async unsafe fn read_file_aligned(file_handle: &FileHandle, buffer: &[PhysAd
 
     let bytes_read = fs.read(inode.index, offset, size, buffer).await;
 
-    println!("operations::read_file_aligned: Read {} bytes", bytes_read);
+    println!("@DBG operations::read_file_aligned: Read {} bytes", bytes_read);
+    print!("@BOTH");
 
     Ok(bytes_read.min(size))
 }

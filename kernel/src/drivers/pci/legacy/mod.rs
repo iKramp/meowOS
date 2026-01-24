@@ -12,6 +12,10 @@ type LegacyPciDevDriverInitFn = ((PciClass, PciDeviceNumericId), fn(LegacyPciDev
 pub trait LegacyPciDriver: Send + Sync {
     fn init(&mut self, dev: &LegacyPciDevice);
     fn deinit(&mut self, dev: &LegacyPciDevice);
+    fn service_interrupt(&mut self, dev: &LegacyPciDevice);
+    /// Called after the device is removed from the system
+    /// Either forcibly, or deinit was called earlier
+    fn remove_device(&mut self);
 }
 
 pub fn get_devices() -> Vec<LegacyPciDevice> {

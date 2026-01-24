@@ -57,7 +57,7 @@ pub type InodeIdentifierChain = Box<[InodeIdentifier]>;
 
 pub struct Vfs {
     ///Map from disk guid to disk object (driver) and a list of partition guids
-    disks: BTreeMap<Uuid, (Box<dyn BlockDevice + Send>, Vec<Uuid>)>,
+    disks: BTreeMap<Uuid, (Arc<dyn BlockDevice + Send>, Vec<Uuid>)>,
     ///maps from filesystem type uuid to filesystem driver factory
     filesystem_driver_factories: BTreeMap<Uuid, Arc<dyn FileSystemFactory + Send>>,
     ///maps from partition uuid to filesystem driver

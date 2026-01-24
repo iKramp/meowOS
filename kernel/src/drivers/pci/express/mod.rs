@@ -21,6 +21,11 @@ type PcieDevDriverInitFn = ((PciClass, PciDeviceNumericId), fn(PcieDevice));
 
 pub trait PcieDriver: Send + Sync {
     fn init(&mut self, dev: &PcieDevice);
+    fn deinit(&mut self, dev: &PcieDevice);
+    /// Called after the device is removed from the system
+    /// Either forcibly, or deinit was called earlier
+    fn remove_device(&mut self);
+    fn service_interrupt(&mut self, dev: &PcieDevice);
 }
 
 pub fn get_devices() -> Vec<PcieDevice> {
@@ -100,7 +105,8 @@ fn is_pcie(device: &mut PcieDevice) -> bool {
     let has_pcie_cap = caps.iter().any(|cap| cap.id == PCI_CAP_PCIE_ID);
     let has_power_mgmt_cap = caps.iter().any(|cap| cap.id == PCI_CAP_POWER_MANAGEMENT_ID);
     if !has_pcie_cap {
-        println!("Skipping non-PCIe device{:?}", device);
+        println!("@DBG Skipping non-PCIe device{:?}", device);
+        print!("@BOTH");
         return false;
     }
     assert!(

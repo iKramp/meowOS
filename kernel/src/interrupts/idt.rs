@@ -1,11 +1,9 @@
 use crate::handler;
 use crate::interrupts::macros::InterruptProcessorState;
-use crate::interrupts::macros::general_interrupt_handler;
 
 use super::gdt::{DEBUG_IST, DOUBLE_FAULT_IST, MACHINE_CHECK_IST, NMI_IST};
 use super::handlers::*;
 use core::arch::asm;
-use core::sync::atomic::AtomicU8;
 use std::printlnc;
 
 macro_rules! never_exit_interrupt_message {
@@ -54,8 +52,6 @@ pub struct TablePointer {
 pub static mut IDT_POINTER: TablePointer = TablePointer { limit: 0, base: 0 };
 
 const IDT_SIZE: usize = 256;
-
-pub static CUSTOM_INTERRUPT_VECTOR: AtomicU8 = AtomicU8::new(128);
 
 #[repr(align(4096))]
 pub struct Idt {
@@ -150,7 +146,7 @@ impl Idt {
         //253 - inter processor interrupt
         //254 - first context switch
         //255 - spurious interrupt
-        //use anything above 128 for pci devices for now
+        //128..160 - PCI interrupts
     }
 }
 

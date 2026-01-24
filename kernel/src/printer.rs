@@ -1,5 +1,5 @@
 use core::ptr::addr_of;
-use std::{Print, format, lock_w_info, sync::no_int_spinlock::NoIntSpinlock};
+use std::{Print, lock_w_info, sync::no_int_spinlock::NoIntSpinlock};
 
 use crate::{
     utils::byte_to_port,
@@ -17,6 +17,8 @@ enum PrintTarget {
     E9Port,
     Both,
 }
+
+const ALLOWED_TARGET: PrintTarget = PrintTarget::Both;
 
 struct Printer {
     vga_text: &'static NoIntSpinlock<VgaText>,
@@ -118,23 +120,17 @@ impl core::fmt::Write for Printer {
             }
             s = &s[6..];
         }
-        match self.target {
-            PrintTarget::Vga => {
+        match (&self.target, ALLOWED_TARGET) {
+            (PrintTarget::Vga | PrintTarget::Both, PrintTarget::Vga | PrintTarget::Both) => {
                 let mut vga = lock_w_info!(self.vga_text);
                 vga.write_str(s)?
             }
-            PrintTarget::E9Port => {
+            (PrintTarget::E9Port | PrintTarget::Both, PrintTarget::E9Port | PrintTarget::Both) => {
                 for char in s.as_bytes() {
                     byte_to_port(0xe9, *char);
                 }
             }
-            PrintTarget::Both => {
-                for char in s.as_bytes() {
-                    byte_to_port(0xe9, *char);
-                }
-                let mut vga = lock_w_info!(self.vga_text);
-                vga.write_str(s)?
-            }
+            (_, _) => { /* Do nothing */ }
         }
         Ok(())
     }

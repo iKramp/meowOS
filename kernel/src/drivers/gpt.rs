@@ -24,7 +24,7 @@ pub struct GPTDriver {}
 
 #[async_trait::async_trait]
 impl PartitionSchemeDriver for GPTDriver {
-    async fn partitions(&self, disk: &mut dyn BlockDevice) -> Vec<(Uuid, Partition)> {
+    async fn partitions(&self, disk: &dyn BlockDevice) -> Vec<(Uuid, Partition)> {
         println!("GPT partitions");
         let first_lba = physical_allocator::allocate_frame();
         let first_lba_binding = unsafe { PAGE_TREE_ALLOCATOR.allocate(Some(first_lba), false) };
@@ -99,7 +99,7 @@ impl PartitionSchemeDriver for GPTDriver {
         partitions
     }
 
-    async fn guid(&self, disk: &mut dyn BlockDevice) -> Uuid {
+    async fn guid(&self, disk: &dyn BlockDevice) -> Uuid {
         let first_lba = physical_allocator::allocate_frame();
         let first_lba_binding = unsafe { PAGE_TREE_ALLOCATOR.allocate(Some(first_lba), false) };
         unsafe {

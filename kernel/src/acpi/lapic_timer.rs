@@ -3,7 +3,7 @@ use std::{println, time::Instant};
 
 use crate::{
     acpi::apic::LapicRegistersPtr, handler, interrupts::{
-        TIMER_DESIRED_FREQUENCY, general_interrupt_handler,
+        TIMER_DESIRED_FREQUENCY,
         handlers::apic_timer_tick,
         idt::{Entry, IDT},
     }
@@ -41,7 +41,6 @@ pub(super) fn activate_timer(lapic_registers: &LapicRegistersPtr) {
 
     let ticks = lapic_registers.current_count().bytes().read();
     lapic_registers.initial_count().bytes().write(0); //disable
-    crate::interrupts::trigger_pit_eoi();
 
     let ticks_counted = TIMER_COUNT - ticks;
     let frequency = ticks_counted as u64 * 1_000 / 5; //ticks counted in 5 miliseconds
@@ -76,7 +75,9 @@ fn sleep_duration(duration: Duration) {
     }
 
     let interrupts_enabled = (rflags & (1 << 9)) != 0;
-    if interrupts_enabled && duration.as_micros() > 20 {
+    let is_root = crate::acpi::cpu_locals::CpuLocals::get().int_depth == 1;
+    const ENABLE_LAPIC_SLEEP: bool = false;
+    if interrupts_enabled && duration.as_micros() > 20 && is_root && ENABLE_LAPIC_SLEEP {
         set_timeout(duration);
         unsafe { core::arch::asm!("hlt") };
     } else {

@@ -153,7 +153,7 @@ fn wake_tasks_in_list(locals: &mut CpuLocals) {
                 };
                 *task_list = Some(Box::new(task));
             } else {
-                panic!("Tried to wake non-existing async task {}", task_id);
+                println!("Tried to wake non-existing async task {}", task_id);
             }
         }
         drop(waiting_lock);

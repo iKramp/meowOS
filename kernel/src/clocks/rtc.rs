@@ -129,7 +129,7 @@ fn secons_on_year_since_epoch(year: u16) -> u64 {
 }
 
 impl Timer for RtcWrapper {
-    fn start(&self, _now: std::time::Instant) -> bool {
+    fn init(&mut self) -> bool {
         true //nothing to do here
     }
 
@@ -153,5 +153,9 @@ impl Timer for RtcWrapper {
         }
 
         old_values.into()
+    }
+
+    fn calibrate(&mut self, _now: std::time::Instant) {
+        //RTC is not a high-resolution timer, nothing to calibrate
     }
 }
