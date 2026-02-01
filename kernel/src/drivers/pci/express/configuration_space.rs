@@ -60,7 +60,6 @@ pub fn get_capabilities_list(dev: &PcieDevice) -> Vec<Capability> {
 }
 
 pub fn get_extended_capabilities_list(dev: &PcieDevice) -> Vec<ExtendedCapability> {
-    print!("@DBG");
     let pointer = dev.config_space_addr.as_ptr() as u64 + 0x100;
     let mut ext_capabilities = Vec::new();
     let mut cap = unsafe { ExtendedCapabilityPtr::from_ptr(pointer as *mut ExtendedCapability) };
@@ -78,7 +77,6 @@ pub fn get_extended_capabilities_list(dev: &PcieDevice) -> Vec<ExtendedCapabilit
         ext_capabilities.push(cap_read);
         if cap_read.version_and_pointer.next_offset() == 0 {
             println!("no next cap");
-            print!("@BOTH");
             return ext_capabilities;
         } else {
             cap = unsafe {
@@ -121,8 +119,6 @@ pub fn get_bar(dev: &PcieDevice, index: u8) -> Option<MemoryBar> {
 
     let is_64_bit = (curr_bar >> 1) & 0b11 == 0b10;
 
-    println!("@DBG");
-
     let prefetchable = (curr_bar >> 3) & 1 == 1;
     let (mut size, addr) = if is_64_bit {
         println!("bar is 64 bit");
@@ -156,8 +152,6 @@ pub fn get_bar(dev: &PcieDevice, index: u8) -> Option<MemoryBar> {
     size += 1;
     println!("Size of bar: {:X}, address of bar: {:X}", size, addr);
     println!("first bar reg: {:X}", curr_bar);
-
-    println!("@BOTH");
 
     Some(MemoryBar::new(index, index + 0x10, PhysAddr(addr), size, prefetchable, is_64_bit))
 }

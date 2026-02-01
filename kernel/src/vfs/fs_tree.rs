@@ -52,8 +52,7 @@ pub fn init(root: Inode) {
 
 pub fn get_inode(inode_index: InodeIdentifier) -> Option<Inode> {
     let cache = &mut lock_w_info!(INODE_CACHE);
-    println!("@DBG inode cache: {:?}", cache.inodes.values().collect::<Vec<_>>());
-    println!("@BOTH");
+    println!("inode cache: {:?}", cache.inodes.values().collect::<Vec<_>>());
     cache.inodes.get(&inode_index).map(|(inode, _)| inode).cloned()
 }
 

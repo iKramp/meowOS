@@ -53,6 +53,10 @@ impl PageTableEntry {
         if user_mode {
             entry.0 |= 4;
         }
+
+        entry.set_page_cache_disable(false); //LiminePat::WB
+        entry.set_page_write_through(false);
+
         entry.set_num_of_available_pages(512);
         entry
     }
@@ -636,6 +640,10 @@ pub struct PageTree {
 impl PageTree {
     pub const fn new(level_4_table: PhysAddr) -> Self {
         Self { level_4_table }
+    }
+
+    pub fn current() -> Self {
+        Self { level_4_table: Self::get_level4_addr() }
     }
 
     pub fn root(&self) -> PhysAddr {

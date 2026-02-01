@@ -61,6 +61,13 @@ bitfield! {
     #[derive(RegMap)]
     pub struct STATUS(u32);
     impl Debug;
+    pub gio_master_enable, _: 19;
+    pub phyra, _: 10;
+    pub asdv, _: 9, 8;
+    pub speed, _: 7,6;
+    pub txoff, _: 4;
+    pub lu, _: 1;
+    pub fd, _: 0;
 }
 
 bitfield! {

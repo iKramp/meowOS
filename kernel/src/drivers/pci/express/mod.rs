@@ -1,6 +1,5 @@
 use std::{
-    mem_utils::{PhysAddr, VirtAddr, translate_phys_virt_addr},
-    print, println, vec::Vec,
+    error::ErrorCode, mem_utils::{PhysAddr, VirtAddr, translate_phys_virt_addr}, print, println, vec::Vec
 };
 
 use crate::{
@@ -20,7 +19,7 @@ pub(super) mod express_device;
 type PcieDevDriverInitFn = ((PciClass, PciDeviceNumericId), fn(PcieDevice));
 
 pub trait PcieDriver: Send + Sync {
-    fn init(&mut self, dev: &PcieDevice);
+    fn init(&mut self, dev: &PcieDevice) -> Result<(), ErrorCode>;
     fn deinit(&mut self, dev: &PcieDevice);
     /// Called after the device is removed from the system
     /// Either forcibly, or deinit was called earlier
@@ -30,12 +29,11 @@ pub trait PcieDriver: Send + Sync {
 
 pub fn get_devices() -> Vec<PcieDevice> {
     let Some(mcfg_table) = crate::acpi::get_table::<McfgTable>("MCFG") else {
-        println!("No MCFG table found, skipping PCIe initialization");
+        println!(level:info, "No MCFG table found, skipping PCIe initialization");
         return Vec::new();
     };
 
-    println!("@DBG pci::enumerate_devices: MCFG table found at {:#?}", mcfg_table);
-    print!("@BOTH");
+    println!("pci::enumerate_devices: MCFG table found at {:#?}", mcfg_table);
 
     let pcie_allocations = mcfg_table.allocations();
 
@@ -94,8 +92,8 @@ fn check_pcie_device(allocation: &BaseAddressAllocation, bus: u8, device: u8, fu
     let class = config_space_ptr.class_code().read();
     let subclass = config_space_ptr.subclass().read();
     let class = PciClass::from(class, subclass);
-    println!("@DBG Found PCIe device: {:#X?}, class: {:?}", pcie_device, class);
-    println!("@VGA Found PCIe device (class: {:?})", class);
+    println!("Found PCIe device: {:#X?}, class: {:?}", pcie_device, class);
+    println!(level:info, "Found PCIe device (class: {:?})", class);
     Some(pcie_device)
 }
 
@@ -105,15 +103,13 @@ fn is_pcie(device: &mut PcieDevice) -> bool {
     let has_pcie_cap = caps.iter().any(|cap| cap.id == PCI_CAP_PCIE_ID);
     let has_power_mgmt_cap = caps.iter().any(|cap| cap.id == PCI_CAP_POWER_MANAGEMENT_ID);
     if !has_pcie_cap {
-        println!("@DBG Skipping non-PCIe device{:?}", device);
-        print!("@BOTH");
+        println!("Skipping non-PCIe device{:?}", device);
         return false;
     }
-    assert!(
-        has_power_mgmt_cap,
-        "PCIe device without power management capability found: {:#X?}",
-        device
-    );
+    if !has_power_mgmt_cap {
+        println!(level:warn, "PCIe device without power management capability found: {:#X?}", device);
+        return false;
+    }
     true
 }
 

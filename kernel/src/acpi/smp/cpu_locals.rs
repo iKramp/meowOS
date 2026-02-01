@@ -124,7 +124,7 @@ pub fn init_dummy_cpu_locals() {
     unsafe { CPU_LOCALS = MaybeUninit::new(vec.into_boxed_slice()) }
 
     let bsp_stack_ptr = prepare_kernel_stack(KERNEL_STACK_SIZE_PAGES);
-    println!("BSP stack ptr: {:016X}, size: {:X}", bsp_stack_ptr.0, KERNEL_STACK_SIZE_PAGES as u64 * 4096);
+    println!(level:info, "BSP stack ptr: {:016X}, size: {:X}", bsp_stack_ptr.0, KERNEL_STACK_SIZE_PAGES as u64 * 4096);
     let bsp_gdt = interrupts::create_new_gdt(bsp_stack_ptr);
     interrupts::load_gdt(bsp_gdt);
     let bsp_local = super::cpu_locals::CpuLocals::new(bsp_stack_ptr, KERNEL_STACK_SIZE_PAGES as u64, 0, 0, bsp_gdt);

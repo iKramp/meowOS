@@ -3,13 +3,14 @@ registers @ page 372 of pdf
 */
 
 use core::time::Duration;
-use std::error::ErrorCode;
+use std::{error::ErrorCode, w_lock_w_info};
 
 use crate::drivers::net_device::e1000e::{E1000eDevice, PhyAddress, mdio, registers::MDICPtr};
 
 pub fn init_phy(dev: &mut E1000eDevice) -> Result<(), ErrorCode> {
     set_phy(dev)?;
-    let mdic_reg = dev.registers.mdic();
+    let registers = w_lock_w_info!(dev.registers);
+    let mdic_reg = registers.mdic();
     mdio::modify(&mdic_reg, dev.phy_addr, 0, |val| val | (1 << 15))?; //reset
     while mdio::read(&mdic_reg, dev.phy_addr, 0)? & (1 << 15) != 0 {}
     mdio::modify(&mdic_reg, dev.phy_addr, 0, |val| val | (1 << 12))?; //auto negotiate
@@ -37,12 +38,13 @@ pub fn init_phy(dev: &mut E1000eDevice) -> Result<(), ErrorCode> {
 }
 
 fn set_phy(dev: &mut E1000eDevice) -> Result<(), ErrorCode> {
-    if let Some(id) = get_phy_id(&dev.registers.mdic(), PhyAddress::ExternalGigabit) {
+    let registers = w_lock_w_info!(dev.registers);
+    if let Some(id) = get_phy_id(&registers.mdic(), PhyAddress::ExternalGigabit) {
         dev.phy_addr = PhyAddress::ExternalGigabit;
         dev.phy_id = id;
         return Ok(());
     }
-    if let Some(id) = get_phy_id(&dev.registers.mdic(), PhyAddress::InternalPCIe) {
+    if let Some(id) = get_phy_id(&registers.mdic(), PhyAddress::InternalPCIe) {
         dev.phy_addr = PhyAddress::InternalPCIe;
         dev.phy_id = id;
         return Ok(());
@@ -61,6 +63,7 @@ fn get_phy_id(mdic_addr: &MDICPtr, addr: PhyAddress) -> Option<u32> {
 }
 
 pub fn get_link_up(dev: &E1000eDevice) -> bool {
-    let status = mdio::read(&dev.registers.mdic(), dev.phy_addr, 17).unwrap_or(0);
+    let registers = w_lock_w_info!(dev.registers);
+    let status = mdio::read(&registers.mdic(), dev.phy_addr, 17).unwrap_or(0);
     (status >> 10) & 1 == 1
 }

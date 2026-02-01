@@ -49,16 +49,18 @@ impl AhciDriver {
 }
 
 impl LegacyPciDriver for AhciDriver {
-    fn init(&mut self, dev: &pci::LegacyPciDevice) {
+    fn init(&mut self, dev: &pci::LegacyPciDevice) -> Result<(), ErrorCode> {
+        println!("AhciController::init: enabling bus mastering");
         dev.enable_bus_mastering();
-        let mut controller = AhciController::new(dev);
+        let mut controller = AhciController::new(dev)?;
         controller.init(dev);
-        println!("@DBG AHCI controller initialized: {:#x?}", controller);
+        println!(level:info, "AHCI controller initialized");
+        println!("Ahci controller: {:#X?}", controller);
         for port in controller.ports.iter() {
             block_task(Box::pin(crate::vfs::add_disk(port.clone())));
         }
-        print!("@BOTH");
         self.controller = MaybeUninit::new(controller);
+        Ok(())
     }
     fn deinit(&mut self, _dev: &pci::LegacyPciDevice) {
         todo!("deinit for ahci not implemented yet")
@@ -68,8 +70,6 @@ impl LegacyPciDriver for AhciDriver {
     }
     fn service_interrupt(&mut self, _dev: &pci::LegacyPciDevice) {
         let controller = unsafe { self.controller.assume_init_ref() };
-        println!("@DBG AHCI controller interrupt received");
-        print!("@BOTH");
         controller.service_interrupt();
     }
 }
@@ -82,24 +82,24 @@ pub struct AhciController {
 }
 
 impl AhciController {
-    fn new(device: &pci::LegacyPciDevice) -> Self {
+    fn new(device: &pci::LegacyPciDevice) -> Result<Self, ErrorCode> {
         let abar = device
             .bars
             .iter()
-            .find(|bar| bar.get_index() == 5)
-            .expect("AHCI device not following AHCI spec");
+            .find(|bar| bar.get_index() == 5).ok_or(ErrorCode::IllegalValue)?;
         let pci::Bar::Memory(abar) = abar else {
-            panic!("Abar is not memory mapped");
+            return Err(ErrorCode::IllegalValue);
+
         };
 
         let ghc = unsafe { GenericHostControlPtr::from_ptr(abar.get_address().0 as *mut GenericHostControl) };
         let is_64_bit = ghc.cap().read().S64A();
 
-        Self {
+        Ok(Self {
             ghc: RWSpinlock::new(ghc),
             ports: Vec::new(),
             is_64_bit,
-        }
+        })
     }
 
     //https://forum.osdev.org/viewtopic.php?t=40969
@@ -107,10 +107,8 @@ impl AhciController {
         let ghc_lock = w_lock_w_info!(self.ghc);
         println!("AhciController::init: staring ahci init");
         println!("AhciController::init: abar at {:p}", ghc_lock.as_ptr());
-        println!("AhciController::init: enabling bus mastering");
         let ghc_dbg = unsafe { ghc_lock.as_ptr().read_volatile() };
-        println!("@DBG AhciController::init: ghc before init: {:#x?}", ghc_dbg);
-        print!("@BOTH");
+        println!("AhciController::init: ghc before init: {:#x?}", ghc_dbg);
 
         let mut ports = Vec::new();
         let ports_implemented = ghc_lock.pi().read();
@@ -167,15 +165,13 @@ impl AhciController {
                 active_ports.push(port.index);
             }
         }
-        println!("@DBG Active ports: {:#x?}", active_ports);
 
         ghc_lock.is().write(0); //clear all interrupts
         ghc_lock.ghc().write(*ghc_lock.ghc().read().SetIE(true)); //enable global interrupts
 
         ports.retain(|port| active_ports.contains(&port.index));
-        println!("@DBG Final ports: {:#x?}", ports);
+        println!("Final ports: {:#x?}", ports);
         self.ports = ports.into_iter().map(Arc::new).collect();
-        print!("@BOTH");
     }
 
     fn perform_bios_handoff(&self) {
@@ -237,8 +233,6 @@ impl AhciController {
     fn service_interrupt(&self) {
         let ghc_lock = w_lock_w_info!(self.ghc);
         let is = ghc_lock.is().read();
-        println!("@DBG AHCI Controller interrupt serviced, IS: {:#x}", is);
-        print!("@BOTH");
         for port in &self.ports {
             if is & (1 << port.index) != 0 {
                 //handle port interrupt

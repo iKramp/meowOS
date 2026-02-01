@@ -113,12 +113,11 @@ fn enumerate_devices() {
     let express_devices = express::get_devices();
 
     for device in legacy_devices {
-        println!("@DBG configuring pci device (class): {:#x?} ({:#X?})", device, device.common.class.clone());
+        println!("configuring pci device (class): {:#x?} ({:#X?})", device, device.common.class.clone());
         let Some(PciDriverFactory::Legacy(driver_fn)) = get_pci_driver_factory(device.common.class.clone(), &device.common.identification) else {
             println!("No PCI driver loaded for device {:#X?}", device.common.identification_strings);
             continue;
         };
-        print!("@BOTH");
         let driver = driver_fn();
         let location = device.common.device;
         let full_dev = RWSpinlock::new(FullPciDevType::Legacy(device, driver));
@@ -129,12 +128,11 @@ fn enumerate_devices() {
     }
 
     for device in express_devices {
-        println!("@DBG configuring pcie device (class): {:#x?} ({:#X?})", device, device.common.class.clone());
+        println!("configuring pcie device (class): {:#x?} ({:#X?})", device, device.common.class.clone());
         let Some(PciDriverFactory::Express(driver_fn)) = get_pci_driver_factory(device.common.class.clone(), &device.common.identification) else {
-            println!("No PCI driver loaded for device {:#X?}", device.common.identification_strings);
+            println!(level:info, "No PCI driver loaded for device {:#X?}", device.common.identification_strings);
             continue;
         };
-        print!("@BOTH");
         let driver = driver_fn();
         let location = device.common.device;
         let full_dev = RWSpinlock::new(FullPciDevType::Express(device, driver));
@@ -144,17 +142,27 @@ fn enumerate_devices() {
         printlnc!((51, 153, 10), "Device configured");
     }
 
-    let pci_devs = r_lock_w_info!(PCI_DEVICES);
+    let mut pci_devs = w_lock_w_info!(PCI_DEVICES);
+    let mut to_remove = Vec::new();
     pci_devs.values().for_each(|dev| {
         let dev = &mut *w_lock_w_info!(dev);
-        println!("@DBG Initializing PCI device at {:?}", dev.get_common().device);
-        print!("@BOTH");
+        println!("Initializing PCI device at {:?}", dev.get_common().device);
         common_pci_config(dev);
-        match dev {
+        let result = match dev {
             FullPciDevType::Legacy(device, driver) => driver.init(device),
             FullPciDevType::Express(device, driver) => driver.init(device),
+        };
+        if let Err(e) = result {
+            println!(level:error, "PCI device {:?} deriver errored during initialization: {e}. Uninitializing...", dev.get_common().device);
+            to_remove.push(dev.get_common().device);
+            if let Err(e) = common_pci_unconfig(dev) {
+                println!(level:error, "error while uninitializing device: {e}")
+            }
         }
     });
+    for dev_to_remove in to_remove {
+        pci_devs.remove(&dev_to_remove);
+    }
 }
 
 fn common_pci_config(dev: &mut FullPciDevType) {
@@ -162,18 +170,24 @@ fn common_pci_config(dev: &mut FullPciDevType) {
     w_lock_w_info!(PCI_INTERRUPT_HANDLERS)[irq as usize].push(dev.get_common().device);
     let Err(e_msi) = capabilities::msi::init_msi_interrupt(dev, irq + 128) else {
         dev.set_int_type(InterruptType::Msi);
-        println!("@DBG MSI init success");
-        println!("@BOTH");
+        println!("MSI init success");
         return;
     };
     let Err(e_msix) = capabilities::msix::ini_msix_interrupt(dev, irq + 128) else {
         dev.set_int_type(InterruptType::MsiX);
-        println!("@DBG MSIX init success");
-        println!("@BOTH");
+        println!("MSIX init success");
         return;
     };
     w_lock_w_info!(PCI_INTERRUPT_HANDLERS)[irq as usize].retain(|&loc| loc != dev.get_common().device);
-    println!("@DBG MSI/MSIX init error: {:?}/{:?}, skipping device interrupt setup", e_msi, e_msix);
+    println!("MSI/MSIX init error: {:?}/{:?}, skipping device interrupt setup", e_msi, e_msix);
+}
+
+fn common_pci_unconfig(dev: &mut FullPciDevType) -> Result<(), ErrorCode> {
+    match dev.get_int_type() {
+        InterruptType::Uninitialized => Ok(()),
+        InterruptType::Msi => msi::disable_msi(dev),
+        InterruptType::MsiX => msix::disable_msix(dev)
+    }
 }
 
 static PCI_INTERRUPT_HANDLERS: RWSpinlock<[Vec<PciDeviceLocation>; 32]> = RWSpinlock::new([const { Vec::new() }; 32]);
@@ -184,8 +198,6 @@ fn alocate_irq() -> u8 {
 }
 
 fn common_pci_interrupt_handler(irq_index: u8) {
-    println!("@DBG PCI interrupt received");
-    print!("@BOTH");
     let pci_devs_lock = r_lock_w_info!(PCI_INTERRUPT_HANDLERS);
     let pci_devs = pci_devs_lock[irq_index as usize].clone();
     drop(pci_devs_lock);
@@ -194,27 +206,19 @@ fn common_pci_interrupt_handler(irq_index: u8) {
         let pci_dev_lock = match pci_devices_lock.get(dev_location) {
             Some(dev) => dev,
             None => {
-                println!("@DBG PCI device at {:?} not found for interrupt handling", dev_location);
-                print!("@BOTH");
                 continue;
             }
         };
         let mut pci_dev = w_lock_w_info!(pci_dev_lock);
         match &mut *pci_dev {
             FullPciDevType::Legacy(device, driver) => {
-                println!("@DBG Handling interrupt for legacy PCI device at {:?}", dev_location);
-                print!("@BOTH");
                 driver.service_interrupt(device);
             }
             FullPciDevType::Express(device, driver) => {
-                println!("@DBG Handling interrupt for PCIe device at {:?}", dev_location);
-                print!("@BOTH");
                 driver.service_interrupt(device);
             }
         }
     }
-    println!("@DBG PCI interrupt handling complete");
-    print!("@BOTH");
     apic_eoi();
 }
 

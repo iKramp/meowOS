@@ -1,4 +1,4 @@
-use std::{error::ErrorCode, println};
+use std::{error::ErrorCode, println, w_lock_w_info};
 
 use crate::{drivers::net_device::e1000e::{E1000eDevice, registers::E1000eRegistersPtr}, rand};
 
@@ -31,26 +31,23 @@ pub(super) enum NvmState {
     Unchanged,
 }
 
-pub(super) fn init_nvm(dev: &mut E1000eDevice) {
-    while !dev.registers.eec().read().auto_rd() {}
-}
-
 fn config_nvm(dev: &mut E1000eDevice) -> Result<NvmState, ErrorCode> {
+    let registers = w_lock_w_info!(dev.registers);
     let mut state = NvmState::Unchanged;
-    let mut ecc = dev.registers.eec().read();
+    let mut ecc = registers.eec().read();
     println!("{:X?}", ecc);
 
     if ecc.nvadds() == 0 {
-        println!("@DBG NVM address size is 0");
+        println!("NVM address size is 0");
         if ecc.nvmtype() {
             //flash
-            println!("@BOTH Error: NVM type is flash and nvsize is 0");
+            println!(level:error, "e1000e config_nvm error: NVM type is flash and nvsize is 0");
             return Err(ErrorCode::IllegalValue);
         } else {
             //eeprom
             let size: u32 = 128 * (1 << ecc.nvsize());
             if size > 1 << 16 {
-                println!("@BOTH Error: Invalid NVM size: {}", size);
+                println!(level:error, "e1000e config_nvm error: Invalid NVM size: {}", size);
                 return Err(ErrorCode::IllegalValue);
             }
             let addr_size = if size > 1 << 8 {
@@ -59,18 +56,17 @@ fn config_nvm(dev: &mut E1000eDevice) -> Result<NvmState, ErrorCode> {
                 1
             };
             println!("NVM size: {} bytes", size);
-            dev.registers.eec().write(*ecc.set_nvadds(addr_size));
+            registers.eec().write(*ecc.set_nvadds(addr_size));
             state = NvmState::Changed;
         }
-        println!("@BOTH");
     }
 
 
 
     //read mac
-    let bytes_1 = read_nvm(&dev.registers, 0);
-    let bytes_2 = read_nvm(&dev.registers, 1);
-    let bytes_3 = read_nvm(&dev.registers, 2);
+    let bytes_1 = read_nvm(&registers, 0);
+    let bytes_2 = read_nvm(&registers, 1);
+    let bytes_3 = read_nvm(&registers, 2);
     dev.mac_address = [
         (bytes_1 & 0xFF) as u8,
         (bytes_1 >> 8) as u8,

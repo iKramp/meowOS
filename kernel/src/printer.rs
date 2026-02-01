@@ -1,5 +1,5 @@
 use core::ptr::addr_of;
-use std::{Print, lock_w_info, sync::no_int_spinlock::NoIntSpinlock};
+use std::{Print, lock_w_info, print::LogLevel, sync::no_int_spinlock::NoIntSpinlock};
 
 use crate::{
     utils::byte_to_port,
@@ -12,22 +12,17 @@ pub fn init_printer() {
     unsafe { std::set_print(addr_of!(PRINT)) };
 }
 
-enum PrintTarget {
-    Vga,
-    E9Port,
-    Both,
-}
-
-const ALLOWED_TARGET: PrintTarget = PrintTarget::Both;
-
 struct Printer {
     vga_text: &'static NoIntSpinlock<VgaText>,
-    target: PrintTarget,
+    log_level: LogLevel,
 }
 
 impl Printer {
     pub const fn new(vga_text: &'static NoIntSpinlock<VgaText>) -> Self {
-        Self { vga_text, target: PrintTarget::Both }
+        Self {
+            vga_text,
+            log_level: LogLevel::Info,
+        }
     }
 
     pub fn init(&self) {
@@ -39,11 +34,7 @@ fn num_to_chars(num: u8) -> [u8; 3] {
     let hundreds = num / 100;
     let tens = (num % 100) / 10;
     let units = num % 10;
-    [
-        hundreds + b'0',
-        tens + b'0',
-        units + b'0',
-    ]
+    [hundreds + b'0', tens + b'0', units + b'0']
 }
 
 impl Print for Printer {
@@ -95,42 +86,21 @@ impl Print for Printer {
         byte_to_port(0xe9, b'0');
         byte_to_port(0xe9, b'm');
     }
+
+    fn set_log_level(&mut self, log_level: std::print::LogLevel) {
+        self.log_level = log_level;
+    }
 }
 
 impl core::fmt::Write for Printer {
-    fn write_str(&mut self, mut s: &str) -> core::fmt::Result {
-        if s.starts_with("@VGA") {
-            self.target = PrintTarget::Vga;
-            if s.len() <= 5 {
-                return Ok(());
-            }
-            s = &s[5..];
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        if self.log_level != LogLevel::Debug {
+            let mut vga = lock_w_info!(self.vga_text);
+            vga.write_str(s);
         }
-        if s.starts_with("@DBG") {
-            self.target = PrintTarget::E9Port;
-            if s.len() <= 5 {
-                return Ok(());
-            }
-            s = &s[5..];
-        }
-        if s.starts_with("@BOTH") {
-            self.target = PrintTarget::Both;
-            if s.len() <= 6 {
-                return Ok(());
-            }
-            s = &s[6..];
-        }
-        match (&self.target, ALLOWED_TARGET) {
-            (PrintTarget::Vga | PrintTarget::Both, PrintTarget::Vga | PrintTarget::Both) => {
-                let mut vga = lock_w_info!(self.vga_text);
-                vga.write_str(s)?
-            }
-            (PrintTarget::E9Port | PrintTarget::Both, PrintTarget::E9Port | PrintTarget::Both) => {
-                for char in s.as_bytes() {
-                    byte_to_port(0xe9, *char);
-                }
-            }
-            (_, _) => { /* Do nothing */ }
+
+        for char in s.as_bytes() {
+            byte_to_port(0xe9, *char);
         }
         Ok(())
     }

@@ -1,13 +1,18 @@
 use crate::{
     drivers::net_device::e1000e::{E1000eDevice, registers::MRQC},
-    memory::{paging::PageTree, physical_allocator},
+    memory::{
+        paging::{self, PageTree},
+        physical_allocator,
+    },
     rand,
 };
+use bitfield::bitfield;
 use core::sync::atomic::Ordering;
 use std::{
-    boxed::Box,
-    mem_utils::{PhysAddr, VirtAddr, translate_virt_phys_addr},
+    lock_w_info,
+    mem_utils::{self, PhysAddr, translate_virt_phys_addr},
     println,
+    vec::Vec, w_lock_w_info,
 };
 
 pub(super) const RX_DESC_COUNT: usize = 256;
@@ -17,14 +22,26 @@ pub(super) struct ReceiveDescriptor {
     pub buffer_addr: PhysAddr,
     pub length: u16,
     pub checksum: u16,
-    pub status: u8,
+    pub status: RxDescStatus,
     pub errors: u8,
     pub vlan_tag: u16,
 }
 
+bitfield! {
+    pub(super) struct RxDescStatus(u8);
+    impl Debug;
+    desc_done, _: 0;
+    end_of_packet, _: 1;
+    vp, _: 3;
+    udp_checksum_calculated, _: 4;
+    tcp_checksum_calculated, _: 5;
+    ip_checksum_calculated, _: 6;
+}
+
 pub(super) fn init_receive(dev: &mut E1000eDevice) {
+    let registers = w_lock_w_info!(dev.registers);
     //mac addr 0
-    let mac_reg = dev.registers.rx_add().idx(0);
+    let mac_reg = registers.rx_add().idx(0);
     let mac = mac_reg.ral().read() as u64 | ((mac_reg.rah().read() as u64) << 32);
     println!("MAC address read from hardware: {:012X}", mac);
     if mac & (1 << 63) == 0 {
@@ -57,11 +74,11 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
 
     //zero out MTA
     for i in 0..128 {
-        dev.registers.mta().idx(i).write(0);
+        registers.mta().idx(i).write(0);
     }
 
-    dev.registers.rctl().write(
-        *dev.registers
+    registers.rctl().write(
+        *registers
             .rctl()
             .read()
             .set_en(false) //disable first
@@ -71,7 +88,7 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
             .set_lpe(false) //no long packets for now
             .set_lbm(0) //no loopback
             .set_rdmts(0) //process at 1/2 descriptors filled
-            .set_dtyp(0) //split descriptor
+            .set_dtyp(0) //legacy descriptor
             //ignore multicast offset for now, idk what it is
             .set_bam(true) //broadcast accept mode
             .set_bsize(0b11) //4096 bytes buffer size - 1 page
@@ -80,56 +97,142 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
             .set_cfien(false)
             .set_dpf(true) //discard pause frames - not dealing with pause now
             .set_pmcf(true) //pass MAC control frames
-            .set_secrc(false), //don't strip crc
+            .set_secrc(true), //strip crc
     );
 
-    dev.registers.mrqc().write(MRQC(0)); //no multi-queue
+    registers.mrqc().write(MRQC(0)); //no multi-queue
+
+    //clear RSS redirection table
+    for i in 0..32 {
+        registers.reta().idx(i).write(0);
+    }
+
+    //clear RSS hash keys
+    for i in 0..10 {
+        registers.rssrk().idx(i).write(0);
+    }
 
     //initialize the queue
     let queue_size_bytes = RX_DESC_COUNT * core::mem::size_of::<ReceiveDescriptor>();
-    let mut rx_queue: Box<[ReceiveDescriptor; RX_DESC_COUNT]> = Box::new(std::array::from_fn(|_| ReceiveDescriptor::default()));
-    let rx_queue_virt = VirtAddr(rx_queue.as_ref() as *const _ as u64);
-    let rx_queue_phy =
-        translate_virt_phys_addr(rx_queue_virt, PageTree::get_level4_addr()).expect("Failed to translate RX queue address");
+    let queue_size_pages = queue_size_bytes.div_ceil(4096);
 
-    for descriptor in rx_queue.iter_mut() {
-        let phys_addr = physical_allocator::allocate_frame();
-        descriptor.buffer_addr = phys_addr;
-        descriptor.status = 0;
-        descriptor.length = 0;
-        descriptor.checksum = 0;
-        descriptor.errors = 0;
-        descriptor.vlan_tag = 0;
+    let rx_queue_virt = paging::PageTree::current().allocate_contigious(queue_size_pages as u64, None, false);
+    let rx_queue: &mut [ReceiveDescriptor; RX_DESC_COUNT] =
+        unsafe { &mut *(rx_queue_virt.0 as *mut [ReceiveDescriptor; RX_DESC_COUNT]) };
+
+    let mut page_tree = PageTree::current();
+    for page in 0..queue_size_pages {
+        let page_virt = rx_queue_virt + 4096 * page as u64;
+        let page = page_tree.get_page_table_entry_mut(page_virt).expect("was just allocated");
+        page.set_pat(paging::LiminePat::UC);
     }
 
+    let rx_queue_phys =
+        translate_virt_phys_addr(rx_queue_virt, PageTree::get_level4_addr()).expect("Failed to translate RX queue address");
+
+    for descriptor in rx_queue[..RX_DESC_COUNT - 1].iter_mut() {
+        let mut default_desc = ReceiveDescriptor::default();
+        core::mem::swap(&mut default_desc, descriptor);
+        core::mem::forget(default_desc);
+
+        let phys_addr = physical_allocator::allocate_frame();
+        descriptor.buffer_addr = phys_addr;
+    }
+    let last_descriptor = rx_queue.last_mut().expect("?");
+    let mut default_desc = ReceiveDescriptor::default();
+    core::mem::swap(&mut default_desc, last_descriptor);
+    core::mem::forget(default_desc);
+
+
     core::sync::atomic::fence(Ordering::SeqCst);
+    dev.receive_queue = Some((rx_queue, (rx_queue_virt, rx_queue_phys)));
 
-    dev.receive_queue = Some((rx_queue, (rx_queue_virt, rx_queue_phy)));
+    registers.rx_descriptor_queue_info().rdbal().write(rx_queue_phys.0 as u32);
+    registers
+        .rx_descriptor_queue_info()
+        .rdbah()
+        .write((rx_queue_phys.0 >> 32) as u32);
+    registers
+        .rx_descriptor_queue_info()
+        .rdlen()
+        .write(queue_size_bytes as u32);
+    registers.rx_descriptor_queue_info().rdh().write(0);
+    registers
+        .rx_descriptor_queue_info()
+        .rdt()
+        .write((RX_DESC_COUNT - 1) as u32);
 
-    dev.registers.rx_descriptor_queue_info().rdbal().write(rx_queue_phy.0 as u32);
-    dev.registers.rx_descriptor_queue_info().rdbah().write((rx_queue_phy.0 >> 32) as u32);
-    dev.registers.rx_descriptor_queue_info().rdlen().write(queue_size_bytes as u32);
-    dev.registers.rx_descriptor_queue_info().rdh().write(0);
-    dev.registers.rx_descriptor_queue_info().rdt().write((RX_DESC_COUNT - 1) as u32);
-
-    dev.registers.rxdctl().write(*dev.registers.rxdctl().read()
-        .set_gran(true)
-        .set_pthresh(32)
-        .set_hthresh(32)
-        .set_wthresh(1)
+    registers.rxdctl().write(
+        *registers
+            .rxdctl()
+            .read()
+            .set_gran(true)
+            .set_pthresh(32)
+            .set_hthresh(32)
+            .set_wthresh(1),
     );
 }
 
+pub(super) fn process_received_packets(dev: &mut E1000eDevice) {
+    let packets = get_received_packets(dev);
+    for packet in packets {
+        let ptr = mem_utils::translate_phys_virt_addr(packet.buffer_addr);
+        let len = packet.length;
+        let buffer = unsafe { core::slice::from_raw_parts(ptr.0 as *const u8, len as usize) };
+        println!(level:info, "{:X?}", buffer);
+    }
+}
+
+fn get_received_packets(dev: &mut E1000eDevice) -> Vec<ReceiveDescriptor> {
+    let lock = lock_w_info!(dev.receive_lock);
+    let registers = w_lock_w_info!(dev.registers);
+    let mut curr_tail = registers.rx_descriptor_queue_info().rdt().read();
+    let curr_head = registers.rx_descriptor_queue_info().rdh().read();
+
+    let Some((receive_queue, _)) = &mut dev.receive_queue else {
+        return Vec::new();
+    };
+
+    let mut desc_vec = Vec::new();
+
+    //first descriptor may have already been processed but can't be advanced. Check
+    loop {
+        let curr_descriptor = &mut receive_queue[curr_tail as usize];
+        if curr_descriptor.buffer_addr.0 != 0 {
+            //process descriptor
+            let mut tmp_desc = ReceiveDescriptor::default();
+            core::mem::swap(&mut tmp_desc, curr_descriptor);
+            desc_vec.push(tmp_desc);
+        }
+
+        if (curr_tail + 1) % RX_DESC_COUNT as u32 == curr_head {
+            break;
+        }
+
+        let data_frame = physical_allocator::allocate_frame();
+        curr_descriptor.buffer_addr = data_frame;
+        curr_tail += 1;
+        curr_tail %= RX_DESC_COUNT as u32;
+    }
+
+    registers.rx_descriptor_queue_info().rdt().write(curr_tail);
+
+    drop(lock);
+    desc_vec
+}
+
 pub fn enable_receive(dev: &mut E1000eDevice) {
-    let mut rctl = dev.registers.rctl().read();
+    let registers = w_lock_w_info!(dev.registers);
+    let mut rctl = registers.rctl().read();
     rctl.set_en(true);
-    dev.registers.rctl().write(rctl);
+    registers.rctl().write(rctl);
 }
 
 pub fn disable_receive(dev: &mut E1000eDevice) {
-    let mut rctl = dev.registers.rctl().read();
+    let registers = w_lock_w_info!(dev.registers);
+    let mut rctl = registers.rctl().read();
     rctl.set_en(false);
-    dev.registers.rctl().write(rctl);
+    registers.rctl().write(rctl);
 }
 
 pub fn generate_random_mac() -> [u8; 6] {
@@ -149,7 +252,7 @@ impl Default for ReceiveDescriptor {
             buffer_addr: PhysAddr(0),
             length: 0,
             checksum: 0,
-            status: 0,
+            status: RxDescStatus(0),
             errors: 0,
             vlan_tag: 0,
         }

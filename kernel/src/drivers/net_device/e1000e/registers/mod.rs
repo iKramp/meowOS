@@ -45,9 +45,9 @@ pub(super) struct E1000eRegisters {
     #[reg(RW)] pub eiac: EIAC,
     #[reg(RW)] pub iam: IAM,
     #[reg(RW)] pub ivar: IVAR,
-    reserved_rctl: [u8; 0x78],
+    reserved_rctl: [u8; 0x18],
     #[reg(RW)] pub rctl: RCTL,
-    reserved_fcttv: [u8; 0xC],
+    reserved_fcttv: [u8; 0x6C],
     #[reg(RW)] pub fcttv: FCTTV,
     reserved_tctl: [u8; 0x28C],
     #[reg(RW)] pub tctl: TCTL,
@@ -120,6 +120,8 @@ pub(super) struct E1000eRegisters {
     reserved_fcrtv: [u8; 0x298],
     #[reg(RW)] pub fcrtv: FCRTV, //offset 0x5f40
 }
+
+unsafe impl Send for E1000eRegistersPtr<'_> {}
 
 const _: () = {
     assert!(offset_of!(E1000eRegisters, fcrtv) == 0x5f40, "E1000eRegs.fcrtv offset is wrong!");

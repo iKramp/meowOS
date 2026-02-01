@@ -51,14 +51,12 @@ pub fn get_device_identification(id_struct: PciDeviceNumericId) -> DeviceIdentif
 
     let _res = get_device_identification_inner(&mut identification); //it's fine if we get Err, not all
     //devices have subsystems
-    print!("@BOTH");
     identification
 }
 
 fn get_device_identification_inner(id_struct: &mut DeviceIdentification) -> Result<(), ErrorCode> {
     let vendor_str = format!("{:x}", id_struct.id.vendor_id.ok_or(ErrorCode::NoEntry)?);
 
-    print!("@DBG");
     println!("vendor str: {}", vendor_str);
 
     let file_lines = DEVICE_CODES.split('\n').filter(|line| !line.starts_with("#"));

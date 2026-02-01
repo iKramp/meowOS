@@ -1,38 +1,41 @@
-use std::println;
+use std::{println, w_lock_w_info};
 
 use crate::drivers::net_device::e1000e::{
-    E1000eDevice, enable_promiscuous_mode, nvm::init_nvm, phy, receive::{disable_receive, enable_receive, init_receive}, registers::{FCAH, FCAL, FCT, InterruptMask}, transmit::{disable_transmit, enable_transmit, init_transmit}
+    E1000eDevice, phy, receive::{disable_receive, enable_receive, init_receive}, registers::{FCAH, FCAL, FCT, InterruptMask}, transmit::{disable_transmit, enable_transmit, init_transmit}
 };
 
 pub(super) fn init(dev: &mut E1000eDevice) {
+    let registers = w_lock_w_info!(dev.registers);
     //disable all interrupts
-    dev.registers.imc().write(all_interrupts_mask());
+    registers.imc().write(all_interrupts_mask());
 
     //reset
-    dev.registers.ctrl().write(*dev.registers.ctrl().read().set_rst(true));
+    registers.ctrl().write(*registers.ctrl().read().set_rst(true));
     std::thread::sleep(std::time::Duration::from_millis(1));
-    while dev.registers.ctrl().read().rst() {}
-    println!("@DBG E1000e reset complete");
+    while registers.ctrl().read().rst() {}
+    println!("E1000e reset complete");
 
     //disable interrupts again
-    dev.registers.imc().write(all_interrupts_mask());
+    registers.imc().write(all_interrupts_mask());
 
-    dev.registers.ctrl().write(
-        *dev.registers
+    registers.ctrl().write(
+        *registers
             .ctrl()
             .read()
-            .set_asde(false) //docs say must be set to 0
+            .set_asde(false)
             .set_frcdplx(false)
             .set_frcspd(false)
             .set_slu(true)
     );
 
     //no flow control for now
-    dev.registers.fcah().write(FCAH(0));
-    dev.registers.fcal().write(FCAL(0));
-    dev.registers.fct().write(FCT(0));
-    dev.registers.gcr().write(*dev.registers.gcr().read().set_must_set_1(true));
-    dev.registers.gcr2().write(*dev.registers.gcr2().read().set_must_set_1(true));
+    registers.fcah().write(FCAH(0));
+    registers.fcal().write(FCAL(0));
+    registers.fct().write(FCT(0));
+    registers.gcr().write(*registers.gcr().read().set_must_set_1(true));
+    registers.gcr2().write(*registers.gcr2().read().set_must_set_1(true));
+
+    drop(registers);
 
     //init phy
     if let Err(e) = phy::init_phy(dev) {
@@ -43,10 +46,6 @@ pub(super) fn init(dev: &mut E1000eDevice) {
 
     //init stats
 
-    //nvm init
-    init_nvm(dev);
-    println!("NVM initialized");
-
     init_receive(dev);
     init_transmit(dev);
     println!("Receive and Transmit initialized");
@@ -54,11 +53,13 @@ pub(super) fn init(dev: &mut E1000eDevice) {
     enable_receive(dev);
     enable_transmit(dev);
 
+    let registers = w_lock_w_info!(dev.registers);
     //enable interesting interrupts
-    dev.registers.icr().read(); //clear all first
-    dev.registers.ims().write(interesting_interrupts_mask());
+    registers.icr().read(); //clear all first
+    registers.ims().write(interesting_interrupts_mask());
+    drop(registers);
 
-    println!("E1000e initialized successfully");
+    println!(level:info, "E1000e initialized successfully");
     println!(
         "MAC Address: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
         dev.mac_address[0],
@@ -72,14 +73,15 @@ pub(super) fn init(dev: &mut E1000eDevice) {
     println!("Link up: {}", phy::get_link_up(dev));
 
     println!("Enabling promiscuous mode for testing purposes");
-    enable_promiscuous_mode(dev);
+    dev.enable_promiscuous_mode();
 }
 
 pub(super) fn deinit(dev: &mut E1000eDevice) {
-    dev.registers.imc().write(all_interrupts_mask());
+    w_lock_w_info!(dev.registers).imc().write(all_interrupts_mask());
     disable_receive(dev);
     disable_transmit(dev);
-    dev.registers.ctrl().write(*dev.registers.ctrl().read().set_slu(false)); //link down
+    let registers = w_lock_w_info!(dev.registers);
+    registers.ctrl().write(*registers.ctrl().read().set_slu(false)); //link down
 }
 
 //everything except reserved fields

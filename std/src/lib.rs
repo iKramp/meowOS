@@ -10,7 +10,7 @@
 fn panic(info: &PanicInfo) -> ! {
     unsafe {
         let mut lock = crate::print::PRINT.as_mut().unwrap().force_get_lock();
-        printlncl!((0, 0, 255), &mut lock, "{}", info);
+        print::_print_colored_locked((0, 0, 255), &mut lock, format_args!("{}", info), print::LogLevel::Error);
         loop {
             crate::thread::sleep(crate::time::Duration::from_secs(10));
         }

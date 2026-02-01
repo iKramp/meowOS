@@ -25,8 +25,7 @@ impl PcieDevice {
             subdevice_id: Some(config_space_addr.subsystem_id().read()),
         };
         let identification_strings = crate::drivers::pci::device_codes::get_device_identification(identification.clone());
-        println!("@DBG init_pci_device: Device identification: {:#X?}", identification_strings);
-        print!("@BOTH");
+        println!("init_pci_device: Device identification: {:#X?}", identification_strings);
 
         Self {
             bars: Vec::new(),
@@ -53,8 +52,7 @@ impl PcieDevice {
                 i += 1;
                 continue;
             };
-            println!("@DBG Bar {}: {:#X?}", i, bar);
-            println!("@BOTH");
+            println!("Bar {}: {:#X?}", i, bar);
             i += if bar.is_64_bit { 2 } else { 1 };
             bars.push(bar);
         }
@@ -67,6 +65,11 @@ impl PcieDevice {
 
     pub(super) fn load_extended_capabilities(&mut self) {
         self.extended_capabilities = configuration_space::get_extended_capabilities_list(self);
+    }
+
+    pub fn enable_bus_mastering(&self) {
+        let mut command = self.config_space_addr.command().read();
+        self.config_space_addr.command().write(*command.set_bus_master_enable(true));
     }
 }
 

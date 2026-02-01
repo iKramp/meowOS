@@ -52,7 +52,7 @@ pub fn read_tables() {
         .expect("This os doesn not support PCs without ACPI");
     let rsdt = rsdt::get_rsdt(&rsdp);
     assert!(rsdt.validate());
-    println!("rsdt is valid");
+    println!(level:info, "rsdt is valid");
 
     let tables = rsdt.get_tables();
     for table in &tables {
@@ -67,11 +67,11 @@ pub fn read_tables() {
             );
             let header = std::mem_utils::get_at_virtual_addr::<sdt::AcpiSdtHeader>(table_virt);
             let signature = std::str::from_utf8(&header.signature).expect("signatures are ascii, error in mem read");
-            println!("Found ACPI table: {} at physical address {:X}", signature, table.0);
+            println!(level:info, "Found ACPI table: {} at physical address {:X}", signature, table.0);
             ACPI_TABLE_MAP.insert(signature, table_virt);
         }
     }
-    println!("Acpi tables read");
+    println!(level:info, "Acpi tables read");
 }
 
 pub fn init_acpi() {
@@ -81,7 +81,7 @@ pub fn init_acpi() {
     let entries = madt.get_madt_entries();
     let platform_info = platform_info::PlatformInfo::new(&entries, std::mem_utils::PhysAddr(madt.local_apic_address as u64));
     //override madt apic address if it exists in entries
-    println!("initing APIC");
+    println!(level:info, "initing APIC");
     unsafe {
         PLATFORM_INFO = Some(platform_info);
     };
@@ -92,7 +92,7 @@ pub fn init_acpi() {
     ioapic::init_ioapic(platform_info);
 
     smp::wake_cpus(platform_info);
-    printlnc!((0, 255, 0), "ACPI initialized and APs started");
+    printlnc!(level:info, (0, 255, 0), "ACPI initialized and APs started");
     unsafe { PAGE_TREE_ALLOCATOR.unmap_lower_half() };
 
     //after loading dsdt

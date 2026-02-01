@@ -65,8 +65,8 @@ extern "C" fn _start() -> ! {
     let cmd_line_info = unsafe { &(*LIMINE_BOOTLOADER_REQUESTS.cmd_line_request.info) };
     let str = unsafe { ffi::CStr::from_ptr(cmd_line_info.cmdline) };
 
-    println!("starting RustOs...");
-    println!("stack pointer: {:?}", stack_pointer);
+    println!(level:info, "starting RustOs...");
+    println!(level:info, "stack pointer: {:?}", stack_pointer);
 
     memory::init_memory();
 
@@ -75,7 +75,7 @@ extern "C" fn _start() -> ! {
     interrupts::init_interrupts();
 
     let cmd_args = cmd_args::CmdArgs::new(str.to_str().expect("Invalid UTF-8 in cmdline"));
-    println!("cmd_args: {:?}", cmd_args);
+    println!(level:info, "cmd_args: {:?}", cmd_args);
 
     acpi::read_tables();
 
@@ -125,7 +125,6 @@ extern "C" fn _start() -> ! {
     loop {
         println!("RustOs is running! Counter: {}", counter);
         counter += 1;
-        drivers::net_device::e1000e::print_ptrs();
         std::thread::sleep(core::time::Duration::from_secs(1));
     }
 

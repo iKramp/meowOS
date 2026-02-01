@@ -39,8 +39,8 @@ pub fn init() {
     };
     let n_pages = find_max_ram_address(memory_regions).0 >> 12;
     unsafe { MAX_RAM_ADDR = PhysAddr(n_pages << 12) };
-    println!("n_pages: {}", n_pages);
-    println!("max memory address: {:#X}", n_pages * 4096);
+    println!(level:info, "n_pages: {}", n_pages);
+    println!(level:info, "max memory address: {:#X}", n_pages * 4096);
 
     //is a power of 2
     let binary_tree_size_elements = get_binary_tree_element_cnt(n_pages);

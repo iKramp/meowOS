@@ -17,7 +17,7 @@ pub fn init_msi_interrupt(dev: &FullPciDevType, msi_irq: u8) -> Result<(), Error
     let cap_addr;
     match dev {
         FullPciDevType::Legacy(legacy_pci_device, _) => {
-            println!("@DBG device is legacy pci device");
+            println!("device is legacy pci device");
             println!("disabling legacy interrupt");
             let command = legacy::config_space::get_command(&legacy_pci_device.common.device);
             legacy::config_space::set_command(command | (1 << 10), &legacy_pci_device.common.device);
@@ -30,7 +30,7 @@ pub fn init_msi_interrupt(dev: &FullPciDevType, msi_irq: u8) -> Result<(), Error
             ));
         }
         FullPciDevType::Express(pcie_device, _) => {
-            println!("@DBG device is pcie device");
+            println!("device is pcie device");
             println!("disabling legacy interrupt");
             let mut command = pcie_device.config_space_addr.command().read();
             command.set_interrupt_disable(true);
@@ -76,9 +76,43 @@ pub fn init_msi_interrupt(dev: &FullPciDevType, msi_irq: u8) -> Result<(), Error
     cap_addr.set_dword(0, (message_control as u32) << 16 | (first_dword & 0xFFFF));
 
     println!("MSI interrupt initialized on vector {}", msi_irq);
-    println!("@BOTH");
 
     Ok(())
+}
+
+pub fn disable_msi(dev: &FullPciDevType) -> Result<(), ErrorCode> {
+    let capabilities = &dev.get_common().capabilities;
+    let msi_cap = capabilities.iter().find(|cap| cap.id == 5).ok_or(ErrorCode::NoEntry)?;
+
+    #[allow(clippy::needless_late_init)] //bruh useless lint
+    let cap_addr;
+    match dev {
+        FullPciDevType::Legacy(legacy_pci_device, _) => {
+            let command = legacy::config_space::get_command(&legacy_pci_device.common.device);
+            legacy::config_space::set_command(command | (1 << 10), &legacy_pci_device.common.device);
+            cap_addr = CapAddr::IO(port_access::get_config_address(
+                true,
+                legacy_pci_device.common.device.bus,
+                legacy_pci_device.common.device.device,
+                legacy_pci_device.common.device.function,
+                msi_cap.pointer,
+            ));
+        }
+        FullPciDevType::Express(pcie_device, _) => {
+            let mut command = pcie_device.config_space_addr.command().read();
+            command.set_interrupt_disable(true);
+            pcie_device.config_space_addr.command().write(command);
+            let ptr = pcie_device.config_space_addr.as_ptr() as u64 + msi_cap.pointer as u64;
+            cap_addr = CapAddr::Memory(VirtAddr(ptr));
+        }
+    }
+    
+    let mut first_dword = cap_addr.get_dword(0);
+    first_dword &= !(1 << 16);
+    cap_addr.set_dword(0, first_dword); //disable
+
+    todo!()
+    
 }
 
 fn set_msi_address(is_64_bit: bool, cap_addr: &CapAddr) {

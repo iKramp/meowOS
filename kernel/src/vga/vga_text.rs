@@ -128,6 +128,10 @@ impl std::Print for VgaText {
         self.foreground = (255, 255, 255);
         self.background = (0, 0, 0);
     }
+
+    fn set_log_level(&mut self, _log_level: print::LogLevel) {
+        
+    }
 }
 
 #[used]
@@ -153,7 +157,7 @@ pub fn clear_screen() {
     display.char = 0;
     let vga_buffer_addr = unsafe { VGA_BINDING.buffer };
     drop(display);
-    println!("VGA buffer address: {:#x?}", vga_buffer_addr);
+    println!(level:info, "VGA buffer address: {:#x?}", vga_buffer_addr);
 }
 
 pub fn hello_message() {

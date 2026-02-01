@@ -40,13 +40,13 @@ pub fn disable_interrupts() -> bool {
 }
 
 pub fn init_interrupts() {
-    println!("initializing PIC");
+    println!(level:info, "initializing PIC");
     init_pic();
-    println!("initializing GDT");
+    println!(level:info, "initializing GDT");
     gdt::init_boot_gdt(); //add a separate TSS for each core
-    println!("initializing IDT");
+    println!(level:info, "initializing IDT");
     idt::init_idt();
-    printlnc!((0, 255, 0), "interrupts initialized");
+    printlnc!(level:info, (0, 255, 0), "interrupts initialized");
 }
 
 pub fn init_pic() {

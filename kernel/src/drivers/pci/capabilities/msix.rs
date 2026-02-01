@@ -1,6 +1,6 @@
 use std::{error::ErrorCode, mem_utils::VirtAddr, vec::Vec};
 
-use crate::drivers::pci::{BarTrait, FullPciDevType, MemoryBar, capabilities::CapAddr, legacy, port_access};
+use crate::drivers::pci::{BarTrait, FullPciDevType, MemoryBar, capabilities::CapAddr, legacy, port_access::{self, set_dword}};
 
 pub(in crate::drivers::pci) const PCI_CAP_MSIX_ID: u8 = 0x11;
 
@@ -85,9 +85,44 @@ pub fn ini_msix_interrupt(dev: &FullPciDevType, msi_irq: u8) -> Result<(), Error
         set_table_entry(&table_bar, table_offset, i, msi_addr, msi_data, 0);
     }
 
+    let mut dword_0 = cap_addr.get_dword(0);
+    dword_0 |= 1 << 31;
+    cap_addr.set_dword(0, dword_0); //enable
+
     Ok(())
 }
 
-pub(in crate::drivers::pci) fn get_vector(dev: &FullPciDevType) -> u8 {
-    todo!()
+pub fn disable_msix(dev: &FullPciDevType) -> Result<(), ErrorCode> {
+    let capabilities = &dev.get_common().capabilities;
+    let msix_cap = capabilities
+        .iter()
+        .find(|cap| cap.id == PCI_CAP_MSIX_ID)
+        .ok_or(ErrorCode::NoEntry)?;
+
+    let cap_addr;
+    match dev {
+        FullPciDevType::Legacy(legacy_pci_device, _) => {
+            let command = legacy::config_space::get_command(&legacy_pci_device.common.device);
+            legacy::config_space::set_command(command | (1 << 10), &legacy_pci_device.common.device);
+            cap_addr = CapAddr::IO(port_access::get_config_address(
+                true,
+                legacy_pci_device.common.device.bus,
+                legacy_pci_device.common.device.device,
+                legacy_pci_device.common.device.function,
+                msix_cap.pointer,
+            ));
+        }
+        FullPciDevType::Express(pcie_device, _) => {
+            let mut command = pcie_device.config_space_addr.command().read();
+            command.set_interrupt_disable(true);
+            pcie_device.config_space_addr.command().write(command);
+            let ptr = pcie_device.config_space_addr.as_ptr() as u64 + msix_cap.pointer as u64;
+            cap_addr = CapAddr::Memory(VirtAddr(ptr));
+        }
+    }
+
+    let mut dword_0 = cap_addr.get_dword(0);
+    dword_0 &= !(1 << 31);
+    cap_addr.set_dword(0, dword_0); //disable
+    Ok(())
 }

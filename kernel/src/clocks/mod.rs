@@ -48,7 +48,7 @@ fn try_use_timer(timer: &mut Box<dyn Timer>) -> bool {
     if success {
         let now = rtc::RTC_WRAPPER.get_time();
         timer.calibrate(now);
-        println!("Current time: {:?}", timer.get_time());
+        println!(level:info, "Current time: {:?}", timer.get_time());
     }
     success
 }

@@ -43,7 +43,7 @@ pub async fn add_disk(disk: Arc<dyn BlockDevice>) -> Uuid {
 fn remove_disk(uuid: Uuid) {
     let mut vfs = lock_w_info!(VFS);
     let Some(partitions) = vfs.disks.remove(&uuid) else {
-        //slow path
+        //slow path, maybe disk was forcibly removed
         remove_disk_slow(uuid, vfs);
         return;
     };
@@ -52,20 +52,20 @@ fn remove_disk(uuid: Uuid) {
         if let Some(part) = part {
             let was_mounted = vfs.mounted_filesystems.remove(partition);
             let had_device = vfs.devices.remove(&part.device);
-            debug_assert!(was_mounted.is_none(), "Inconsistent VFS state detected when removing disk: had mounted partitions");
-            printlnc!((0, 255, 255), "Inconsistent VFS state detected when removing disk: had mounted partitions");
-            debug_assert!(had_device.is_some(), "Inconsistent VFS state detected when removing disk: missing device for partition {}", partition);
-            printlnc!((0, 255, 255), "Inconsistent VFS state detected when removing disk: missing device for partition {}", partition);
+            if was_mounted.is_some() {
+                printlnc!(level:error, (0, 255, 255), "Inconsistent VFS state detected when removing disk: had mounted partitions");
+            }
+            if had_device.is_none() {
+                printlnc!(level:error, (0, 255, 255), "Inconsistent VFS state detected when removing disk: missing device for partition {}", partition);
+            }
         } else {
-            debug_assert!(false, "Inconsistent VFS state detected when removing disk: missing partition {}", partition);
-            printlnc!((0, 255, 255), "Inconsistent VFS state detected when removing disk: missing partition {}", partition);
+            printlnc!(level:error, (0, 255, 255), "Inconsistent VFS state detected when removing disk: missing partition {}", partition);
         }
     }
 }
 
 fn remove_disk_slow(uuid: Uuid, mut vfs: NoIntSpinlockGuard<'_, Vfs>) {
-    debug_assert!(false, "Warning: attempting to remove non existent disk {}", uuid);
-    printlnc!((0, 255, 255), "Warning: attempting to remove non existent disk {}", uuid);
+    printlnc!(level:warn, (0, 255, 255), "Warning: attempting to remove non existent disk {}", uuid);
     let Vfs { 
         available_partitions,
         devices,
@@ -74,8 +74,9 @@ fn remove_disk_slow(uuid: Uuid, mut vfs: NoIntSpinlockGuard<'_, Vfs>) {
     } = &mut *vfs;
     available_partitions.retain(|part_id, part| {
         let device = devices.get(&part.device);
-        debug_assert!(device.is_some(), "Inconsistent VFS state detected when removing disk: device is none");
-        printlnc!((0, 255, 255), "Inconsistent VFS state detected when removing disk: device is none");
+        if device.is_none() {
+            printlnc!(level:error, (0, 255, 255), "Inconsistent VFS state detected when removing disk: device is none");
+        }
         let retain = if let Some(device) = device {
             device.drive != uuid
         } else {
@@ -85,8 +86,9 @@ fn remove_disk_slow(uuid: Uuid, mut vfs: NoIntSpinlockGuard<'_, Vfs>) {
             return true;
         }
         let was_mounted = mounted_filesystems.remove(part_id);
-        debug_assert!(was_mounted.is_none(), "Inconsistent VFS state detected when removing disk: had mounted partitions");
-        printlnc!((0, 255, 255), "Inconsistent VFS state detected when removing disk: had mounted partitions");
+        if was_mounted.is_some() {
+            printlnc!(level:error, (0, 255, 255), "Inconsistent VFS state detected when removing disk: had mounted partitions");
+        }
         false
     });
 }
@@ -335,13 +337,11 @@ pub async unsafe fn read_file_aligned(file_handle: &FileHandle, buffer: &[PhysAd
 
     let inode = fs_tree::get_inode(file_handle.inode).ok_or(ErrorCode::InodeNotPresent)?;
 
-    println!("@DBG operations::read_file_aligned: Inode {:X?}", inode);
-    print!("@BOTH");
+    println!("operations::read_file_aligned: Inode {:X?}", inode);
 
     let mut vfs = lock_w_info!(VFS);
     let device_details = vfs.devices.get(&inode.device).ok_or(ErrorCode::NoEntry)?;
-    println!("@DBG operations::read_file_aligned: Device details {:X?}", device_details);
-    print!("@BOTH");
+    println!("operations::read_file_aligned: Device details {:X?}", device_details);
     let partition_id = device_details.partition;
     let fs = vfs.mounted_filesystems.get_mut(&partition_id).ok_or(ErrorCode::NoEntry)?;
     let fs = fs.clone();
@@ -350,8 +350,7 @@ pub async unsafe fn read_file_aligned(file_handle: &FileHandle, buffer: &[PhysAd
 
     let bytes_read = fs.read(inode.index, offset, size, buffer).await;
 
-    println!("@DBG operations::read_file_aligned: Read {} bytes", bytes_read);
-    print!("@BOTH");
+    println!("operations::read_file_aligned: Read {} bytes", bytes_read);
 
     Ok(bytes_read.min(size))
 }
