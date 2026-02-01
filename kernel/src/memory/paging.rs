@@ -249,7 +249,7 @@ impl PageTable {
 
         //remove highest page from pool
         let highest_virt_page = VirtAddr(0xFFFF_FFFF_FFFF_F000);
-        unsafe { self.mmap(highest_virt_page, PhysAddr(0)) };
+        unsafe { self.mmap(highest_virt_page, PhysAddr(0)).expect("mapping highest page must succeed") };
         let entry = self.get_page_table_entry(highest_virt_page, 4).expect("page entry must exist after allocation");
         entry.set_writeable(false);
         entry.set_no_execute(true);
@@ -311,7 +311,7 @@ impl PageTable {
             }
             None
         }
-        return None;
+        None
     }
 
     fn get_available_entry_level_1(&self, low: bool) -> usize {
@@ -346,7 +346,7 @@ impl PageTable {
                 }
             }
         }
-        return None
+        None
     }
 
     pub fn allocate(&mut self, virtual_address: VirtAddr) -> Result<PhysAddr, ErrorCode> {
@@ -401,9 +401,9 @@ impl PageTable {
 
     ///maps the given virtual address to the given physical address. Physical address must be
     ///marked as used
+    ///Returns an error if the virtual address is already mapped
     ///# Safety
-    ///physical address must be marked as used by an external actor. Virtual address must
-    ///not yet be in use by this page tree
+    ///physical address must be marked as used by an external actor. 
     pub unsafe fn mmap(&mut self, virtual_address: VirtAddr, physical_address: PhysAddr) -> Result<(), ErrorCode> {
         debug_assert!(!is_on_ram(physical_address) || physical_allocator::is_frame_allocated(physical_address));
         unsafe {
@@ -439,8 +439,9 @@ impl PageTable {
         entry.num_of_available_pages() == 0
     }
 
-    ///#Safety: Virtual address must not yet be in use by this page tree. Physical address must be
-    ///marked as used
+    ///Returns an error if the virtual address is already mapped
+    ///# Safety
+    ///Physical address must be marked as used
     unsafe fn allocate_4_to_2_virtual(&mut self, level: u64, address: VirtAddr, physical_address: PhysAddr) -> Result<bool, ErrorCode> {
         let entry = self.get_page_table_entry_on_level(address, level);
         if !entry.present() {
@@ -515,7 +516,8 @@ impl PageTable {
 
     //TODO: when unmapping lowest pages, also unmap higher pages
 
-    //returns if there was no space but now there is
+    ///returns if there was no space but now there is
+    ///Erros if the page was not mapped
     pub unsafe fn unmap(&mut self, address: VirtAddr, level: u64) -> Result<bool, ErrorCode> {
         let entry = &mut self.entries[(address.0 >> (3 + level * 9) & 0b111_111_111) as usize];
         if !entry.present() {
@@ -793,10 +795,12 @@ impl PageTree {
         }
     }
 
-    pub fn unmap(&mut self, addr: std::mem_utils::VirtAddr) {
+    ///Unmaps the given virtual address
+    ///Returns an error if the address was not mapped
+    pub fn unmap(&mut self, addr: std::mem_utils::VirtAddr) -> Result<(), ErrorCode> {
         unsafe {
             let level_4_table = get_at_physical_addr::<PageTable>(self.level_4_table);
-            level_4_table.unmap(addr, 4);
+            level_4_table.unmap(addr, 4).map(|_| ())
         }
     }
 

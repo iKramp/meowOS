@@ -54,7 +54,7 @@ pub fn register_express_pci_driver(
 fn register_pci_driver(class: PciClass, id: PciDeviceNumericId, factory: PciDriverFactory) {
     let key = (class.clone(), id);
     let mut drivers = w_lock_w_info!(PCI_DEVICE_DRIVERS);
-    let class_drivers = drivers.entry(class).or_insert_with(Vec::new);
+    let class_drivers = drivers.entry(class).or_default();
     class_drivers.push((key.1, factory));
 }
 

@@ -1,20 +1,31 @@
-use crate::{drivers::pci::{
-    capabilities::{Capability, msi, msix::{self, PCI_CAP_MSIX_ID}}, common_info::CommonInfo, driver_store::{PciDriverFactory, get_pci_driver_factory}
-}, handler, interrupts};
-use core::{fmt::Debug, sync::atomic::{AtomicU8, Ordering}};
-use std::{boxed::Box, collections::btree_map::BTreeMap, error::ErrorCode, print, println, printlnc, r_lock_w_info, sync::rw_lock::RWSpinlock, vec::Vec, w_lock_w_info};
+use crate::{
+    drivers::pci::{
+        capabilities::{Capability, msi, msix},
+        common_info::CommonInfo,
+        driver_store::{PciDriverFactory, get_pci_driver_factory},
+    },
+    handler, interrupts,
+};
+use core::{
+    fmt::Debug,
+    sync::atomic::{AtomicU8, Ordering},
+};
+use std::{
+    boxed::Box, collections::btree_map::BTreeMap, error::ErrorCode, println, printlnc, r_lock_w_info, sync::rw_lock::RWSpinlock,
+    vec::Vec, w_lock_w_info,
+};
 
 use crate::interrupts::{InterruptProcessorState, handlers::apic_eoi};
 
 mod bar;
 mod capabilities;
+mod common_info;
 mod device_class;
 mod device_codes;
 mod driver_store;
 mod express;
 mod legacy;
 mod port_access;
-mod common_info;
 
 pub use bar::*;
 pub(super) use device_class::*;
@@ -25,9 +36,9 @@ pub use legacy::legacy_device::LegacyPciDevice;
 pub(super) const PCI_CAP_POWER_MANAGEMENT_ID: u8 = 0x1;
 pub(super) const PCI_CAP_PCIE_ID: u8 = 0x10;
 
-pub use driver_store::{register_legacy_pci_driver, register_express_pci_driver};
-pub use legacy::LegacyPciDriver;
+pub use driver_store::{register_express_pci_driver, register_legacy_pci_driver};
 pub use express::PcieDriver;
+pub use legacy::LegacyPciDriver;
 use unroll::unroll_for_loops;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -86,7 +97,7 @@ impl FullPciDevType {
     }
 
     fn set_int_type(&mut self, int_type: InterruptType) {
-        self.get_common_mut().int_type = int_type;       
+        self.get_common_mut().int_type = int_type;
     }
 
     fn get_int_type(&self) -> InterruptType {
@@ -113,8 +124,14 @@ fn enumerate_devices() {
     let express_devices = express::get_devices();
 
     for device in legacy_devices {
-        println!("configuring pci device (class): {:#x?} ({:#X?})", device, device.common.class.clone());
-        let Some(PciDriverFactory::Legacy(driver_fn)) = get_pci_driver_factory(device.common.class.clone(), &device.common.identification) else {
+        println!(
+            "configuring pci device (class): {:#x?} ({:#X?})",
+            device,
+            device.common.class.clone()
+        );
+        let Some(PciDriverFactory::Legacy(driver_fn)) =
+            get_pci_driver_factory(device.common.class.clone(), &device.common.identification)
+        else {
             println!("No PCI driver loaded for device {:#X?}", device.common.identification_strings);
             continue;
         };
@@ -128,8 +145,14 @@ fn enumerate_devices() {
     }
 
     for device in express_devices {
-        println!("configuring pcie device (class): {:#x?} ({:#X?})", device, device.common.class.clone());
-        let Some(PciDriverFactory::Express(driver_fn)) = get_pci_driver_factory(device.common.class.clone(), &device.common.identification) else {
+        println!(
+            "configuring pcie device (class): {:#x?} ({:#X?})",
+            device,
+            device.common.class.clone()
+        );
+        let Some(PciDriverFactory::Express(driver_fn)) =
+            get_pci_driver_factory(device.common.class.clone(), &device.common.identification)
+        else {
             println!(level:info, "No PCI driver loaded for device {:#X?}", device.common.identification_strings);
             continue;
         };
@@ -179,14 +202,17 @@ fn common_pci_config(dev: &mut FullPciDevType) {
         return;
     };
     w_lock_w_info!(PCI_INTERRUPT_HANDLERS)[irq as usize].retain(|&loc| loc != dev.get_common().device);
-    println!("MSI/MSIX init error: {:?}/{:?}, skipping device interrupt setup", e_msi, e_msix);
+    println!(
+        "MSI/MSIX init error: {:?}/{:?}, skipping device interrupt setup",
+        e_msi, e_msix
+    );
 }
 
 fn common_pci_unconfig(dev: &mut FullPciDevType) -> Result<(), ErrorCode> {
     match dev.get_int_type() {
         InterruptType::Uninitialized => Ok(()),
         InterruptType::Msi => msi::disable_msi(dev),
-        InterruptType::MsiX => msix::disable_msix(dev)
+        InterruptType::MsiX => msix::disable_msix(dev),
     }
 }
 

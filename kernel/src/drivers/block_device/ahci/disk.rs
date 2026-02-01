@@ -1,15 +1,16 @@
 #![allow(non_snake_case)]
 #![allow(clippy::identity_op)]
 
-use core::{array, cell::UnsafeCell, fmt::Debug, mem::MaybeUninit, ops::DerefMut, sync::atomic::{AtomicU8, AtomicU32}, task::Waker, time::Duration};
+use core::{array, fmt::Debug, mem::MaybeUninit, ops::DerefMut, sync::atomic::AtomicU32, task::Waker, time::Duration};
 use std::{
     boxed::Box,
     error::ErrorCode,
     lock_w_info,
     mem_utils::{PhysAddr, VirtAddr, get_at_physical_addr, get_at_virtual_addr, memset_virtual_addr},
-    print, println,
+    println,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
-    vec::Vec, w_lock_w_info,
+    vec::Vec,
+    w_lock_w_info,
 };
 
 use bitfield::bitfield;
@@ -86,10 +87,10 @@ impl AhciController {
         let abar = device
             .bars
             .iter()
-            .find(|bar| bar.get_index() == 5).ok_or(ErrorCode::IllegalValue)?;
+            .find(|bar| bar.get_index() == 5)
+            .ok_or(ErrorCode::IllegalValue)?;
         let pci::Bar::Memory(abar) = abar else {
             return Err(ErrorCode::IllegalValue);
-
         };
 
         let ghc = unsafe { GenericHostControlPtr::from_ptr(abar.get_address().0 as *mut GenericHostControl) };
@@ -126,7 +127,7 @@ impl AhciController {
                     device: 0,
                     commands_issued: AtomicU32::new(0),
                     address_lock: NoIntSpinlock::new(()),
-                    task_wakers: array::from_fn(|_| NoIntSpinlock::new(None))
+                    task_wakers: array::from_fn(|_| NoIntSpinlock::new(None)),
                 });
             }
         }
@@ -276,17 +277,19 @@ struct CommandMetadata {
 impl VirtualPort {
     pub fn get_command_index(&self) -> Option<u8> {
         let mut index = u8::MAX;
-        self.commands_issued.fetch_update(
-            core::sync::atomic::Ordering::AcqRel,
-            core::sync::atomic::Ordering::Acquire,
-            |current| {
-                index = current.trailing_ones() as u8;
-                if index >= self.command_depth as u8 {
-                    return None;
-                }
-                Some(current | (1 << index))
-            },
-        ).ok()?;
+        self.commands_issued
+            .fetch_update(
+                core::sync::atomic::Ordering::AcqRel,
+                core::sync::atomic::Ordering::Acquire,
+                |current| {
+                    index = current.trailing_ones() as u8;
+                    if index >= self.command_depth as u8 {
+                        return None;
+                    }
+                    Some(current | (1 << index))
+                },
+            )
+            .ok()?;
 
         Some(index)
     }
@@ -523,7 +526,7 @@ impl VirtualPort {
                 prdt_entry_ptr.write_volatile(PrdtEntry(prdt_entry.0));
             }
 
-            PAGE_TREE_ALLOCATOR.unmap(cmd_table_virt);
+            let _ = PAGE_TREE_ALLOCATOR.unmap(cmd_table_virt); //unmap can't fail, was just mapped
         }
 
         let cmd_issue = 1 << index;
@@ -559,7 +562,8 @@ impl VirtualPort {
         let in_service = self.get_property(0x38);
         let issued = self.commands_issued.load(core::sync::atomic::Ordering::Acquire);
         let completed = issued & !in_service;
-        self.commands_issued.fetch_and(!completed, core::sync::atomic::Ordering::AcqRel);
+        self.commands_issued
+            .fetch_and(!completed, core::sync::atomic::Ordering::AcqRel);
         drop(lock);
 
         let serr = self.get_property(0x30);

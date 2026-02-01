@@ -1,6 +1,5 @@
 use std::{
-    boxed::Box,
-    mem_utils::{PhysAddr, VirtAddr, translate_virt_phys_addr}, w_lock_w_info,
+    mem_utils::{PhysAddr, translate_virt_phys_addr}, w_lock_w_info,
 };
 
 use crate::{

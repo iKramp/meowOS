@@ -1,4 +1,4 @@
-use std::{mem_utils::PhysAddr, print, println, vec::Vec};
+use std::{mem_utils::PhysAddr, println, vec::Vec};
 
 use bitfield::bitfield;
 use reg_map::RegMap;

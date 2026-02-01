@@ -1,6 +1,6 @@
 use std::{error::ErrorCode, mem_utils::VirtAddr, vec::Vec};
 
-use crate::drivers::pci::{BarTrait, FullPciDevType, MemoryBar, capabilities::CapAddr, legacy, port_access::{self, set_dword}};
+use crate::drivers::pci::{BarTrait, FullPciDevType, MemoryBar, capabilities::CapAddr, legacy, port_access};
 
 pub(in crate::drivers::pci) const PCI_CAP_MSIX_ID: u8 = 0x11;
 
@@ -82,7 +82,7 @@ pub fn ini_msix_interrupt(dev: &FullPciDevType, msi_irq: u8) -> Result<(), Error
 
         let msi_data = msi_irq as u32;
 
-        set_table_entry(&table_bar, table_offset, i, msi_addr, msi_data, 0);
+        set_table_entry(table_bar, table_offset, i, msi_addr, msi_data, 0);
     }
 
     let mut dword_0 = cap_addr.get_dword(0);
@@ -99,6 +99,7 @@ pub fn disable_msix(dev: &FullPciDevType) -> Result<(), ErrorCode> {
         .find(|cap| cap.id == PCI_CAP_MSIX_ID)
         .ok_or(ErrorCode::NoEntry)?;
 
+    #[allow(clippy::needless_late_init)]
     let cap_addr;
     match dev {
         FullPciDevType::Legacy(legacy_pci_device, _) => {

@@ -6,7 +6,7 @@ use std::{
     boxed::Box,
     error::ErrorCode,
     mem_utils::{PhysAddr, VirtAddr},
-    print, println, r_lock_w_info,
+    println, r_lock_w_info,
     sync::{no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
     w_lock_w_info,
 };
@@ -58,13 +58,13 @@ impl PcieDriver for E1000eDriver {
         Ok(())
     }
 
-    fn deinit(&mut self, dev: &pci::PcieDevice) {}
+    fn deinit(&mut self, _dev: &pci::PcieDevice) {}
 
     fn remove_device(&mut self) {
         todo!()
     }
 
-    fn service_interrupt(&mut self, dev: &pci::PcieDevice) {
+    fn service_interrupt(&mut self, _dev: &pci::PcieDevice) {
         let nic = unsafe { self.device.assume_init_mut() };
         nic.service_interrupt();
     }
@@ -218,7 +218,13 @@ impl Drop for E1000eDevice {
 
             let mut page_tree = PageTree::current();
             for page in 0..queue_size_pages {
-                page_tree.unmap(queue.1.0 + 4096 * page as u64);
+                let res = page_tree.unmap(queue.1.0 + 4096 * page as u64);
+                #[cfg(debug_assertions)]
+                {
+                    if let Err(e) = res {
+                        println!("Error unmapping RX page {}: {:?}", page, e);
+                    }
+                }
             }
         }
 
@@ -228,7 +234,13 @@ impl Drop for E1000eDevice {
 
             let mut page_tree = PageTree::current();
             for page in 0..queue_size_pages {
-                page_tree.unmap(queue.1.0 + 4096 * page as u64);
+                let res = page_tree.unmap(queue.1.0 + 4096 * page as u64);
+                #[cfg(debug_assertions)]
+                {
+                    if let Err(e) = res {
+                        println!("Error unmapping TX page {}: {:?}", page, e);
+                    }
+                }
             }
         }
     }

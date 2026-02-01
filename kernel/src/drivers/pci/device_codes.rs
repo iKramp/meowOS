@@ -1,5 +1,5 @@
 use core::ops::Add;
-use std::{error::ErrorCode, format, print, println};
+use std::{error::ErrorCode, format, println};
 
 static DEVICE_CODES: &str = include_str!("../../../../assets/pci.ids");
 

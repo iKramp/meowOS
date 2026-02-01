@@ -1,7 +1,4 @@
-use core::alloc::{self, GlobalAlloc, Layout};
-use std::{boxed::Box, mem_utils::*};
-
-use reg_map::RegMap;
+use std::mem_utils::*;
 
 use crate::acpi::sdt::AcpiSdtHeader;
 
@@ -105,11 +102,7 @@ impl RootSystemDescriptorTable for Rsdt {
     fn print_signature(&self) {
         crate::println!(
             "{:?}",
-            self.header
-                .signature
-                .iter()
-                .map(|a| *a as char)
-                .collect::<std::Vec<char>>()
+            self.header.signature.iter().map(|a| *a as char).collect::<std::Vec<char>>()
         )
     }
 }
@@ -175,11 +168,7 @@ impl RootSystemDescriptorTable for Xsdt {
     fn print_signature(&self) {
         crate::println!(
             "{:?}",
-            self.header
-                .signature
-                .iter()
-                .map(|a| *a as char)
-                .collect::<std::Vec<char>>()
+            self.header.signature.iter().map(|a| *a as char).collect::<std::Vec<char>>()
         )
     }
 }

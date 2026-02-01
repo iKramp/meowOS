@@ -1,6 +1,6 @@
 use std::{error::ErrorCode, println, w_lock_w_info};
 
-use crate::{drivers::net_device::e1000e::{E1000eDevice, registers::E1000eRegistersPtr}, rand};
+use crate::{drivers::net_device::e1000e::{E1000eDevice, registers::E1000eRegistersPtr}};
 
 
 

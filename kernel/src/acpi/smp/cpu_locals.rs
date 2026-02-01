@@ -191,7 +191,7 @@ impl CpuLocals {
                 cpu_locals = out(reg) cpu_locals
             );
             let mut_ref = &mut *cpu_locals;
-            let prev_mut_borrow = mut_ref.get_state.mut_borrow.swap(true, Ordering::AcqRel);
+            let _ = mut_ref.get_state.mut_borrow.swap(true, Ordering::AcqRel);
             // assert!(!prev_mut_borrow && mut_ref.get_state.immut_borrow.load(Ordering::Acquire) == 0, "CpuLocals already borrowed");
             CpuLocalBindingMut { cpu_locals: mut_ref }
         }

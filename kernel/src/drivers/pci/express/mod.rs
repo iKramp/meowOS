@@ -1,5 +1,5 @@
 use std::{
-    error::ErrorCode, mem_utils::{PhysAddr, VirtAddr, translate_phys_virt_addr}, print, println, vec::Vec
+    error::ErrorCode, mem_utils::{PhysAddr, VirtAddr, translate_phys_virt_addr}, println, vec::Vec
 };
 
 use crate::{

@@ -1,5 +1,3 @@
-use std::println;
-
 use crate::{acpi::cpu_locals::CpuLocals, proc::{StackCpuStateData, interrupt_context_switch, save_and_release_current}};
 
 use super::{disable_interrupts, enable_interrupts};

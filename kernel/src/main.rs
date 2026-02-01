@@ -83,15 +83,6 @@ extern "C" fn _start() -> ! {
 
     acpi::init_acpi();
 
-    // let mut counter = 0;
-    //
-    // loop {
-    //     println!("Counting {}", counter);
-    //     counter += 1;
-    //     let now = std::time::Instant::now();
-    //     while std::time::Instant::now() - now < core::time::Duration::from_secs(1) {}
-    // }
-
     drivers::init_drivers();
 
     drivers::pci::init();
@@ -108,25 +99,8 @@ extern "C" fn _start() -> ! {
         println!("{}", e);
         panic!("Failed to mount root partition");
     }
-    //
-    // let path = vfs::resolve_path("/");
-    // let file_open_flags = FileFlags::new_with_flags(true, false, false, false);
-    // let file = block_task(Box::pin(vfs::open_file((&path).into(), None, file_open_flags))).unwrap();
-    // println!("{:?}", block_task(Box::pin(vfs::get_dir_entries(&file))));
-    // file_operations::do_file_operations();
-    //
-    // loop {
-    //     process_tasks();
-    // }
 
-    // proc::init();
-
-    let mut counter = 0;
-    loop {
-        println!("RustOs is running! Counter: {}", counter);
-        counter += 1;
-        std::thread::sleep(core::time::Duration::from_secs(1));
-    }
+    proc::init();
 
     //start first proc
     unsafe { core::arch::asm!("int 254") };

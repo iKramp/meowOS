@@ -96,7 +96,7 @@ impl core::fmt::Write for Printer {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         if self.log_level != LogLevel::Debug {
             let mut vga = lock_w_info!(self.vga_text);
-            vga.write_str(s);
+            let _ = vga.write_str(s); //ignore errors to vga, serial works either way
         }
 
         for char in s.as_bytes() {

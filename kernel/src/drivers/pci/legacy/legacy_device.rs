@@ -1,6 +1,8 @@
-use std::{print, println, vec::Vec};
+use std::{println, vec::Vec};
 
-use crate::drivers::pci::{InterruptType, PciDeviceLocation, PciDeviceNumericId, bar::Bar, common_info::CommonInfo, legacy::config_space};
+use crate::drivers::pci::{
+    InterruptType, PciDeviceLocation, PciDeviceNumericId, bar::Bar, common_info::CommonInfo, legacy::config_space,
+};
 
 #[derive(Debug)]
 pub struct LegacyPciDevice {

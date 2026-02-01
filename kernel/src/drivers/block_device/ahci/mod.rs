@@ -1,4 +1,3 @@
-use core::mem::MaybeUninit;
 use std::boxed::Box;
 
 use crate::drivers::pci::{MassStorageController, PciClass};
