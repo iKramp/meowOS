@@ -3,7 +3,7 @@ use std::{lock_w_info, print};
 use std::{sync::no_int_spinlock::NoIntSpinlock, vec::Vec};
 use std::boxed::Box;
 
-use crate::vfs::{DeviceId, InodeType};
+use crate::vfs::{DeviceId, Inode, InodeType};
 
 use super::{VfsAdapterTrait, DirEntry};
 
@@ -45,7 +45,7 @@ impl TtyAdapter {
 
 #[async_trait::async_trait]
 impl VfsAdapterTrait for TtyAdapter {
-    async fn read(&self, _inode: crate::vfs::InodeIndex, _offset_bytes: u64, mut size_bytes: u64, buffer: &[std::mem_utils::PhysAddr]) -> u64 {
+    async fn read(&self, _inode: crate::vfs::InodeIndex, _offset_bytes: u64, mut size_bytes: u64, buffer: &[std::mem_utils::PhysAddr]) -> Result<u64, ErrorCode> {
         let mut ready_input = lock_w_info!(self.ready_input);
         let mut block = 0;
         let mut read_size = 0;
@@ -65,33 +65,33 @@ impl VfsAdapterTrait for TtyAdapter {
             size_bytes -= size_to_read;
             read_size += size_to_read;
         }
-        read_size
+        Ok(read_size)
     }
 
     async fn read_dir(&self, _inode: crate::vfs::InodeIndex) -> Result<Box<[DirEntry]>, ErrorCode> {
-        panic!("TTY does not support read_dir");
+        Err(ErrorCode::UnsupportedOperation)
     }
 
-    async fn write(&self, _inode: crate::vfs::InodeIndex, _offset: u64, size: u64, buffer: &[std::mem_utils::PhysAddr]) -> (crate::vfs::Inode, u64) {
+    async fn write(&self, _inode: crate::vfs::InodeIndex, _offset: u64, size: u64, buffer: &[std::mem_utils::PhysAddr]) -> Result<(Inode, u64), ErrorCode> {
         for i in 0..(size / 4096) {
             let Some(phys_ptr) = buffer.get(i as usize) else {
-                return (self.get_inode(), size);
+                return Err(ErrorCode::InvalidArgument);
             };
             let ptr = std::mem_utils::translate_phys_virt_addr(*phys_ptr).0 as *const u8;
             let str = unsafe { core::str::from_raw_parts(ptr, 4096) };
-            print!("{}", str);
+            print!(level:info, "{}", str);
         }
         let Some(phys_ptr) = buffer.last() else {
-            return (self.get_inode(), size);
+            return Err(ErrorCode::InvalidArgument);
         };
         let ptr = std::mem_utils::translate_phys_virt_addr(*phys_ptr).0 as *const u8;
         let str = unsafe { core::str::from_raw_parts(ptr, (size % 4096) as usize) };
         print!("{}", str);
 
-        (self.get_inode(), size)
+        Ok((self.get_inode(), size))
     }
 
-    async fn stat(&self, _inode: crate::vfs::InodeIndex) -> crate::vfs::Inode {
-        self.get_inode()
+    async fn stat(&self, _inode: crate::vfs::InodeIndex) -> Result<Inode, ErrorCode> {
+        Ok(self.get_inode())
     }
 }

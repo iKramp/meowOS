@@ -13,19 +13,19 @@ pub trait FileSystemFactory: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait FileSystem: Debug + Send + Sync {
-    async fn unmount(&self);
+    async fn unmount(&self) -> Result<(), ErrorCode>;
     ///Offset must be page aligned
-    async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> u64;
+    async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, ErrorCode>;
     async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, ErrorCode>;
     ///Offset must be page aligned. Returns the new inode
-    async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> (Inode, u64);
-    async fn stat(&self, inode: InodeIndex) -> Inode;
-    async fn set_stat(&self, inode_index: InodeIndex, inode_data: Inode);
+    async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), ErrorCode>;
+    async fn stat(&self, inode: InodeIndex) -> Result<Inode, ErrorCode>;
+    async fn set_stat(&self, inode_index: InodeIndex, inode_data: Inode) -> Result<(), ErrorCode>;
     ///returns the new parent inode in the first field and the new inode in the second
-    async fn create(&self, name: &str, parent_dir: InodeIndex, type_mode: InodeType, uid: u16, gid: u16) -> (Inode, Inode);
-    async fn unlink(&self, parent_inode: InodeIndex, name: &str);
+    async fn create(&self, name: &str, parent_dir: InodeIndex, type_mode: InodeType, uid: u16, gid: u16) -> Result<(Inode, Inode), ErrorCode>;
+    async fn unlink(&self, parent_inode: InodeIndex, name: &str) -> Result<(), ErrorCode>;
     ///returns the new parent inode
-    async fn link(&self, inode: InodeIndex, parent_dir: InodeIndex, name: &str) -> Inode;
-    async fn truncate(&self, inode: InodeIndex, size: u64);
+    async fn link(&self, inode: InodeIndex, parent_dir: InodeIndex, name: &str) -> Result<Inode, ErrorCode>;
+    async fn truncate(&self, inode: InodeIndex, size: u64) -> Result<(), ErrorCode>;
     async fn rename(&self, inode: InodeIndex, parent_inode: InodeIndex, name: &str) -> Result<(), ErrorCode>;
 }

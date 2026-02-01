@@ -7,6 +7,7 @@ use super::{filesystem_trait::FileSystem, DeviceDetails, DeviceId, Inode, InodeI
 
 mod proc_adapter;
 mod tty_adapter;
+mod net_adapter;
 
 pub use proc_adapter::ProcAdapter;
 pub use tty_adapter::TtyAdapter;
@@ -42,15 +43,15 @@ impl VfsAdapterDevice {
 
 #[async_trait::async_trait]
 pub trait VfsAdapterTrait: Debug + Send + Sync {
-    async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> u64;
+    async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, ErrorCode>;
     async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, ErrorCode>;
-    async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> (Inode, u64);
-    async fn stat(&self, inode: InodeIndex) -> Inode;
+    async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), ErrorCode>;
+    async fn stat(&self, inode: InodeIndex) -> Result<Inode, ErrorCode>;
 }
 
 #[async_trait::async_trait]
 impl<T: VfsAdapterTrait> FileSystem for T {
-    async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> u64 {
+    async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, ErrorCode> {
         VfsAdapterTrait::read(self, inode, offset_bytes, size_bytes, buffer).await
     }
 
@@ -58,20 +59,20 @@ impl<T: VfsAdapterTrait> FileSystem for T {
         VfsAdapterTrait::read_dir(self, inode).await
     }
 
-    async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> (Inode, u64) {
+    async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), ErrorCode> {
         VfsAdapterTrait::write(self, inode, offset, size, buffer).await
     }
 
-    async fn stat(&self, inode: InodeIndex) -> Inode {
+    async fn stat(&self, inode: InodeIndex) -> Result<Inode, ErrorCode> {
         VfsAdapterTrait::stat(self, inode).await
     }
 
-    async fn unmount(&self) {
-        unreachable!()
+    async fn unmount(&self) -> Result<(), ErrorCode> {
+        Err(ErrorCode::UnsupportedOperation)
     }
 
-    async fn set_stat(&self, _inode_index: InodeIndex, _inode_data: Inode) {
-        unreachable!()
+    async fn set_stat(&self, _inode_index: InodeIndex, _inode_data: Inode) -> Result<(), ErrorCode> {
+        Err(ErrorCode::UnsupportedOperation)
     }
 
     async fn create(
@@ -81,23 +82,23 @@ impl<T: VfsAdapterTrait> FileSystem for T {
         _type_mode: super::InodeType,
         _uid: u16,
         _gid: u16,
-    ) -> (Inode, Inode) {
-        unreachable!()
+    ) -> Result<(Inode, Inode), ErrorCode> {
+        Err(ErrorCode::UnsupportedOperation)
     }
 
-    async fn unlink(&self, _parent_inode: InodeIndex, _name: &str) {
-        unreachable!()
+    async fn unlink(&self, _parent_inode: InodeIndex, _name: &str) -> Result<(), ErrorCode> {
+        Err(ErrorCode::UnsupportedOperation)
     }
 
-    async fn link(&self, _inode: InodeIndex, _parent_dir: InodeIndex, _name: &str) -> Inode {
-        unreachable!()
+    async fn link(&self, _inode: InodeIndex, _parent_dir: InodeIndex, _name: &str) -> Result<Inode, ErrorCode> {
+        Err(ErrorCode::UnsupportedOperation)
     }
 
-    async fn truncate(&self, _inode: InodeIndex, _size: u64) {
-        unreachable!()
+    async fn truncate(&self, _inode: InodeIndex, _size: u64) -> Result<(), ErrorCode> {
+        Err(ErrorCode::UnsupportedOperation)
     }
 
     async fn rename(&self, _inode: InodeIndex, _parent_inode: InodeIndex, _name: &str) -> Result<(), ErrorCode> {
-        unreachable!()
+        Err(ErrorCode::UnsupportedOperation)
     }
 }

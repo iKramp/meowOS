@@ -1,5 +1,12 @@
 use std::{
-    boxed::Box, error::ErrorCode, lock_w_info, mem_utils::{PhysAddr, translate_phys_virt_addr}, println, printlnc, string::{String, ToString}, sync::{arc::Arc, no_int_spinlock::NoIntSpinlockGuard}, vec::Vec
+    boxed::Box,
+    error::ErrorCode,
+    lock_w_info,
+    mem_utils::{PhysAddr, translate_phys_virt_addr},
+    println, printlnc,
+    string::ToString,
+    sync::{arc::Arc, no_int_spinlock::NoIntSpinlockGuard},
+    vec::Vec,
 };
 
 use uuid::Uuid;
@@ -10,7 +17,12 @@ use crate::drivers::{
 };
 
 use super::{
-    file::{FileFlags, FileHandle}, filesystem_trait::FileSystem, fs_tree::{self}, resolve_path, DeviceDetails, InodeIdentifierChain, InodeType, ResolvedPath, ResolvedPathBorrowed, Vfs, ROOT_INODE_INDEX, VFS, VFS_ADAPTER_DEVICE
+    DeviceDetails, InodeIdentifierChain, InodeType, ROOT_INODE_INDEX, ResolvedPath, ResolvedPathBorrowed, VFS,
+    VFS_ADAPTER_DEVICE, Vfs,
+    file::{FileFlags, FileHandle},
+    filesystem_trait::FileSystem,
+    fs_tree::{self},
+    resolve_path,
 };
 
 pub async fn add_disk(disk: Arc<dyn BlockDevice>) -> Uuid {
@@ -66,7 +78,7 @@ fn remove_disk(uuid: Uuid) {
 
 fn remove_disk_slow(uuid: Uuid, mut vfs: NoIntSpinlockGuard<'_, Vfs>) {
     printlnc!(level:warn, (0, 255, 255), "Warning: attempting to remove non existent disk {}", uuid);
-    let Vfs { 
+    let Vfs {
         available_partitions,
         devices,
         mounted_filesystems,
@@ -120,7 +132,7 @@ pub async fn mount_blkdev_partition(part_id: Uuid, mountpoint: ResolvedPath) -> 
     };
     let fs = fs_factory.mount(mounted_partition).await;
     if let Err(e) = mount_filesystem(mountpoint, fs.clone(), part_id).await {
-        fs.unmount().await;
+        let _ = fs.unmount().await; //double error...???
         Err(e)
     } else {
         Ok(())
@@ -137,7 +149,7 @@ async fn mount_filesystem(mountpoint: ResolvedPath, fs: Arc<dyn FileSystem + Sen
         vfs.mounted_filesystems.insert(part_id, fs);
         mount_vfs_adapters(vfs).await;
     } else {
-        let fs_root_inode = fs.stat(ROOT_INODE_INDEX).await;
+        let fs_root_inode = fs.stat(ROOT_INODE_INDEX).await?;
         //we disallow the mounting of root failing so no checks :3
         let (inode, _parent_inode_chain) = fs_tree::get_inode_chain((&mountpoint).into(), None).await?;
         fs_tree::mount_inode(inode, fs_root_inode);
@@ -150,22 +162,21 @@ async fn mount_filesystem(mountpoint: ResolvedPath, fs: Arc<dyn FileSystem + Sen
 }
 
 async fn mount_new_root(fs: &Arc<dyn FileSystem + Send>) -> Result<(), ErrorCode> {
-    let inode = fs.stat(ROOT_INODE_INDEX).await;
+    let inode = fs.stat(ROOT_INODE_INDEX).await?;
     let inode_index = inode.index;
     fs_tree::init(inode);
 
     //root checks
     let root_dirs = fs.read_dir(inode_index).await?;
-    let required_dirs = ["tty", "proc"];
+    let required_dirs = ["tty", "proc", "net"];
     for required_dir in required_dirs.iter() {
         if !root_dirs.iter().any(|entry| entry.name.as_ref() == *required_dir) {
             //create the required directory
             fs.create(required_dir, ROOT_INODE_INDEX, InodeType::new_dir(0o755), 0, 0)
-                .await;
+                .await?;
         }
     }
     Ok(())
-
 }
 
 async fn mount_vfs_adapters(mut vfs: NoIntSpinlockGuard<'_, Vfs>) {
@@ -175,8 +186,12 @@ async fn mount_vfs_adapters(mut vfs: NoIntSpinlockGuard<'_, Vfs>) {
 
     let proc_adapter: Arc<dyn FileSystem + Send> = Arc::new(crate::vfs::adapters::ProcAdapter::new(proc_dev.0));
     let tty_adapter: Arc<dyn FileSystem + Send> = Arc::new(crate::vfs::adapters::TtyAdapter::new(tty_dev.0));
-    Box::pin(mount_filesystem(resolve_path("/tty"), tty_adapter, tty_dev.1.partition)).await.expect("Failed to mount /tty");
-    Box::pin(mount_filesystem(resolve_path("/proc"), proc_adapter, proc_dev.1.partition)).await.expect("Failed to mount /proc");
+    Box::pin(mount_filesystem(resolve_path("/tty"), tty_adapter, tty_dev.1.partition))
+        .await
+        .expect("Failed to mount /tty");
+    Box::pin(mount_filesystem(resolve_path("/proc"), proc_adapter, proc_dev.1.partition))
+        .await
+        .expect("Failed to mount /proc");
 }
 
 pub async fn unmount(path: ResolvedPathBorrowed<'_>) -> Result<(), ErrorCode> {
@@ -191,7 +206,7 @@ pub async fn unmount(path: ResolvedPathBorrowed<'_>) -> Result<(), ErrorCode> {
         let Some(partition) = vfs.mounted_filesystems.remove(&partition_id) else {
             return Ok(());
         };
-        partition.unmount().await;
+        partition.unmount().await?;
     }
     Ok(())
 }
@@ -236,25 +251,28 @@ pub async fn create_file(parent_dir: &mut FileHandle, name: &str, inode_type: In
     let mut vfs = lock_w_info!(VFS);
     let device_details = vfs.devices.get(&parent_inode.device).ok_or(ErrorCode::InodeNotPresent)?;
     let partition_id = device_details.partition;
-    let fs = vfs.mounted_filesystems.get_mut(&partition_id).ok_or(ErrorCode::InodeNotPresent)?;
+    let fs = vfs
+        .mounted_filesystems
+        .get_mut(&partition_id)
+        .ok_or(ErrorCode::InodeNotPresent)?;
     let fs = fs.clone();
     drop(vfs);
-    let (file_inode, parent_inode) = fs.create(name, parent_inode.index, inode_type, 0, 0).await;
+    let (file_inode, parent_inode) = fs.create(name, parent_inode.index, inode_type, 0, 0).await?;
     fs_tree::update_inode(parent_dir.inode, parent_inode)?;
     fs_tree::insert_inode(parent_dir.inode, name.to_string().into_boxed_str(), file_inode)?;
     Ok(())
 }
 
-pub async fn write_file(file_handle: &mut FileHandle, content: &[PhysAddr], size: u64) -> Result<u64, String> {
+pub async fn write_file(file_handle: &mut FileHandle, content: &[PhysAddr], size: u64) -> Result<u64, ErrorCode> {
     if !file_handle.file_flags.write() {
-        return Err("File opened in read-only mode".to_string());
+        return Err(ErrorCode::InsufficientPermissions);
     }
 
-    let inode = fs_tree::get_inode(file_handle.inode).ok_or("Inode not found")?;
+    let inode = fs_tree::get_inode(file_handle.inode).ok_or(ErrorCode::InodeNotPresent)?;
     let mut vfs = lock_w_info!(VFS);
-    let device_details = vfs.devices.get(&inode.device).ok_or("Device not found")?;
+    let device_details = vfs.devices.get(&inode.device).ok_or(ErrorCode::NoEntry)?;
     let partition_id = device_details.partition;
-    let fs = vfs.mounted_filesystems.get_mut(&partition_id).ok_or("FS not found")?;
+    let fs = vfs.mounted_filesystems.get_mut(&partition_id).ok_or(ErrorCode::NoEntry)?;
     let fs = fs.clone();
     drop(vfs);
 
@@ -264,7 +282,7 @@ pub async fn write_file(file_handle: &mut FileHandle, content: &[PhysAddr], size
         file_handle.position
     };
 
-    let res = fs.write(inode.index, offset, size, content).await;
+    let res = fs.write(inode.index, offset, size, content).await?;
 
     if !file_handle.file_flags.append() {
         file_handle.position += size;
@@ -299,7 +317,9 @@ pub async fn read_file(file_handle: &mut FileHandle, buffer: &[PhysAddr], size: 
         let res = unsafe { read_file_aligned(file_handle, buf_to_use, offset, aligned_size).await };
         let Ok(bytes_read) = res else {
             if needs_new_page {
-                unsafe { crate::memory::physical_allocator::deallocate_frame(*buf_to_use.last().expect("frame was just allocated")) };
+                unsafe {
+                    crate::memory::physical_allocator::deallocate_frame(*buf_to_use.last().expect("frame was just allocated"))
+                };
             }
             return res;
         };
@@ -308,11 +328,23 @@ pub async fn read_file(file_handle: &mut FileHandle, buffer: &[PhysAddr], size: 
         let to_copy_second = diff; //next page
         let total_copies = buffer.len();
         for i in 0..total_copies {
-            unsafe { core::ptr::copy((translate_phys_virt_addr(buf_to_use[i]).0 + diff) as *mut u8, translate_phys_virt_addr(buf_to_use[i]).0 as *mut u8, to_copy_first as usize) };
+            unsafe {
+                core::ptr::copy(
+                    (translate_phys_virt_addr(buf_to_use[i]).0 + diff) as *mut u8,
+                    translate_phys_virt_addr(buf_to_use[i]).0 as *mut u8,
+                    to_copy_first as usize,
+                )
+            };
             if i == total_copies - 1 && !needs_new_page {
                 break;
             }
-            unsafe { core::ptr::copy_nonoverlapping(translate_phys_virt_addr(buf_to_use[i + 1]).0 as *mut u8, (translate_phys_virt_addr(buf_to_use[i]).0 + diff) as *mut u8, to_copy_second as usize) };
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    translate_phys_virt_addr(buf_to_use[i + 1]).0 as *mut u8,
+                    (translate_phys_virt_addr(buf_to_use[i]).0 + diff) as *mut u8,
+                    to_copy_second as usize,
+                )
+            };
         }
 
         if needs_new_page {
@@ -327,7 +359,12 @@ pub async fn read_file(file_handle: &mut FileHandle, buffer: &[PhysAddr], size: 
 ///# Safety:
 ///Caller must ensure offset is page aligned, and must advance file handle position accordingly
 ///This function just checks permissons and performs the read
-pub async unsafe fn read_file_aligned(file_handle: &FileHandle, buffer: &[PhysAddr], offset: u64, size: u64) -> Result<u64, ErrorCode> {
+pub async unsafe fn read_file_aligned(
+    file_handle: &FileHandle,
+    buffer: &[PhysAddr],
+    offset: u64,
+    size: u64,
+) -> Result<u64, ErrorCode> {
     if !file_handle.file_flags.read() {
         return Err(ErrorCode::InsufficientPermissions);
     }
@@ -347,8 +384,7 @@ pub async unsafe fn read_file_aligned(file_handle: &FileHandle, buffer: &[PhysAd
     let fs = fs.clone();
     drop(vfs);
 
-
-    let bytes_read = fs.read(inode.index, offset, size, buffer).await;
+    let bytes_read = fs.read(inode.index, offset, size, buffer).await?;
 
     println!("operations::read_file_aligned: Read {} bytes", bytes_read);
 

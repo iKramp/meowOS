@@ -22,7 +22,7 @@ impl VfsAdapterTrait for ProcAdapter {
         _offset_bytes: u64,
         _size_bytes: u64,
         _buffer: &[std::mem_utils::PhysAddr],
-    ) -> u64 {
+    ) -> Result<u64, ErrorCode> {
         todo!()
     }
 
@@ -36,12 +36,12 @@ impl VfsAdapterTrait for ProcAdapter {
         _offset: u64,
         _size: u64,
         _buffer: &[std::mem_utils::PhysAddr],
-    ) -> (crate::vfs::Inode, u64) {
+    ) -> Result<(crate::vfs::Inode, u64), ErrorCode> {
         todo!()
     }
 
-    async fn stat(&self, inode: crate::vfs::InodeIndex) -> crate::vfs::Inode {
-        crate::vfs::Inode {
+    async fn stat(&self, inode: crate::vfs::InodeIndex) -> Result<crate::vfs::Inode, ErrorCode> {
+        Ok(crate::vfs::Inode {
             index: inode,
             device: self.device_id,
             type_mode: InodeType::new_dir(0o755),
@@ -54,6 +54,6 @@ impl VfsAdapterTrait for ProcAdapter {
             stat_change_time: 0,
             preferred_block_size: 512,
             blocks: u32::MAX,
-        }
+        })
     }
 }

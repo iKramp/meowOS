@@ -1,10 +1,8 @@
 use uuid::Uuid;
 
 use super::{
-    DirEntry, Inode, InodeBitmask, InodeSize, SuperBlock,
+    BLOCK_SIZE_SECTORS, DirEntry, Inode, InodeBitmask, InodeSize, MountedPartition, SuperBlock,
     btree::{BtreeNode, Key},
-    MountedPartition,
-    BLOCK_SIZE_SECTORS
 };
 use crate::{
     memory::{PAGE_TREE_ALLOCATOR, paging::LiminePat, physical_allocator},
@@ -230,7 +228,11 @@ impl Rfs {
         let mut block_index = 0;
         loop {
             self.partition
-                .read(next_ptr as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block_memory.phys])
+                .read(
+                    next_ptr as usize * BLOCK_SIZE_SECTORS,
+                    BLOCK_SIZE_SECTORS,
+                    &[block_memory.phys],
+                )
                 .await;
             let bitmask: &mut InodeBitmask = unsafe { get_at_virtual_addr(block_memory.virt) };
             for (bit_index, byte_mask) in bitmask.inodes.iter_mut().enumerate() {
@@ -248,10 +250,22 @@ impl Rfs {
             if bitmask.next_ptr == 0 {
                 let new_block = self.allocate_block().await;
                 bitmask.next_ptr = new_block;
-                self.partition.write(next_ptr as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block_memory.phys]).await;
+                self.partition
+                    .write(
+                        next_ptr as usize * BLOCK_SIZE_SECTORS,
+                        BLOCK_SIZE_SECTORS,
+                        &[block_memory.phys],
+                    )
+                    .await;
                 unsafe { std::mem_utils::memset_virtual_addr(block_memory.virt, 0, 4096) };
                 bitmask.inodes[0] = 1;
-                self.partition.write(new_block as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block_memory.phys]).await;
+                self.partition
+                    .write(
+                        new_block as usize * BLOCK_SIZE_SECTORS,
+                        BLOCK_SIZE_SECTORS,
+                        &[block_memory.phys],
+                    )
+                    .await;
                 return block_index as u32 * 8 * bitmask.inodes.len() as u32;
             } else {
                 next_ptr = bitmask.next_ptr;
@@ -259,18 +273,30 @@ impl Rfs {
         }
     }
 
-    pub(super) async fn remove_inode_from_bitmask(&mut self, inode_index: u32) {
+    /// Safety
+    /// must hold inode tree lock
+    pub(super) async unsafe fn remove_inode_from_bitmask(&self, inode_index: u32) {
         let block_memory = get_working_block();
         self.partition.read(1, 1, &[block_memory.phys]).await;
         let superblock: &mut SuperBlock = unsafe { get_at_virtual_addr(block_memory.virt) };
         let mut next_ptr = superblock.inode_bitmask;
-        self.partition.read(next_ptr as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block_memory.phys]).await;
+        self.partition
+            .read(
+                next_ptr as usize * BLOCK_SIZE_SECTORS,
+                BLOCK_SIZE_SECTORS,
+                &[block_memory.phys],
+            )
+            .await;
         let mut inode_bitmask: &mut InodeBitmask = unsafe { get_at_virtual_addr(block_memory.virt) };
 
         let inode_lock = self.inode_lock.lock().await;
         for _i in 0..(inode_index / (inode_bitmask.inodes.len() as u32 * 8)) {
             self.partition
-                .read(inode_bitmask.next_ptr as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block_memory.phys])
+                .read(
+                    inode_bitmask.next_ptr as usize * BLOCK_SIZE_SECTORS,
+                    BLOCK_SIZE_SECTORS,
+                    &[block_memory.phys],
+                )
                 .await;
             inode_bitmask = unsafe { get_at_virtual_addr(block_memory.virt) };
             next_ptr = inode_bitmask.next_ptr;
@@ -278,7 +304,13 @@ impl Rfs {
         let byte_index = (inode_index % (inode_bitmask.inodes.len() as u32 * 8)) / 8;
         let bit_index = (inode_index % (inode_bitmask.inodes.len() as u32 * 8)) % 8;
         inode_bitmask.inodes[byte_index as usize] &= !(1 << bit_index);
-        self.partition.write(next_ptr as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block_memory.phys]).await;
+        self.partition
+            .write(
+                next_ptr as usize * BLOCK_SIZE_SECTORS,
+                BLOCK_SIZE_SECTORS,
+                &[block_memory.phys],
+            )
+            .await;
         drop(inode_lock);
     }
 
@@ -615,19 +647,31 @@ impl Rfs {
         }
     }
 
-    async unsafe fn read_locked(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> u64 {
+    async unsafe fn read_locked(
+        &self,
+        inode: InodeIndex,
+        offset_bytes: u64,
+        size_bytes: u64,
+        buffer: &[PhysAddr],
+    ) -> Result<u64, ErrorCode> {
         if size_bytes == 0 {
-            return 0;
+            return Ok(0);
         }
-        assert!(buffer.len() == (size_bytes).div_ceil(4096) as usize);
-        assert!(offset_bytes % 4096 == 0);
+
+        //turn into if checks
+        if buffer.len() != (size_bytes).div_ceil(4096) as usize {
+            return Err(ErrorCode::InvalidArgument);
+        }
+        if offset_bytes % 4096 != 0 {
+            return Err(ErrorCode::InvalidArgument);
+        }
 
         let inode_tree_lock = self.inode_lock.lock().await;
 
         let root = unsafe { self.get_node(self.root_block).await.1.virt };
         let inode_block_index = BtreeNode::find_inode_block(root, inode as u32, self)
             .await
-            .expect("root inode must be present");
+            .ok_or(ErrorCode::InodeNotPresent)?;
         drop(inode_tree_lock); //file inode lock is held, so file won't move. Found the block
         let inode_block = get_working_block();
         self.partition
@@ -636,21 +680,23 @@ impl Rfs {
         let inode_data: &mut Inode = unsafe { get_at_virtual_addr(inode_block.virt) };
 
         if offset_bytes >= inode_data.size.size() {
-            return 0;
+            return Err(ErrorCode::InvalidArgument);
         }
+
         let max_size = inode_data.size.size() - offset_bytes;
+
+        if max_size == 0 {
+            return Ok(0);
+        }
+
         let size_bytes = u64::min(size_bytes, max_size);
         let aligned_size = size_bytes.div_ceil(4096) * 4096;
         let ret_size = u64::min(max_size, aligned_size);
 
-        if aligned_size == 0 {
-            return 0;
-        }
-
         let mut levels = inode_data.size.ptr_levels();
         if levels == 0 {
             self.partition.read(inode_block_index as usize * 8 + 1, 7, buffer).await;
-            return ret_size;
+            return Ok(ret_size);
         }
         //read first level pointers
         self.partition
@@ -696,13 +742,28 @@ impl Rfs {
                 )
                 .await;
         }
-        ret_size
+        Ok(ret_size)
     }
 
-    pub async fn write_locked(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> (vfs::Inode, u64) {
+    pub async fn write_locked(
+        &self,
+        inode: InodeIndex,
+        offset: u64,
+        size: u64,
+        buffer: &[PhysAddr],
+    ) -> Result<(vfs::Inode, u64), ErrorCode> {
+        if size == 0 {
+            return Err(ErrorCode::InvalidArgument);
+        }
+
         let inode = inode as u32;
-        assert!(offset % 4096 == 0);
-        assert!(size.div_ceil(4096) <= buffer.len() as u64);
+        if offset % 4096 != 0 {
+            return Err(ErrorCode::InvalidArgument);
+        }
+        if size.div_ceil(4096) != buffer.len() as u64 {
+            return Err(ErrorCode::InvalidArgument);
+        }
+
         //get info about file currently
 
         let inode_lock = self.inode_lock.lock().await;
@@ -744,7 +805,7 @@ impl Rfs {
             self.partition
                 .write(inode_block_index as usize * 8, 1, &[inode_block.phys])
                 .await;
-            return (vfs_inode, size);
+            return Ok((vfs_inode, size));
         }
 
         let mut pointers: Vec<u32> = std::Vec::new();
@@ -791,10 +852,15 @@ impl Rfs {
                 )
                 .await;
         }
-        (vfs_inode, size)
+        Ok((vfs_inode, size))
     }
 
-    async fn link_locked(&self, inode_index: InodeIndex, parent_inode_index: InodeIndex, name: &str) -> vfs::Inode {
+    async fn link_locked(
+        &self,
+        inode_index: InodeIndex,
+        parent_inode_index: InodeIndex,
+        name: &str,
+    ) -> Result<vfs::Inode, ErrorCode> {
         //TODO: i don't increase link count ??
 
         let inode_lock = self.inode_lock.lock().await;
@@ -803,7 +869,7 @@ impl Rfs {
         let working_block = get_working_block();
         let parent_inode_block_index = BtreeNode::find_inode_block(root, parent_inode_index as u32, self)
             .await
-            .expect("root inode must be present");
+            .ok_or(ErrorCode::InodeNotPresent)?;
         drop(inode_lock); //file lock is held, so file won't move. Found the block
         self.partition
             .read(
@@ -830,7 +896,7 @@ impl Rfs {
                     u64::min(4096, inode_data.size.size()),
                     &[working_block.phys],
                 )
-                .await
+                .await?
             };
         }
         let name_bytes = name.as_bytes();
@@ -869,19 +935,20 @@ impl Rfs {
         };
         let vfs_inode = self
             .write_locked(parent_inode_index, offset & (!0xFFF), write_size, buffers)
-            .await;
+            .await?;
 
-        vfs_inode.0
+        Ok(vfs_inode.0)
     }
 }
 
 #[async_trait::async_trait]
 impl FileSystem for Rfs {
-    async fn unmount(&self) {
+    async fn unmount(&self) -> Result<(), ErrorCode> {
         self.clean_inode_tree_cache().await;
+        Ok(())
     }
 
-    async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> u64 {
+    async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, ErrorCode> {
         let file_lock = self.get_file_lock(inode as u32);
         let _read_guard = file_lock.lock_read().await;
         let bytes_read = unsafe { self.read_locked(inode, offset_bytes, size_bytes, buffer).await };
@@ -889,7 +956,13 @@ impl FileSystem for Rfs {
         bytes_read
     }
 
-    async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> (vfs::Inode, u64) {
+    async fn write(
+        &self,
+        inode: InodeIndex,
+        offset: u64,
+        size: u64,
+        buffer: &[PhysAddr],
+    ) -> Result<(vfs::Inode, u64), ErrorCode> {
         let file_lock = self.get_file_lock(inode as u32);
         let _write_guard = file_lock.lock_write().await;
         let vfs_inode = self.write_locked(inode, offset, size, buffer).await;
@@ -897,13 +970,13 @@ impl FileSystem for Rfs {
         vfs_inode
     }
 
-    async fn stat(&self, inode: InodeIndex) -> crate::vfs::Inode {
+    async fn stat(&self, inode: InodeIndex) -> Result<crate::vfs::Inode, ErrorCode> {
         let inode = inode as u32;
         let inode_lock = self.inode_lock.lock().await;
         let root = unsafe { self.get_node(self.root_block).await.1.virt };
         let inode_block_index = BtreeNode::find_inode_block(root, inode, self)
             .await
-            .expect("root inode must be present");
+            .ok_or(ErrorCode::InodeNotPresent)?;
         drop(inode_lock);
         let inode_block = get_working_block();
         //no need to get file lock since this doesn't move
@@ -911,15 +984,15 @@ impl FileSystem for Rfs {
             .read(inode_block_index as usize * 8, 1, &[inode_block.phys])
             .await;
         let inode_data: &mut Inode = unsafe { get_at_virtual_addr(inode_block.virt) };
-        inode_data.to_vfs(inode, &self.partition.partition)
+        Ok(inode_data.to_vfs(inode, &self.partition.partition))
     }
 
-    async fn set_stat(&self, inode_index: InodeIndex, vfs_inode_data: vfs::Inode) {
+    async fn set_stat(&self, inode_index: InodeIndex, vfs_inode_data: vfs::Inode) -> Result<(), ErrorCode> {
         let inode_lock = self.inode_lock.lock().await;
         let root = unsafe { self.get_node(self.root_block).await.1.virt };
         let inode_block_index = BtreeNode::find_inode_block(root, inode_index as u32, self)
             .await
-            .expect("root inode must be present");
+            .ok_or(ErrorCode::InodeNotPresent)?;
         drop(inode_lock);
         let inode_block = get_working_block();
         self.partition
@@ -931,6 +1004,7 @@ impl FileSystem for Rfs {
         self.partition
             .write(inode_block_index as usize * 8, 1, &[inode_block.phys])
             .await;
+        Ok(())
     }
 
     async fn create(
@@ -940,7 +1014,7 @@ impl FileSystem for Rfs {
         type_mode: crate::vfs::InodeType,
         uid: u16,
         gid: u16,
-    ) -> (vfs::Inode, vfs::Inode) {
+    ) -> Result<(vfs::Inode, vfs::Inode), ErrorCode> {
         let new_inode_block_index = self.allocate_block().await;
         let inode_lock = self.inode_lock.lock().await;
         let inode_index = unsafe { self.allocate_inode().await };
@@ -978,19 +1052,38 @@ impl FileSystem for Rfs {
         let _new_guard = new_lock.lock_write().await;
         drop(inode_lock);
 
-        let parent_vfs_inode = self.link_locked(inode_index as InodeIndex, parent_dir, name).await;
+        let link_res = self.link_locked(inode_index as InodeIndex, parent_dir, name).await;
+        if let Err(e) = link_res {
+            //rollback
+            let inode_lock = self.inode_lock.lock().await;
+            BtreeNode::delete_key_root(
+                root,
+                self.root_block,
+                inode_index,
+                self,
+            )
+            .await;
+            unsafe { self.remove_inode_from_bitmask(inode_index).await };
+            self.free_block(new_inode_block_index).await;
+
+            drop(inode_lock);
+
+            return Err(e);
+        };
+
+        let parent_vfs_inode = unsafe { link_res.unwrap_unchecked() };
 
         drop(_new_guard);
         drop(_parent_guard);
 
-        (vfs_inode, parent_vfs_inode)
+        Ok((vfs_inode, parent_vfs_inode))
     }
 
-    async fn unlink(&self, _parent_inode: InodeIndex, _name: &str) {
+    async fn unlink(&self, _parent_inode: InodeIndex, _name: &str) -> Result<(), ErrorCode> {
         todo!()
     }
 
-    async fn link(&self, inode_index: InodeIndex, parent_inode_index: InodeIndex, name: &str) -> vfs::Inode {
+    async fn link(&self, inode_index: InodeIndex, parent_inode_index: InodeIndex, name: &str) -> Result<vfs::Inode, ErrorCode> {
         let parent_lock = self.get_file_lock(parent_inode_index as u32);
         let child_lock = self.get_file_lock(inode_index as u32);
         let _parent_guard = parent_lock.lock_write().await;
@@ -1001,7 +1094,7 @@ impl FileSystem for Rfs {
         vfs_inode
     }
 
-    async fn truncate(&self, _inode: InodeIndex, _size: InodeIndex) {
+    async fn truncate(&self, _inode: InodeIndex, _size: InodeIndex) -> Result<(), ErrorCode> {
         todo!()
     }
 
@@ -1025,22 +1118,13 @@ impl FileSystem for Rfs {
         let dir_size = parent_inode_data.size.size();
         let dir_block_count = dir_size.div_ceil(4096);
 
-        let mut frames = Vec::with_capacity(dir_block_count as usize);
-        for _ in 0..dir_block_count {
-            frames.push(physical_allocator::allocate_frame());
-        }
-        let folder_binding = unsafe { PAGE_TREE_ALLOCATOR.mmap_contigious(&frames, false) };
+        let working_blocks = (0..dir_block_count).map(|_| get_working_block())
+            .collect::<Vec<AllocatedBlock>>();
+        
+        let frames = working_blocks.iter().map(|b| b.phys).collect::<Vec<PhysAddr>>();
+        let folder_binding = working_blocks[0].virt;
 
-        for i in 0..dir_block_count {
-            unsafe {
-                PAGE_TREE_ALLOCATOR
-                    .get_page_table_entry_mut(folder_binding + i * 4096)
-                    .expect("can not get entries of freshly allocated page entries")
-                    .set_pat(LiminePat::UC);
-            }
-        }
-
-        unsafe { self.read_locked(parent_inode, 0, dir_size, &frames).await };
+        unsafe { self.read_locked(parent_inode, 0, dir_size, &frames).await? };
         let mut affected_inode = 0;
         for i in 0..(dir_size / core::mem::size_of::<DirEntry>() as u64) {
             let dir_entry =
@@ -1069,12 +1153,9 @@ impl FileSystem for Rfs {
         } else {
             &frames[affected_block as usize..(affected_block + 1) as usize]
         };
-        self.write(parent_inode, affected_block * 4096, write_size, buffers).await;
+        self.write(parent_inode, affected_block * 4096, write_size, buffers).await?;
         drop(_parent_guard);
 
-        for i in 0..dir_block_count {
-            unsafe { PAGE_TREE_ALLOCATOR.deallocate(folder_binding + i * 4096) };
-        }
         Ok(())
     }
 
@@ -1104,7 +1185,7 @@ impl FileSystem for Rfs {
             .map(|_| physical_allocator::allocate_frame())
             .collect::<Box<[_]>>();
         let virt_addr_start = unsafe { PAGE_TREE_ALLOCATOR.mmap_contigious(&phys_addresses, false) };
-        unsafe { self.read_locked(inode_index, 0, inode.size.size(), &phys_addresses).await };
+        unsafe { self.read_locked(inode_index, 0, inode.size.size(), &phys_addresses).await? };
         drop(_file_guard);
         let mut entries = Vec::new();
         let mut offset = 0;
