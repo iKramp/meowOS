@@ -13,6 +13,7 @@ needless_range_loop = "allow"
 comparison_chain = "allow"
 collapsible_else_if = "allow" #often it is not collapsed for conveying additional info
 unwrap_used = "deny"
+vec_init_then_push = "allow" #don't have vec! macro in no_std
 
 [[bin]]
 name = "kernel"

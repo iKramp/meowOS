@@ -1,6 +1,7 @@
 use core::alloc::Layout;
 
-static mut PHYSICAL_OFFSET: PhysOffset = PhysOffset(0);
+static mut HIGHER_HALF_DIRECT_MAP_ADDR: PhysOffset = PhysOffset(0);
+static mut HIGHER_HALF_DIRECT_MAP_LEN: u64 = 0;
 static mut MEM_INITIALIZED: bool = false;
 static mut HEAP_INITIALIZED: bool = false;
 
@@ -110,7 +111,7 @@ impl core::ops::Sub<u64> for VirtAddr {
 pub unsafe fn get_at_physical_addr<T>(addr: PhysAddr) -> &'static mut T {
     unsafe {
         debug_assert!(MEM_INITIALIZED);
-        let data: *mut T = (addr + PHYSICAL_OFFSET).0 as *mut T;
+        let data: *mut T = (addr + HIGHER_HALF_DIRECT_MAP_ADDR).0 as *mut T;
         &mut *data
     }
 }
@@ -122,16 +123,25 @@ pub unsafe fn set_at_physical_addr<T>(addr: PhysAddr, data: T) {
     unsafe {
         #[cfg(debug_assertions)]
         assert!(MEM_INITIALIZED);
-        set_at_virtual_addr(addr + PHYSICAL_OFFSET, data);
+        set_at_virtual_addr(addr + HIGHER_HALF_DIRECT_MAP_ADDR, data);
     }
 }
 
 #[inline]
-pub fn get_physical_offset() -> PhysOffset {
+pub fn get_hhdm_addr() -> PhysOffset {
     unsafe {
         #[cfg(debug_assertions)]
         assert!(MEM_INITIALIZED);
-        PHYSICAL_OFFSET
+        HIGHER_HALF_DIRECT_MAP_ADDR
+    }
+}
+
+#[inline]
+pub fn get_hhdm_len() -> u64 {
+    unsafe {
+        #[cfg(debug_assertions)]
+        assert!(MEM_INITIALIZED);
+        HIGHER_HALF_DIRECT_MAP_LEN
     }
 }
 
@@ -184,10 +194,17 @@ pub unsafe fn set_at_virtual_addr<T>(addr: VirtAddr, data: T) {
 ///# Safety
 ///the physical address offset must be correct
 #[inline]
-pub unsafe fn set_physical_offset(addr: PhysOffset) {
+pub unsafe fn set_hhdm_addr(addr: PhysOffset) {
     unsafe {
         MEM_INITIALIZED = true;
-        PHYSICAL_OFFSET = addr;
+        HIGHER_HALF_DIRECT_MAP_ADDR = addr;
+    }
+}
+
+#[inline]
+pub fn set_hhdm_len(len: u64) {
+    unsafe {
+        HIGHER_HALF_DIRECT_MAP_LEN = len;
     }
 }
 
@@ -217,7 +234,7 @@ pub unsafe fn memset_virtual_addr(addr: VirtAddr, value: u8, size: usize) {
 #[inline]
 pub unsafe fn memset_physical_addr(addr: PhysAddr, value: u8, size: usize) {
     unsafe {
-        let virt_addr = addr + PHYSICAL_OFFSET;
+        let virt_addr = addr + HIGHER_HALF_DIRECT_MAP_ADDR;
         memset_virtual_addr(virt_addr, value, size);
     }
 }
@@ -227,7 +244,7 @@ pub unsafe fn memset_physical_addr(addr: PhysAddr, value: u8, size: usize) {
 #[inline]
 pub unsafe fn memcopy_physical_buffer(dest: PhysAddr, src: &[u8]) {
     unsafe {
-        let dest_ptr = (dest + PHYSICAL_OFFSET).0 as *mut u8;
+        let dest_ptr = (dest + HIGHER_HALF_DIRECT_MAP_ADDR).0 as *mut u8;
         core::ptr::copy_nonoverlapping(src.as_ptr(), dest_ptr, src.len());
     }
 }
@@ -259,7 +276,7 @@ pub fn translate_virt_phys_addr(addr: VirtAddr, root_page_addr: PhysAddr) -> Opt
 pub fn translate_phys_virt_addr(addr: PhysAddr) -> VirtAddr {
     unsafe {
         debug_assert!(MEM_INITIALIZED);
-        addr + PHYSICAL_OFFSET
+        addr + HIGHER_HALF_DIRECT_MAP_ADDR
     }
 }
 

@@ -1,4 +1,3 @@
-use std::println;
 use std::{
     mem_utils::{PhysAddr, VirtAddr},
     sync::once_lock::OnceLock,
@@ -150,13 +149,7 @@ impl Drop for MemoryBar {
         };
         let pages = self.size.div_ceil(0x1000);
         for i in 0..pages {
-            let res = unsafe { PAGE_TREE_ALLOCATOR.unmap(addr + i * 0x1000) };
-            #[cfg(debug_assertions)]
-            {
-                if let Err(e) = res {
-                    println!("Error unmapping BAR page {}: {:?}", i, e);
-                }
-            }
+            unsafe { PAGE_TREE_ALLOCATOR.unmap(addr + i * 0x1000) };
         }
     }
 }

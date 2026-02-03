@@ -218,13 +218,7 @@ impl Drop for E1000eDevice {
 
             let mut page_tree = PageTree::current();
             for page in 0..queue_size_pages {
-                let res = page_tree.unmap(queue.1.0 + 4096 * page as u64);
-                #[cfg(debug_assertions)]
-                {
-                    if let Err(e) = res {
-                        println!("Error unmapping RX page {}: {:?}", page, e);
-                    }
-                }
+                page_tree.unmap(queue.1.0 + 4096 * page as u64);
             }
         }
 
@@ -234,13 +228,7 @@ impl Drop for E1000eDevice {
 
             let mut page_tree = PageTree::current();
             for page in 0..queue_size_pages {
-                let res = page_tree.unmap(queue.1.0 + 4096 * page as u64);
-                #[cfg(debug_assertions)]
-                {
-                    if let Err(e) = res {
-                        println!("Error unmapping TX page {}: {:?}", page, e);
-                    }
-                }
+                page_tree.unmap(queue.1.0 + 4096 * page as u64);
             }
         }
     }

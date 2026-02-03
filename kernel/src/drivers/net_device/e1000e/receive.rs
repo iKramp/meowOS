@@ -4,6 +4,7 @@ use crate::{
         paging::{self, PageTree},
         physical_allocator,
     },
+    net::{NetPacket, RawNetDataChunk},
     rand,
 };
 use bitfield::bitfield;
@@ -12,7 +13,8 @@ use std::{
     lock_w_info,
     mem_utils::{self, PhysAddr, translate_virt_phys_addr},
     println,
-    vec::Vec, w_lock_w_info,
+    vec::Vec,
+    w_lock_w_info,
 };
 
 pub(super) const RX_DESC_COUNT: usize = 256;
@@ -143,7 +145,6 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
     core::mem::swap(&mut default_desc, last_descriptor);
     core::mem::forget(default_desc);
 
-
     core::sync::atomic::fence(Ordering::SeqCst);
     dev.receive_queue = Some((rx_queue, (rx_queue_virt, rx_queue_phys)));
 
@@ -152,15 +153,9 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
         .rx_descriptor_queue_info()
         .rdbah()
         .write((rx_queue_phys.0 >> 32) as u32);
-    registers
-        .rx_descriptor_queue_info()
-        .rdlen()
-        .write(queue_size_bytes as u32);
+    registers.rx_descriptor_queue_info().rdlen().write(queue_size_bytes as u32);
     registers.rx_descriptor_queue_info().rdh().write(0);
-    registers
-        .rx_descriptor_queue_info()
-        .rdt()
-        .write((RX_DESC_COUNT - 1) as u32);
+    registers.rx_descriptor_queue_info().rdt().write((RX_DESC_COUNT - 1) as u32);
 
     registers.rxdctl().write(
         *registers
@@ -175,11 +170,23 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
 
 pub(super) fn process_received_packets(dev: &mut E1000eDevice) {
     let packets = get_received_packets(dev);
-    for packet in packets {
-        let ptr = mem_utils::translate_phys_virt_addr(packet.buffer_addr);
-        let len = packet.length;
-        let buffer = unsafe { core::slice::from_raw_parts(ptr.0 as *const u8, len as usize) };
-        println!(level:info, "{:X?}", buffer);
+    for packet in &packets {
+        // let ptr = mem_utils::translate_phys_virt_addr(packet.buffer_addr);
+        // let len = packet.length;
+        // let buffer = unsafe { core::slice::from_raw_parts(ptr.0 as *const u8, len as usize) };
+        // println!(level:info, "{:X?}", buffer);
+    }
+    let net_packets = packets
+        .into_iter()
+        .map(|packet| {
+            let data_chunk = RawNetDataChunk::new(packet.buffer_addr, packet.length.into());
+            //each is a separate packet for now
+            core::mem::forget(packet);
+            NetPacket::from_single(data_chunk)
+        })
+        .collect::<Vec<NetPacket>>();
+    for packet in net_packets {
+        crate::net::debug_packet(&packet, crate::net::NetLayer2Type::Ethernet);
     }
 }
 

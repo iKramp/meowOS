@@ -1,5 +1,5 @@
 use core::fmt::Display;
-use std::{error::ErrorCode, print, println, string::String};
+use std::{error::ErrorCode, mem_utils, print, println, string::String};
 
 use bitfield::bitfield;
 
@@ -489,29 +489,31 @@ impl PageTable {
     }
 
     //returns if there was no space but now there is
-    pub unsafe fn deallocate(&mut self, address: VirtAddr, level: u64) -> bool {
+    pub unsafe fn deallocate(&mut self, address: VirtAddr, level: u64) -> Result<bool, ErrorCode> {
         let entry = &mut self.entries[(address.0 >> (3 + level * 9) & 0b111_111_111) as usize];
-        debug_assert!(entry.present());
+        if !entry.present() {
+            return Err(ErrorCode::NotMapped)
+        }
         if level == 1 {
             entry.set_present(false);
             unsafe { physical_allocator::deallocate_frame(entry.address()) };
-            return true;
+            return Ok(true);
         }
         if entry.present() && entry.huge_page() {
             entry.set_present(false);
             dealloc_huge_page(entry, level);
-            return true;
+            return Ok(true);
         }
         unsafe {
             let lower_level_table = get_at_physical_addr::<PageTable>(entry.address());
-            let more_space = lower_level_table.deallocate(address, level - 1);
+            let more_space = lower_level_table.deallocate(address, level - 1)?;
             if !more_space {
-                return false;
+                return Ok(false);
             }
         }
         entry.increase_available();
         //if it was 0 before, this entry was not available but now it is
-        entry.num_of_available_pages() == 1
+        Ok(entry.num_of_available_pages() == 1)
     }
 
     //TODO: when unmapping lowest pages, also unmap higher pages
@@ -789,18 +791,30 @@ impl PageTree {
     }
 
     pub fn deallocate(&mut self, addr: std::mem_utils::VirtAddr) {
+        if addr >= PhysAddr(0) + mem_utils::get_hhdm_addr() && addr < PhysAddr(mem_utils::get_hhdm_len()) + mem_utils::get_hhdm_addr() {
+            //presumably mapping to owned physical addr?
+            println!(level:warn, "Attempted to deallocate address {:#x?} in HHDM. Removing physical entry only", addr.0);
+            debug_assert!(false); //panic in debug
+            let phys_addr = PhysAddr(addr.0 - mem_utils::get_hhdm_addr().0);
+            unsafe { physical_allocator::deallocate_frame(phys_addr) };
+        }
+
         unsafe {
             let level_4_table = get_at_physical_addr::<PageTable>(self.level_4_table);
-            level_4_table.deallocate(addr, 4);
+            if let Err(e) = level_4_table.deallocate(addr, 4) {
+                println!(level:error, "Error deallocating address {:#x?}: {:?}", addr.0, e);
+            }
         }
     }
 
     ///Unmaps the given virtual address
     ///Returns an error if the address was not mapped
-    pub fn unmap(&mut self, addr: std::mem_utils::VirtAddr) -> Result<(), ErrorCode> {
+    pub fn unmap(&mut self, addr: std::mem_utils::VirtAddr) {
         unsafe {
             let level_4_table = get_at_physical_addr::<PageTable>(self.level_4_table);
-            level_4_table.unmap(addr, 4).map(|_| ())
+            if let Err(e) = level_4_table.unmap(addr, 4) {
+                println!(level:error, "Error unmapping address {:#x?}: {:?}", addr.0, e);
+            }
         }
     }
 

@@ -15,7 +15,7 @@ use std::{
 use super::macros::InterruptProcessorState;
 
 pub extern "C" fn invalid_opcode(proc_data: &mut InterruptProcessorState) {
-    printlnc!(
+    printlnc!(level:error,
         (0, 0, 255),
         "EXCEPTION: INVALID OPCODE at {:#X}:{:#X}",
         proc_data.interrupt_frame.cs,
@@ -29,7 +29,7 @@ pub extern "C" fn invalid_opcode(proc_data: &mut InterruptProcessorState) {
 }
 
 pub extern "C" fn breakpoint(proc_data: &mut InterruptProcessorState) {
-    printlnc!(
+    printlnc!(level:warn,
         (0, 255, 255),
         "Breakpoint reached at {:#X}:{:#X}",
         proc_data.interrupt_frame.cs,
@@ -63,7 +63,7 @@ impl From<u64> for PageFaultErrorCode {
 
 pub extern "C" fn page_fault(proc_data: &mut InterruptProcessorState) {
     println!("{}", proc_data as *const InterruptProcessorState as usize);
-    printlnc!(
+    printlnc!(level:error,
         (0, 0, 255),
         "EXCEPTION: PAGE FAULT. error code: {:#X?}\nproc state: {:#X?}",
         PageFaultErrorCode::from(proc_data.err_code),
@@ -73,13 +73,13 @@ pub extern "C" fn page_fault(proc_data: &mut InterruptProcessorState) {
     page_tree
         .get_page_table_entry_mut(VirtAddr(proc_data.interrupt_frame.rip & 0xFFFF_FFFF_FFFF_F000))
         .map(|entry| {
-            println!(
+            println!(level:error,
                 "Page fault at {:#X?} with entry: {:#X?}",
                 proc_data.interrupt_frame.rip, entry
             );
         })
         .unwrap_or_else(|| {
-            println!("Page fault at {:#X?} with no entry", proc_data.interrupt_frame.rip);
+            println!(level:error,"Page fault at {:#X?} with no entry", proc_data.interrupt_frame.rip);
         });
     unsafe {
         loop {
@@ -90,13 +90,13 @@ pub extern "C" fn page_fault(proc_data: &mut InterruptProcessorState) {
 
 //gpf
 pub extern "C" fn general_protection_fault(proc_data: &mut InterruptProcessorState) {
-    printlnc!((0, 0, 255), "EXCEPTION: GPF. err code: {:#X?}", proc_data.err_code);
-    printlnc!((0, 0, 255), "EXCEPTION: GPF. proc_data: {:#X?}", proc_data);
+    printlnc!(level:error,(0, 0, 255), "EXCEPTION: GPF. err code: {:#X?}", proc_data.err_code);
+    printlnc!(level:error,(0, 0, 255), "EXCEPTION: GPF. proc_data: {:#X?}", proc_data);
     //print GDT
     let cpu_locals = CpuLocals::get();
     let gdt_ptr = cpu_locals.gdt_ptr;
     let gdt = unsafe { get_at_virtual_addr::<GlobalDescriptorTable>(VirtAddr(gdt_ptr.base)) };
-    println!("gdt: {:#x?}", gdt);
+    println!(level:error,"gdt: {:#x?}", gdt);
     unsafe {
         loop {
             asm!("hlt");

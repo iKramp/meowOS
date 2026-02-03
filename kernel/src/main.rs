@@ -41,6 +41,7 @@ mod vfs;
 mod vga;
 mod printer;
 mod rand;
+mod net;
 use limine::LIMINE_BOOTLOADER_REQUESTS;
 use task_runner::block_task;
 use vfs::ResolvedPath;
@@ -102,8 +103,13 @@ extern "C" fn _start() -> ! {
 
     proc::init();
 
-    //start first proc
-    unsafe { core::arch::asm!("int 254") };
+    loop {
+        println!(level:info, "loopng...");
+        std::thread::sleep(core::time::Duration::from_secs(1));
+    }
+
+    // //start first proc
+    // unsafe { core::arch::asm!("int 254") };
 
     panic!("Returned to _start after first context switch");
 }

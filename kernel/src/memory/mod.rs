@@ -16,7 +16,9 @@ pub fn init_memory() {
     print_limine_phys_map();
     unsafe {
         let offset: u64 = (*LIMINE_BOOTLOADER_REQUESTS.higher_half_direct_map_request.info).offset;
-        mem_utils::set_physical_offset(mem_utils::PhysOffset(offset));
+        let len = get_hhdm_map_len();
+        mem_utils::set_hhdm_addr(mem_utils::PhysOffset(offset));
+        mem_utils::set_hhdm_len(len);
         println!(level:info, "offset: {:#x?}", offset);
         println!(level:info, "initializing physical allocator");
         physical_allocator::init();
@@ -50,8 +52,19 @@ pub fn print_limine_phys_map() {
             5 => "Bootloader Reclaimable",
             6 => "Kernel and Modules",
             7 => "Framebuffer",
+            8 => "Acpi tables",
             _ => "Unknown",
         };
         println!(level:info, "{:#x?} - {:#x?} ({})", start, end, mem_type);
     }
+}
+
+pub fn get_hhdm_map_len() -> u64 {
+    let mmap = unsafe { &(*LIMINE_BOOTLOADER_REQUESTS.memory_map_request.info) };
+    let entries = unsafe { core::slice::from_raw_parts(mmap.memory_map, mmap.memory_map_count as usize) };
+    entries.iter().filter(|entry| {
+        entry.entry_type != 1 && entry.entry_type != 4
+    }).fold(0u64, |acc, entry| {
+        acc.max(entry.base + entry.length)
+    })
 }
