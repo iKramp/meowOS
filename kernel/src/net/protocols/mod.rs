@@ -1,37 +1,81 @@
-use crate::net::{packet::RawPacket, protocols::{arp::ArpHeader, ethernet::{EthernetHeader, parse_ethernet_frame}}};
+use crate::net::{flow::FlowDirectionFlags, packet::RawPacket, protocols::{arp::ArpHeader, ethernet::{EthernetHeader, parse_ethernet_frame}}};
 
 pub(in crate::net) mod ethernet;
 pub(in crate::net) mod arp;
 
-pub(in crate::net) fn parse_net_packet(packet: &RawPacket, packet_type: NetLayer2Type) -> Option<Layer2Data> {
+pub(in crate::net) fn parse_layer(packet: &RawPacket, packet_type: NetLayerType, offset: usize) -> Option<NetLayerData> {
     let data = match packet_type {
-        NetLayer2Type::Ethernet => Layer2Data::Ethernet(parse_ethernet_frame(packet)?),
+        NetLayerType::Ethernet => NetLayerData::Ethernet(parse_ethernet_frame(packet)?),
+        NetLayerType::Arp => NetLayerData::Arp(arp::parse_arp(packet, offset)?),
+        NetLayerType::Unknown => NetLayerData::Unknown(UnknownLayer { offset }),
+        NetLayerType::None => NetLayerData::None,
+        _ => return None,
     };
     Some(data)
 }
 
-fn parse_layer_3(packet: &RawPacket, offset: usize, layer_type: u32) -> (Layer3Data, u32) {
-    match layer_type {
-        0x0806 => arp::parse_arp(packet, offset), // ARP
-        // 0x0800 => todo!("Implement IPv4"), // IPv4
-        // 0x86DD => todo!("Implement IPv6"), // IPv6
-        _ => (Layer3Data::Unknown, 0),
-    }
+pub(in crate::net) trait NetLayer {
+    fn flow_direction(&self) -> FlowDirectionFlags;
+    fn current_layer_type(&self) -> NetLayerType;
+    fn current_layer_offset(&self) -> u32;
+    fn upper_layer_type(&self) -> NetLayerType;
+    fn upper_layer_offset(&self) -> u32;
 }
 
-#[derive(Debug)]
-pub(in crate::net) enum Layer2Data {
+#[derive(Debug, Clone)]
+pub(in crate::net) enum NetLayerData {
+    Unparsed,
+    Unknown(UnknownLayer),
+    None, //for example above TCP, no longer a kernel thing
     Ethernet(EthernetHeader),
-}
-
-#[derive(Debug)]
-pub(in crate::net) enum Layer3Data {
-    Unknown,
     Ipv4,
     Ipv6,
     Arp(ArpHeader),
+    Tcp,
+    Udp
 }
 
-pub enum NetLayer2Type {
+impl NetLayerData {
+    pub fn is_known(&self) -> bool {
+        match self {
+            NetLayerData::Unparsed | NetLayerData::Unknown(_) => false,
+            NetLayerData::None => panic!("NetLayerData::None should short circuit before is_known() is called"),
+            _ => true,
+        }
+    }
+
+    pub fn get(&self) -> Option<&dyn NetLayer> {
+        match self {
+            NetLayerData::Ethernet(header) => Some(header),
+            _ => None,
+        }
+    }
+
+    pub fn get_mut(&mut self) -> Option<&mut dyn NetLayer> {
+        match self {
+            NetLayerData::Ethernet(header) => Some(header),
+            _ => None,
+        }
+    }
+}
+
+
+#[derive(Clone, Copy, Debug)]
+pub enum NetLayerType {
+    Unparsed,
+    Unknown,
+    None,
     Ethernet,
+    Ipv4,
+    Ipv6,
+    Arp,
+    Tcp,
+    Udp,
+}
+
+pub type MacAddress = [u8; 6];
+
+#[derive(Debug, Clone)]
+pub(in crate::net) struct UnknownLayer {
+    offset: usize,
 }

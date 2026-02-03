@@ -20,7 +20,7 @@ use crate::{
         },
         pci::{self, BarTrait, NetworkController, PciClass, PcieDriver},
     },
-    memory::paging::PageTree,
+    memory::paging::PageTree, net::NicIdentifier,
 };
 
 mod init;
@@ -82,6 +82,7 @@ fn init_e1000e(dev: &pci::PcieDevice) -> Result<E1000eDevice, ErrorCode> {
 }
 
 struct E1000eDevice {
+    identifier: NicIdentifier,
     memory_bar: VirtAddr,
     flash_bar: VirtAddr,
     registers: RWSpinlock<registers::E1000eRegistersPtr<'static>>, //same value as memory_bar but typed
@@ -126,6 +127,7 @@ impl E1000eDevice {
         }
 
         Ok(Self {
+            identifier: crate::net::requset_nic_identifier(),
             memory_bar,
             flash_bar,
             registers: RWSpinlock::new(registers),

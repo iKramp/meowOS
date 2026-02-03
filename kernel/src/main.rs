@@ -13,6 +13,7 @@
 #![feature(new_range_api)]
 #![feature(rustc_attrs)]
 #![feature(unsafe_cell_access)]
+#![feature(let_chains)]
 #![allow(internal_features)]
 
 extern crate static_cond;

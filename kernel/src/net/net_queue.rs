@@ -34,7 +34,7 @@ impl NetQueueHead {
 
         let last_packet = unsafe { &mut *last_packet_ptr };
         let new_raw_ptr = packet.as_mut() as *mut NetPacket;
-        *last_packet.next() = Some(packet);
+        last_packet.next_packet = Some(packet);
         self.last_packet = Some(new_raw_ptr);
     }
 
@@ -42,7 +42,7 @@ impl NetQueueHead {
         let mut dummy = Option::None;
         core::mem::swap(&mut dummy, &mut self.first_packet);
         let mut first_packet = dummy?;
-        core::mem::swap(first_packet.next(), &mut self.first_packet);
+        core::mem::swap(&mut first_packet.next_packet, &mut self.first_packet);
 
         if self.first_packet.is_none() {
             self.last_packet = None;

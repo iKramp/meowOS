@@ -1,9 +1,8 @@
 use std::{boxed::Box, vec::Vec};
 
-use crate::net::{packet::RawPacket, protocols::Layer3Data};
+use crate::net::{packet::RawPacket, protocols::{MacAddress, NetLayerData}};
 
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(in crate::net) struct ArpHeader {
     operation: u16,
     sender_hardware: HardwareType,
@@ -12,9 +11,9 @@ pub(in crate::net) struct ArpHeader {
     target_protocol: ProtocolType,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum HardwareType {
-    Ethernet([u8; 6]),
+    Ethernet(MacAddress),
     Unknown((u16, Box<[u8]>)),
 }
 
@@ -31,7 +30,7 @@ impl HardwareType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum ProtocolType {
     Ipv4([u8; 4]),
     Ipv6([u8; 16]),
@@ -56,7 +55,7 @@ impl ProtocolType {
     }
 }
 
-pub(in crate::net::protocols) fn parse_arp(packet: &RawPacket, mut offset: usize) -> (Layer3Data, u32) {
+pub(in crate::net::protocols) fn parse_arp(packet: &RawPacket, mut offset: usize) -> Option<ArpHeader> {
     packet.ensure_length(offset as u32 + 28);
 
     let chunks = packet.get_chunks();
@@ -72,7 +71,7 @@ pub(in crate::net::protocols) fn parse_arp(packet: &RawPacket, mut offset: usize
     let protocol_size = data[offset];
     offset += 1;
 
-    let operation = u16::from_be_bytes([data[offset], data[offset+ 1]]);
+    let operation = u16::from_be_bytes([data[offset], data[offset + 1]]);
     offset += 2;
 
     let mut sender_harware_addr = Vec::with_capacity(hardware_size as usize);
@@ -89,7 +88,6 @@ pub(in crate::net::protocols) fn parse_arp(packet: &RawPacket, mut offset: usize
 
     let mut target_protocol_addr = Vec::with_capacity(protocol_size as usize);
     target_protocol_addr.extend_from_slice(&data[offset..(offset + protocol_size as usize)]);
-    offset += protocol_size as usize;
 
     let sender_hardware = HardwareType::from_bytes(hardware_type, sender_harware_addr.into_boxed_slice());
     let sender_protocol = ProtocolType::from_bytes(protocol_type, sender_protocol_addr.into_boxed_slice());
@@ -103,5 +101,5 @@ pub(in crate::net::protocols) fn parse_arp(packet: &RawPacket, mut offset: usize
         target_hardware,
         target_protocol,
     };
-    (Layer3Data::Arp(arp_header), offset as u32)
+    Some(arp_header)
 }

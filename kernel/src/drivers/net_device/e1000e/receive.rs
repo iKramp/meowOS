@@ -4,14 +4,14 @@ use crate::{
         paging::{self, PageTree},
         physical_allocator,
     },
-    net::{NetPacket, RawNetDataChunk},
+    net::{NetPacket, NetPacketSource, RawNetDataChunk},
     rand,
 };
 use bitfield::bitfield;
 use core::sync::atomic::Ordering;
 use std::{
     lock_w_info,
-    mem_utils::{self, PhysAddr, translate_virt_phys_addr},
+    mem_utils::{PhysAddr, translate_virt_phys_addr},
     println,
     vec::Vec,
     w_lock_w_info,
@@ -170,23 +170,17 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
 
 pub(super) fn process_received_packets(dev: &mut E1000eDevice) {
     let packets = get_received_packets(dev);
-    for packet in &packets {
-        // let ptr = mem_utils::translate_phys_virt_addr(packet.buffer_addr);
-        // let len = packet.length;
-        // let buffer = unsafe { core::slice::from_raw_parts(ptr.0 as *const u8, len as usize) };
-        // println!(level:info, "{:X?}", buffer);
-    }
     let net_packets = packets
         .into_iter()
         .map(|packet| {
             let data_chunk = RawNetDataChunk::new(packet.buffer_addr, packet.length.into());
             //each is a separate packet for now
             core::mem::forget(packet);
-            NetPacket::from_single(data_chunk)
+            NetPacket::from_single(data_chunk, crate::net::NetLayerType::Ethernet, NetPacketSource::Nic(dev.identifier))
         })
         .collect::<Vec<NetPacket>>();
     for packet in net_packets {
-        crate::net::debug_packet(&packet, crate::net::NetLayer2Type::Ethernet);
+        crate::net::debug_packet(&packet);
     }
 }
 
