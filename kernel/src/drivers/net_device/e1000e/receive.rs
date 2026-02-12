@@ -4,7 +4,7 @@ use crate::{
         paging::{self, PageTree},
         physical_allocator,
     },
-    net::{NetPacket, NetPacketSource, RawNetDataChunk},
+    net::{NetPacketListNode, NetPacketSource, RawNetDataChunk},
     rand,
 };
 use bitfield::bitfield;
@@ -176,9 +176,9 @@ pub(super) fn process_received_packets(dev: &mut E1000eDevice) {
             let data_chunk = RawNetDataChunk::new(packet.buffer_addr, packet.length.into());
             //each is a separate packet for now
             core::mem::forget(packet);
-            NetPacket::from_single(data_chunk, crate::net::NetLayerType::Ethernet, NetPacketSource::Nic(dev.identifier))
+            NetPacketListNode::from_single(data_chunk, crate::net::NetLayerType::Ethernet, NetPacketSource::Nic(dev.identifier))
         })
-        .collect::<Vec<NetPacket>>();
+        .collect::<Vec<NetPacketListNode>>();
     for packet in net_packets {
         crate::net::debug_packet(packet);
     }

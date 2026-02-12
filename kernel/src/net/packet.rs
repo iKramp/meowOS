@@ -22,16 +22,16 @@ pub enum NetPacketSource {
 }
 
 #[derive(Debug)]
-pub struct NetPacket {
-    pub(in crate::net) raw_data: Acow<RawPacket>,
-    pub(in crate::net) next_packet: Option<Box<NetPacket>>,
+pub struct NetPacketListNode {
+    pub(in crate::net) raw_data: Acow<NetPacket>,
+    pub(in crate::net) next_packet: Option<Box<NetPacketListNode>>,
 }
 
-impl NetPacket {
+impl NetPacketListNode {
     pub fn new(raw_data: Vec<RawNetDataChunk>, packet_type: NetLayerType, source: NetPacketSource) -> Self {
-        let raw_data = Acow::new(RawPacket::new(raw_data, packet_type, source));
+        let raw_data = Acow::new(NetPacket::new(raw_data, packet_type, source));
 
-        NetPacket {
+        NetPacketListNode {
             raw_data,
             next_packet: None,
         }
@@ -40,9 +40,9 @@ impl NetPacket {
     pub fn from_single(raw_data: RawNetDataChunk, packet_type: NetLayerType, source: NetPacketSource) -> Self {
         let mut tmp_vec = Vec::new();
         tmp_vec.push(raw_data);
-        let raw_data = Acow::new(RawPacket::new(tmp_vec, packet_type, source));
+        let raw_data = Acow::new(NetPacket::new(tmp_vec, packet_type, source));
 
-        NetPacket {
+        NetPacketListNode {
             raw_data,
             next_packet: None,
         }
@@ -73,7 +73,7 @@ impl NetPacket {
 }
 
 #[derive(Clone, Debug)]
-pub(in crate::net) struct RawPacket {
+pub(in crate::net) struct NetPacket {
     chunks: Vec<RawNetDataChunk>,
     pub parsed_layers: Vec<NetLayerData>,
     source: NetPacketSource,
@@ -81,11 +81,11 @@ pub(in crate::net) struct RawPacket {
     packet_type: NetLayerType,
 }
 
-impl RawPacket {
+impl NetPacket {
     pub fn new(data: Vec<RawNetDataChunk>, packet_type: NetLayerType, source: NetPacketSource) -> Self {
         let len = data.iter().fold(0, |a, b| a + b.length);
 
-        RawPacket {
+        NetPacket {
             chunks: data,
             parsed_layers: Vec::new(),
             packet_type,

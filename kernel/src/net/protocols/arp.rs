@@ -3,7 +3,7 @@ use std::cow::Acow;
 use crate::net::{
     NetLayerType,
     flow::IncomingFlowDirection,
-    packet::RawPacket,
+    packet::NetPacket,
     protocols::{MacAddress, NetLayer}, routing_tables::{self, get_self_arp_entry},
 };
 
@@ -96,7 +96,7 @@ impl ProtocolAddr {
     }
 }
 
-pub(in crate::net::protocols) fn parse_arp(packet: &mut Acow<RawPacket>, mut offset: usize) -> Option<ArpHeader> {
+pub(in crate::net::protocols) fn parse_arp(packet: &mut Acow<NetPacket>, mut offset: usize) -> Option<ArpHeader> {
     packet.ensure_length(offset as u32 + 28);
 
     let arp_offset = offset as u32;

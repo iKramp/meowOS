@@ -2,7 +2,7 @@ use core::ptr::addr_of_mut;
 use std::{cow::Acow, println};
 
 use crate::net::{
-    packet::RawPacket,
+    packet::NetPacket,
     protocols::{MacAddress, NetLayer, NetLayerType}, routing_tables::is_own_mac,
 };
 
@@ -49,7 +49,7 @@ impl NetLayer for EthernetHeader {
     }
 }
 
-pub(super) fn parse_ethernet_frame(packet: &mut Acow<RawPacket>) -> Option<EthernetHeader> {
+pub(super) fn parse_ethernet_frame(packet: &mut Acow<NetPacket>) -> Option<EthernetHeader> {
     let packet_len = packet.len();
     if packet_len < 14 {
         // Ethernet header + minimum payload + CRC

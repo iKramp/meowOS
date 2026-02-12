@@ -1,7 +1,7 @@
 use std::println;
 
 use crate::net::{
-    NetPacket, hook::{HookStage, call_hooks}, protocols::{self, NetLayerType}
+    NetPacketListNode, hook::{HookStage, call_hooks}, protocols::{self, NetLayerType}
 };
 
 enum RoutingStep {
@@ -16,7 +16,7 @@ pub(in crate::net) enum IncomingFlowDirection {
 }
 
 fn process_next_step(
-    packet: NetPacket,
+    packet: NetPacketListNode,
     flow_direction: IncomingFlowDirection,
     current_layer_type: NetLayerType,
     upper_layer_type: NetLayerType,
@@ -38,7 +38,7 @@ fn process_next_step(
     }
 }
 
-pub(in crate::net) fn process_inbound_packet(mut packet: NetPacket, layer_type: NetLayerType, layer_offset: usize) {
+pub(in crate::net) fn process_inbound_packet(mut packet: NetPacketListNode, layer_type: NetLayerType, layer_offset: usize) {
     if matches!(layer_type, NetLayerType::None) {
         return; //no more layers to process
     }
@@ -77,7 +77,7 @@ pub(in crate::net) fn process_inbound_packet(mut packet: NetPacket, layer_type: 
 /// Processing a packet on the same layer as before
 /// This does not parse the packet in any way, but may do *something* with it
 /// Examples: protocols like ARP or bridging packets
-fn process_bridge(mut packet: NetPacket, _layer_type: NetLayerType) {
+fn process_bridge(mut packet: NetPacketListNode, _layer_type: NetLayerType) {
 
     let layer = unsafe { packet.get_highest_layer().unwrap_unchecked() };
     layer.action();
@@ -89,7 +89,7 @@ fn process_bridge(mut packet: NetPacket, _layer_type: NetLayerType) {
 /// Processing a packet to be sent out
 /// This sets up the layer indicated by layer_type. If the layer already exists
 /// (existing_layer_index is Some), it modifies that layer instead of creating a new one.
-fn process_outbound_packet(mut _packet: NetPacket, _layer_type: NetLayerType, _existing_layer_index: Option<usize>) {
+fn process_outbound_packet(mut _packet: NetPacketListNode, _layer_type: NetLayerType, _existing_layer_index: Option<usize>) {
     todo!();
 
     //last action if packet is not dropped should be process_outbound_packet(packet, lower_layer_type);

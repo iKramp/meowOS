@@ -1,11 +1,11 @@
 use std::cow::Acow;
 
-use crate::net::{flow::IncomingFlowDirection, packet::RawPacket, protocols::{arp::ArpHeader, ethernet::{EthernetHeader, parse_ethernet_frame}}};
+use crate::net::{flow::IncomingFlowDirection, packet::NetPacket, protocols::{arp::ArpHeader, ethernet::{EthernetHeader, parse_ethernet_frame}}};
 
 pub(in crate::net) mod ethernet;
 pub(in crate::net) mod arp;
 
-pub(in crate::net) fn parse_layer(packet: &mut Acow<RawPacket>, packet_type: NetLayerType, offset: usize) -> Option<NetLayerData> {
+pub(in crate::net) fn parse_layer(packet: &mut Acow<NetPacket>, packet_type: NetLayerType, offset: usize) -> Option<NetLayerData> {
     let data = match packet_type {
         NetLayerType::Ethernet => NetLayerData::Ethernet(parse_ethernet_frame(packet)?),
         NetLayerType::Arp => NetLayerData::Arp(arp::parse_arp(packet, offset)?),
