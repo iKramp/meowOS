@@ -1,9 +1,11 @@
-use crate::net::{flow::FlowDirectionFlags, packet::RawPacket, protocols::{arp::ArpHeader, ethernet::{EthernetHeader, parse_ethernet_frame}}};
+use std::cow::Acow;
+
+use crate::net::{flow::IncomingFlowDirection, packet::RawPacket, protocols::{arp::ArpHeader, ethernet::{EthernetHeader, parse_ethernet_frame}}};
 
 pub(in crate::net) mod ethernet;
 pub(in crate::net) mod arp;
 
-pub(in crate::net) fn parse_layer(packet: &RawPacket, packet_type: NetLayerType, offset: usize) -> Option<NetLayerData> {
+pub(in crate::net) fn parse_layer(packet: &mut Acow<RawPacket>, packet_type: NetLayerType, offset: usize) -> Option<NetLayerData> {
     let data = match packet_type {
         NetLayerType::Ethernet => NetLayerData::Ethernet(parse_ethernet_frame(packet)?),
         NetLayerType::Arp => NetLayerData::Arp(arp::parse_arp(packet, offset)?),
@@ -15,7 +17,9 @@ pub(in crate::net) fn parse_layer(packet: &RawPacket, packet_type: NetLayerType,
 }
 
 pub(in crate::net) trait NetLayer {
-    fn flow_direction(&self) -> FlowDirectionFlags;
+    /// Action to take on some packet. For example ARP protocol, TCP/UDP forward to application,...
+    fn action(&self) {}
+    fn incoming_flow_direction(&self) -> IncomingFlowDirection;
     fn current_layer_type(&self) -> NetLayerType;
     fn current_layer_offset(&self) -> u32;
     fn upper_layer_type(&self) -> NetLayerType;
@@ -47,6 +51,7 @@ impl NetLayerData {
     pub fn get(&self) -> Option<&dyn NetLayer> {
         match self {
             NetLayerData::Ethernet(header) => Some(header),
+            NetLayerData::Arp(header) => Some(header),
             _ => None,
         }
     }
@@ -54,13 +59,14 @@ impl NetLayerData {
     pub fn get_mut(&mut self) -> Option<&mut dyn NetLayer> {
         match self {
             NetLayerData::Ethernet(header) => Some(header),
+            NetLayerData::Arp(header) => Some(header),
             _ => None,
         }
     }
 }
 
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NetLayerType {
     Unparsed,
     Unknown,
@@ -73,7 +79,14 @@ pub enum NetLayerType {
     Udp,
 }
 
-pub type MacAddress = [u8; 6];
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct MacAddress([u8; 6]);
+
+impl MacAddress {
+    pub fn is_broadcast(&self) -> bool {
+        self.0.iter().all(|&b| b == 0xFF)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(in crate::net) struct UnknownLayer {

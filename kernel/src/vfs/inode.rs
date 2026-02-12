@@ -14,9 +14,9 @@ pub struct Inode {
     pub gid: u16,
     ///len of a symlink is the length of the pathname
     pub size: u64,
-    pub access_time: u32,
-    pub modification_time: u32,
-    pub stat_change_time: u32,
+    pub access_time: u64,
+    pub modification_time: u64,
+    pub stat_change_time: u64,
     //available if this represents a device, otherwise inherits from device
     pub preferred_block_size: u16,
     ///number of blocks used by this inode, in 512 byte units!!!!!

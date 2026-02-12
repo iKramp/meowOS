@@ -180,7 +180,7 @@ pub(super) fn process_received_packets(dev: &mut E1000eDevice) {
         })
         .collect::<Vec<NetPacket>>();
     for packet in net_packets {
-        crate::net::debug_packet(&packet);
+        crate::net::debug_packet(packet);
     }
 }
 

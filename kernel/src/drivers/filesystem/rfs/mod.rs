@@ -37,10 +37,14 @@ struct Inode {
     link_count: u16,
     uid: u16,
     gid: u16,
-    access_time: u32,
-    modification_time: u32,
-    stat_change_time: u32,
+    access_time: u64,
+    modification_time: u64,
+    stat_change_time: u64,
 }
+
+const _: () = {
+    assert!(core::mem::size_of::<Inode>() <= 512);
+};
 
 impl Inode {
     fn to_vfs(&self, index: u32, partition: &Partition) -> vfs::Inode {

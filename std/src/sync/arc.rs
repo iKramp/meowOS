@@ -8,7 +8,7 @@ pub struct ArcInner<T: ?Sized> {
     data: T,
 }
 
-pub struct Arc<T: ?Sized + 'static> {
+pub struct Arc<T: ?Sized> {
     inner: NonNull<ArcInner<T>>,
 }
 
@@ -31,9 +31,13 @@ impl<T: ?Sized> Arc<T> {
     pub fn get(&self) -> &T {
         unsafe { &(self.inner.as_ref().data) }
     }
+
+    pub fn ref_count(&self) -> usize {
+        unsafe { self.inner.as_ref().ref_count.load(core::sync::atomic::Ordering::Relaxed) }
+    }
 }
 
-impl<T: ?Sized + 'static> Clone for Arc<T> {
+impl<T: ?Sized> Clone for Arc<T> {
     fn clone(&self) -> Self {
         unsafe {
             self.inner

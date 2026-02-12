@@ -1,18 +1,16 @@
 use std::{
     boxed::Box,
+    cow::Acow,
     mem_utils::{PhysAddr, translate_phys_virt_addr},
-    r_lock_w_info,
-    sync::{
-        arc::Arc,
-        rw_lock::{RWLockModeRead, RWLockModeWrite, RWSpinlock, RWSpinlockGuard},
-    },
     vec::Vec,
-    w_lock_w_info,
 };
 
 use crate::{
     memory::physical_allocator,
-    net::{NicIdentifier, protocols::{NetLayer, NetLayerData, NetLayerType}},
+    net::{
+        NicIdentifier,
+        protocols::{NetLayer, NetLayerData, NetLayerType},
+    },
     proc::Pid,
 };
 
@@ -23,20 +21,18 @@ pub enum NetPacketSource {
     Other,
 }
 
-#[derive(Clone)]
+#[derive(Debug)]
 pub struct NetPacket {
-    raw_data: Arc<RawPacket>,
-    pub(in crate::net) parsed_layers: Vec<NetLayerData>,
+    pub(in crate::net) raw_data: Acow<RawPacket>,
     pub(in crate::net) next_packet: Option<Box<NetPacket>>,
 }
 
 impl NetPacket {
     pub fn new(raw_data: Vec<RawNetDataChunk>, packet_type: NetLayerType, source: NetPacketSource) -> Self {
-        let raw_data = Arc::new(RawPacket::new(raw_data, packet_type, source));
+        let raw_data = Acow::new(RawPacket::new(raw_data, packet_type, source));
 
         NetPacket {
             raw_data,
-            parsed_layers: Vec::new(),
             next_packet: None,
         }
     }
@@ -44,33 +40,42 @@ impl NetPacket {
     pub fn from_single(raw_data: RawNetDataChunk, packet_type: NetLayerType, source: NetPacketSource) -> Self {
         let mut tmp_vec = Vec::new();
         tmp_vec.push(raw_data);
-        let raw_data = Arc::new(RawPacket::new(tmp_vec, packet_type, source));
+        let raw_data = Acow::new(RawPacket::new(tmp_vec, packet_type, source));
 
         NetPacket {
             raw_data,
-            parsed_layers: Vec::new(),
             next_packet: None,
         }
     }
 
-    pub(in crate::net) fn raw_data(&self) -> &RawPacket {
-        &self.raw_data
-    }
-
-    pub(in crate::net) fn packet_type(&self) -> &NetLayerType {
-        &self.raw_data.packet_type
+    pub(in crate::net) fn packet_type(&self) -> NetLayerType {
+        self.raw_data.packet_type
     }
 
     pub(in crate::net) fn get_highest_layer(&self) -> Option<&dyn NetLayer> {
-        Some(self.parsed_layers.last()?.get().expect("can't call get_highest_layer on unparsed layer"))
+        Some(
+            self.raw_data
+                .parsed_layers
+                .last()?
+                .get()
+                .expect("can't call get_highest_layer on unparsed layer"),
+        )
+    }
+
+    pub fn clone(&self) -> Self {
+        Self {
+            raw_data: self.raw_data.clone(),
+            next_packet: None,
+        }
     }
 
     //next step
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(in crate::net) struct RawPacket {
-    chunks: RWSpinlock<Vec<RawNetDataChunk>>,
+    chunks: Vec<RawNetDataChunk>,
+    pub parsed_layers: Vec<NetLayerData>,
     source: NetPacketSource,
     length: u32,
     packet_type: NetLayerType,
@@ -81,15 +86,16 @@ impl RawPacket {
         let len = data.iter().fold(0, |a, b| a + b.length);
 
         RawPacket {
-            chunks: RWSpinlock::new(data),
+            chunks: data,
+            parsed_layers: Vec::new(),
             packet_type,
             source,
             length: len,
         }
     }
 
-    pub fn linearize(&self) {
-        let mut vec = w_lock_w_info!(self.chunks);
+    pub fn linearize(&mut self) {
+        let vec = &mut self.chunks;
         if vec.len() <= 1 {
             return;
         }
@@ -116,9 +122,8 @@ impl RawPacket {
         });
     }
 
-    pub fn ensure_length(&self, len: u32) {
-        let vec = r_lock_w_info!(self.chunks);
-        if vec[0].len() < len {
+    pub fn ensure_length(self: &mut Acow<Self>, len: u32) {
+        if self.chunks[0].len() < len {
             self.linearize();
         }
     }
@@ -127,12 +132,12 @@ impl RawPacket {
         self.length
     }
 
-    pub fn get_chunks(&self) -> RWSpinlockGuard<Vec<RawNetDataChunk>, RWLockModeRead> {
-        r_lock_w_info!(self.chunks)
+    pub fn get_chunks(&self) -> &Vec<RawNetDataChunk> {
+        &self.chunks
     }
 
-    pub fn get_chunks_mut(&mut self) -> RWSpinlockGuard<Vec<RawNetDataChunk>, RWLockModeWrite> {
-        w_lock_w_info!(self.chunks)
+    pub fn get_chunks_mut(&mut self) -> &mut Vec<RawNetDataChunk> {
+        &mut self.chunks
     }
 
     pub fn packet_type(&self) -> &NetLayerType {
@@ -174,6 +179,26 @@ impl Drop for RawNetDataChunk {
             unsafe {
                 physical_allocator::deallocate_frame(PhysAddr(self.data.0 + (i as u64) * 4096));
             }
+        }
+    }
+}
+
+impl Clone for RawNetDataChunk {
+    fn clone(&self) -> Self {
+        if self.data.0 == 0 {
+            return Self {
+                data: self.data,
+                length: self.length,
+            };
+        }
+        let pages = self.length.div_ceil(4096);
+        let new_phys = physical_allocator::allocate_contiguius_high(pages as u64);
+        let old_ptr = translate_phys_virt_addr(self.data).0 as *const u8;
+        let new_ptr = translate_phys_virt_addr(new_phys).0 as *mut u8;
+        unsafe { core::ptr::copy_nonoverlapping(old_ptr, new_ptr, self.length as usize) };
+        Self {
+            data: new_phys,
+            length: self.length,
         }
     }
 }

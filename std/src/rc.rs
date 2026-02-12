@@ -4,13 +4,13 @@ use alloc::boxed::Box;
 
 #[repr(C)]
 struct RcInner<T: ?Sized> {
-    count: Cell<u64>,
+    count: Cell<usize>,
     data: T,
 }
 
 pub struct Rc<T>
 where
-    T: 'static + ?Sized,
+    T: ?Sized,
 {
     inner: NonNull<RcInner<T>>,
 }
@@ -30,6 +30,10 @@ impl<T> Rc<T> {
 impl<T: ?Sized> Rc<T> {
     pub fn get(&self) -> &T {
         unsafe { &self.inner.as_ref().data }
+    }
+
+    pub fn ref_count(&self) -> usize {
+        unsafe { self.inner.as_ref().count.get() }
     }
 }
 
