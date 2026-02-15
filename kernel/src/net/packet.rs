@@ -8,8 +8,7 @@ use std::{
 use crate::{
     memory::physical_allocator,
     net::{
-        NicIdentifier,
-        protocols::{NetLayer, NetLayerData, NetLayerType},
+        NicIdentifier, protocols::{NetLayer, NetLayerData, NetLayerFlowID}
     },
     proc::Pid,
 };
@@ -23,38 +22,34 @@ pub enum NetPacketSource {
 
 #[derive(Debug)]
 pub struct NetPacketListNode {
-    pub(in crate::net) raw_data: Acow<NetPacket>,
+    pub(in crate::net) data: Acow<NetPacket>,
     pub(in crate::net) next_packet: Option<Box<NetPacketListNode>>,
 }
 
 impl NetPacketListNode {
-    pub fn new(raw_data: Vec<RawNetDataChunk>, packet_type: NetLayerType, source: NetPacketSource) -> Self {
-        let raw_data = Acow::new(NetPacket::new(raw_data, packet_type, source));
+    pub fn new(raw_data: Vec<RawNetDataChunk>, source: NetPacketSource) -> Self {
+        let raw_data = Acow::new(NetPacket::new(raw_data, source));
 
         NetPacketListNode {
-            raw_data,
+            data: raw_data,
             next_packet: None,
         }
     }
 
-    pub fn from_single(raw_data: RawNetDataChunk, packet_type: NetLayerType, source: NetPacketSource) -> Self {
+    pub fn from_single(raw_data: RawNetDataChunk, source: NetPacketSource) -> Self {
         let mut tmp_vec = Vec::new();
         tmp_vec.push(raw_data);
-        let raw_data = Acow::new(NetPacket::new(tmp_vec, packet_type, source));
+        let raw_data = Acow::new(NetPacket::new(tmp_vec, source));
 
         NetPacketListNode {
-            raw_data,
+            data: raw_data,
             next_packet: None,
         }
-    }
-
-    pub(in crate::net) fn packet_type(&self) -> NetLayerType {
-        self.raw_data.packet_type
     }
 
     pub(in crate::net) fn get_highest_layer(&self) -> Option<&dyn NetLayer> {
         Some(
-            self.raw_data
+            self.data
                 .parsed_layers
                 .last()?
                 .get()
@@ -62,35 +57,49 @@ impl NetPacketListNode {
         )
     }
 
-    pub fn clone(&self) -> Self {
-        Self {
-            raw_data: self.raw_data.clone(),
-            next_packet: None,
-        }
+    pub(in crate::net) fn get_highest_layer_mut(&mut self) -> Option<&mut dyn NetLayer> {
+        Some(
+            self.data
+                .parsed_layers
+                .last_mut()?
+                .get_mut()
+                .expect("can't call get_highest_layer on unparsed layer"),
+        )
     }
+    
+    pub fn into_raw_data(self) -> Vec<RawNetDataChunk> {
+        self.data.chunks.clone()
+    }
+}
 
-    //next step
+impl Clone for NetPacketListNode {
+    fn clone(&self) -> Self {
+        Self { data: self.data.clone(), next_packet: None }
+    }
 }
 
 #[derive(Clone, Debug)]
 pub(in crate::net) struct NetPacket {
     chunks: Vec<RawNetDataChunk>,
     pub parsed_layers: Vec<NetLayerData>,
-    source: NetPacketSource,
     length: u32,
-    packet_type: NetLayerType,
+    pub source: NetPacketSource,
+    /// First element refers to the current layer (where the packet is being processed)
+    /// After each layer is constructed, the first element is popped. If there is nothing left, the
+    /// layer must either make up data, or reject the packet
+    pub layers_to_construct: Vec<NetLayerFlowID>,
 }
 
 impl NetPacket {
-    pub fn new(data: Vec<RawNetDataChunk>, packet_type: NetLayerType, source: NetPacketSource) -> Self {
+    pub fn new(data: Vec<RawNetDataChunk>, source: NetPacketSource) -> Self {
         let len = data.iter().fold(0, |a, b| a + b.length);
 
         NetPacket {
             chunks: data,
             parsed_layers: Vec::new(),
-            packet_type,
-            source,
             length: len,
+            layers_to_construct: Vec::new(),
+            source,
         }
     }
 
@@ -140,8 +149,55 @@ impl NetPacket {
         &mut self.chunks
     }
 
-    pub fn packet_type(&self) -> &NetLayerType {
-        &self.packet_type
+    pub fn reset_packet(&mut self) {
+        self.parsed_layers.clear();
+    }
+
+    pub fn bridge_to_out_set_layers(&mut self) {
+        let Some(highest_layer) = self.parsed_layers.last() else {
+            return;
+        };
+        let Some(highest_layer) = highest_layer.get() else {
+            return;
+        };
+        highest_layer.bridge_to_out_set_layers(&mut self.layers_to_construct);
+    }
+
+    pub fn nuke_lower_layers(&mut self, offset_to_keep: u32) -> Option<()> {
+        let mut curr_off = 0;
+        loop {
+            let first_chunk = self.chunks.first()?;
+            if curr_off + first_chunk.len() <= offset_to_keep {
+                curr_off += first_chunk.len();
+                self.chunks.remove(0);
+            } else {
+                break;
+            }
+        }
+        let to_shift = offset_to_keep - curr_off;
+        if to_shift > 0 {
+            let first_chunk = self.chunks.first_mut()?;
+            let chunk_virt = translate_phys_virt_addr(first_chunk.data);
+            unsafe {
+                core::ptr::copy(
+                    chunk_virt.0 as *const u8,
+                    (chunk_virt.0 as *mut u8).byte_add(to_shift as usize),
+                    (first_chunk.len() - to_shift) as usize,
+                )
+            };
+            let new_len = first_chunk.len() - to_shift;
+            first_chunk.shorten(new_len);
+        }
+        Some(())
+    }
+
+    pub fn insert_chunk_front(&mut self, length: u32) -> &mut RawNetDataChunk {
+        let pages = length.div_ceil(4096);
+        let phys_addr = physical_allocator::allocate_contiguius_high(pages as u64);
+        let chunk = RawNetDataChunk::new(phys_addr, length);
+        self.chunks.insert(0, chunk);
+        self.length += length;
+        unsafe { self.chunks.first_mut().unwrap_unchecked() }
     }
 }
 
@@ -162,9 +218,32 @@ impl RawNetDataChunk {
         self.length
     }
 
+    pub fn phys_addr(&self) -> PhysAddr {
+        self.data
+    }
+
     pub fn data(&self) -> &[u8] {
         let ptr = translate_phys_virt_addr(self.data).0 as *const u8;
         unsafe { core::slice::from_raw_parts(ptr, self.length as usize) }
+    }
+
+    pub fn data_mut(&mut self) -> &mut [u8] {
+        let ptr = translate_phys_virt_addr(self.data).0 as *mut u8;
+        unsafe { core::slice::from_raw_parts_mut(ptr, self.length as usize) }
+    }
+
+    pub fn shorten(&mut self, new_len: u32) {
+        if new_len >= self.length {
+            return;
+        }
+        let pages_before = self.length.div_ceil(4096);
+        self.length = new_len;
+        let pages_after = self.length.div_ceil(4096);
+        for i in pages_after..pages_before {
+            unsafe {
+                physical_allocator::deallocate_frame(PhysAddr(self.data.0 + (i as u64) * 4096));
+            }
+        }
     }
 }
 

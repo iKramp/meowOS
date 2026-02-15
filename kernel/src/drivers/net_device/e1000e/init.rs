@@ -60,14 +60,15 @@ pub(super) fn init(dev: &mut E1000eDevice) {
     drop(registers);
 
     println!(level:info, "E1000e initialized successfully");
+    let mac_address = dev.mac_address.0;
     println!(
         "MAC Address: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-        dev.mac_address[0],
-        dev.mac_address[1],
-        dev.mac_address[2],
-        dev.mac_address[3],
-        dev.mac_address[4],
-        dev.mac_address[5]
+        mac_address[0],
+        mac_address[1],
+        mac_address[2],
+        mac_address[3],
+        mac_address[4],
+        mac_address[5]
     );
     //print link up
     println!("Link up: {}", phy::get_link_up(dev));

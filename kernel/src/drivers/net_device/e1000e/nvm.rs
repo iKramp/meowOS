@@ -1,6 +1,6 @@
 use std::{error::ErrorCode, println, w_lock_w_info};
 
-use crate::{drivers::net_device::e1000e::{E1000eDevice, registers::E1000eRegistersPtr}};
+use crate::{drivers::net_device::e1000e::{E1000eDevice, registers::E1000eRegistersPtr}, net::MacAddress};
 
 
 
@@ -67,23 +67,24 @@ fn config_nvm(dev: &mut E1000eDevice) -> Result<NvmState, ErrorCode> {
     let bytes_1 = read_nvm(&registers, 0);
     let bytes_2 = read_nvm(&registers, 1);
     let bytes_3 = read_nvm(&registers, 2);
-    dev.mac_address = [
+    dev.mac_address = MacAddress([
         (bytes_1 & 0xFF) as u8,
         (bytes_1 >> 8) as u8,
         (bytes_2 & 0xFF) as u8,
         (bytes_2 >> 8) as u8,
         (bytes_3 & 0xFF) as u8,
         (bytes_3 >> 8) as u8,
-    ];
+    ]);
     //print
+    let mac_address = dev.mac_address.0;
     println!(
         "E1000e NVM MAC Address: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-        dev.mac_address[0],
-        dev.mac_address[1],
-        dev.mac_address[2],
-        dev.mac_address[3],
-        dev.mac_address[4],
-        dev.mac_address[5],
+        mac_address[0],
+        mac_address[1],
+        mac_address[2],
+        mac_address[3],
+        mac_address[4],
+        mac_address[5],
     );
 
     Ok(state)

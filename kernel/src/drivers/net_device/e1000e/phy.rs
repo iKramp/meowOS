@@ -2,7 +2,7 @@
 registers @ page 372 of pdf
 */
 
-use core::time::Duration;
+use core::{sync::atomic::Ordering, time::Duration};
 use std::{error::ErrorCode, w_lock_w_info};
 
 use crate::drivers::net_device::e1000e::{E1000eDevice, PhyAddress, mdio, registers::MDICPtr};
@@ -27,7 +27,7 @@ pub fn init_phy(dev: &mut E1000eDevice) -> Result<(), ErrorCode> {
         status_link_up = mdio::read(&mdic_reg, dev.phy_addr, 17)?;
         new = std::time::Instant::now();
     }
-    dev.link_up = (status_link_up >> 10) & 1 == 1;
+    dev.link_up.store((status_link_up >> 10) & 1 == 1, Ordering::Relaxed);
 
     //enable link status changed interrupt (detect cable plugs/unplugs)
     mdio::select_page(&mdic_reg, dev.phy_addr, 0)?;

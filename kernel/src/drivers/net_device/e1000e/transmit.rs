@@ -1,5 +1,10 @@
+use core::{cell::UnsafeCell, sync::atomic::Ordering};
 use std::{
-    mem_utils::{PhysAddr, translate_virt_phys_addr}, w_lock_w_info,
+    lock_w_info,
+    mem_utils::{PhysAddr, translate_virt_phys_addr},
+    println,
+    vec::Vec,
+    w_lock_w_info,
 };
 
 use crate::{
@@ -8,6 +13,7 @@ use crate::{
         paging::{self, PageTree},
         physical_allocator,
     },
+    net,
 };
 
 #[derive(Debug)]
@@ -16,10 +22,22 @@ pub(super) struct TransmitDescriptor {
     pub buffer_addr: PhysAddr,
     pub length: u16,
     pub checksum_offset: u8,
-    pub command: u8,
+    pub command: TxDescCommand,
     pub status_extcmd: u8,
     pub checksum_start: u8,
     pub vlan: u16,
+}
+
+bitfield::bitfield! {
+    pub(super) struct TxDescCommand(u8);
+    impl Debug;
+    interrupt_delay_enable, _: 7;
+    vlan_enable, _: 6;
+    descriptor_extension, _: 5;
+    report_status, _: 3;
+    insert_checksum, _: 2;
+    insert_fcs, set_insert_fcs: 1;
+    end_of_packet, set_eop: 0;
 }
 
 pub(super) const TX_DESC_COUNT: usize = 256;
@@ -42,8 +60,8 @@ pub(super) fn init_transmit(dev: &mut E1000eDevice) {
     let queue_size_pages = queue_size_bytes.div_ceil(4096);
 
     let tx_queue_virt = paging::PageTree::current().allocate_contigious(queue_size_pages as u64, None, false);
-    let tx_queue: &mut [TransmitDescriptor; TX_DESC_COUNT] =
-        unsafe { &mut *(tx_queue_virt.0 as *mut [TransmitDescriptor; TX_DESC_COUNT]) };
+    let tx_queue: &mut [UnsafeCell<TransmitDescriptor>; TX_DESC_COUNT] =
+        unsafe { &mut *(tx_queue_virt.0 as *mut [UnsafeCell<TransmitDescriptor>; TX_DESC_COUNT]) };
 
     let mut page_tree = paging::PageTree::current();
     for i in 0..queue_size_pages {
@@ -57,13 +75,14 @@ pub(super) fn init_transmit(dev: &mut E1000eDevice) {
 
     for descriptor in tx_queue.iter_mut() {
         let phys_addr = physical_allocator::allocate_frame();
-        descriptor.buffer_addr = phys_addr;
-        descriptor.length = 0;
-        descriptor.checksum_offset = 0;
-        descriptor.command = 0;
-        descriptor.status_extcmd = 0;
-        descriptor.checksum_start = 0;
-        descriptor.vlan = 0;
+        let desc = unsafe { &mut *descriptor.get() };
+        desc.buffer_addr = phys_addr;
+        desc.length = 0;
+        desc.checksum_offset = 0;
+        desc.command = TxDescCommand(0);
+        desc.status_extcmd = 0;
+        desc.checksum_start = 0;
+        desc.vlan = 0;
     }
 
     dev.transmit_queue = Some((tx_queue, (tx_queue_virt, tx_queue_phys)));
@@ -75,10 +94,7 @@ pub(super) fn init_transmit(dev: &mut E1000eDevice) {
         .tx_descriptor_queue_info()
         .tdbah()
         .write((tx_queue_phys.0 >> 32) as u32);
-    registers
-        .tx_descriptor_queue_info()
-        .tdlen()
-        .write((queue_size_bytes) as u32);
+    registers.tx_descriptor_queue_info().tdlen().write((queue_size_bytes) as u32);
     registers.tx_descriptor_queue_info().tdh().write(0);
     registers.tx_descriptor_queue_info().tdt().write(0);
     registers.tx_descriptor_queue_info().txdctl().write(
@@ -98,14 +114,66 @@ pub(super) fn init_transmit(dev: &mut E1000eDevice) {
         .write(*registers.tipg().read().set_ipgt(8).set_ipgr1(2).set_ipgr2(10));
 }
 
-pub fn enable_transmit(dev: &mut E1000eDevice) {
+pub(super) fn send_packet(dev: &E1000eDevice, packet: net::NetPacketListNode) {
+    let raw_chunks = packet.into_raw_data();
+    let mut tx_descriptors = Vec::new();
+    for chunk in raw_chunks {
+        let mut command = TxDescCommand(0);
+        command.set_insert_fcs(true);
+
+        let descriptor = TransmitDescriptor {
+            buffer_addr: chunk.phys_addr(),
+            length: chunk.len() as u16,
+            command,
+            ..TransmitDescriptor::default()
+        };
+        tx_descriptors.push(descriptor);
+    }
+
+    let Some(chunk) = tx_descriptors.last_mut() else {
+        return;
+    };
+    chunk.command.set_eop(true);
+
+    core::sync::atomic::fence(Ordering::Release);
+
+    let lock = lock_w_info!(dev.transmit_lock);
+    let registers = w_lock_w_info!(dev.registers);
+
+    let tail = registers.tx_descriptor_queue_info().tdt().read() as usize;
+    let head = registers.tx_descriptor_queue_info().tdh().read() as usize + TX_DESC_COUNT - 1; //to avoid negative, but can't use last
+    let available_slots = head - tail;
+    if available_slots < tx_descriptors.len() {
+        println!(level:error, "Not enough space in transmit queue: available {}, needed {}", available_slots, tx_descriptors.len());
+        return;
+    }
+
+    let desc_len = tx_descriptors.len();
+    for (i, descriptor) in tx_descriptors.into_iter().enumerate() {
+        let index = (tail + i) % TX_DESC_COUNT;
+        let Some((queue, _)) = dev.transmit_queue.as_ref() else {
+            println!(level:error, "Transmit queue not initialized");
+            return;
+        };
+        //safe because we hold the lock
+        unsafe { *queue[index].get() = descriptor };
+    }
+
+    registers
+        .tx_descriptor_queue_info()
+        .tdt()
+        .write(((tail + desc_len) % TX_DESC_COUNT) as u32);
+    drop(lock);
+}
+
+pub fn enable_transmit(dev: &E1000eDevice) {
     let registers = w_lock_w_info!(dev.registers);
     let mut tctl = registers.tctl().read();
     tctl.set_en(true);
     registers.tctl().write(tctl);
 }
 
-pub fn disable_transmit(dev: &mut E1000eDevice) {
+pub fn disable_transmit(dev: &E1000eDevice) {
     let registers = w_lock_w_info!(dev.registers);
     let mut tctl = registers.tctl().read();
     tctl.set_en(false);
@@ -126,7 +194,7 @@ impl Default for TransmitDescriptor {
             buffer_addr: PhysAddr(0),
             length: 0,
             checksum_offset: 0,
-            command: 0,
+            command: TxDescCommand(0),
             status_extcmd: 0,
             checksum_start: 0,
             vlan: 0,

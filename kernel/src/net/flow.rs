@@ -1,96 +1,175 @@
-use std::println;
+use std::{println, sync::arc::Arc, vec::Vec};
 
 use crate::net::{
-    NetPacketListNode, hook::{HookStage, call_hooks}, protocols::{self, NetLayerType}
+    NIC, NetPacketListNode,
+    hook::{HookFilter, HookStage, call_hooks},
+    protocols::{self, NetLayerType},
 };
 
-enum RoutingStep {
-    Parsed,
-    SendOut,
-}
-
-pub(in crate::net) enum IncomingFlowDirection {
-    LayerUp,
+pub enum RoutingStep {
+    Incoming,
     Bridge,
-    Both,
+    Outgoing,
+    Loopback,
 }
 
-fn process_next_step(
-    packet: NetPacketListNode,
-    flow_direction: IncomingFlowDirection,
-    current_layer_type: NetLayerType,
-    upper_layer_type: NetLayerType,
-    upper_layer_offset: usize,
-) {
-    match flow_direction {
-        IncomingFlowDirection::LayerUp => {
-            process_inbound_packet(packet, upper_layer_type, upper_layer_offset);
-        }
-        IncomingFlowDirection::Bridge => {
-            //process the packet on the same layer, then stop processing
-            process_bridge(packet, current_layer_type);
-        }
-        IncomingFlowDirection::Both => {
-            let packet_clone = packet.clone();
-            process_bridge(packet, current_layer_type);
-            process_inbound_packet(packet_clone, upper_layer_type, upper_layer_offset);
+#[derive(Debug)]
+pub(in crate::net) enum IncomingFlowDirection {
+    LayerUp(NetLayerType, usize), //upper layer type and offset
+    Bridge,
+    Both(NetLayerType, usize), //upper layer type and offset
+    Drop,
+}
+
+#[derive(Debug)]
+pub(in crate::net) enum LayerDownType {
+    Normal(NetLayerType),
+    Nic(Arc<dyn NIC>),
+}
+
+#[derive(Debug)]
+pub(in crate::net) enum OutgoingFlowDirection {
+    LayerDown(LayerDownType),
+    Loopback,
+    Both(NetLayerType),
+    Drop,
+}
+
+pub fn process_packet_flow(packet: NetPacketListNode, initial_routing_step: RoutingStep, initial_layer: NetLayerType) {
+    let mut process_queue = Vec::new();
+    process_queue.push(((initial_routing_step, initial_layer, 0), packet));
+
+    while let Some(((routing_step, current_layer_type, current_layer_offset), mut packet)) = process_queue.pop() {
+        match routing_step {
+            RoutingStep::Incoming => {
+                let proc_res = process_inbound_packet(&mut packet, current_layer_type, current_layer_offset);
+                match proc_res {
+                    IncomingFlowDirection::LayerUp(next_layer_type, next_layer_offset) => {
+                        process_queue.push(((RoutingStep::Incoming, next_layer_type, next_layer_offset), packet));
+                    }
+                    IncomingFlowDirection::Bridge => {
+                        process_queue.push(((RoutingStep::Bridge, current_layer_type, 0), packet));
+                    }
+                    IncomingFlowDirection::Both(next_layer_type, next_layer_offset) => {
+                        process_queue.push(((RoutingStep::Incoming, next_layer_type, next_layer_offset), packet.clone()));
+                        process_queue.push(((RoutingStep::Bridge, current_layer_type, 0), packet));
+                    }
+                    IncomingFlowDirection::Drop => {}
+                }
+            }
+            RoutingStep::Bridge => {
+                let hook_filter = process_bridge(&mut packet, current_layer_type);
+                if matches!(hook_filter, HookFilter::Continue) {
+                    process_queue.push(((RoutingStep::Outgoing, current_layer_type, 1), packet));
+                }
+            }
+            RoutingStep::Outgoing => {
+                let bridged = current_layer_offset == 1; //hacky way to track if this packet was bridged or not
+                let out_res = process_outbound_packet(&mut packet, current_layer_type, bridged);
+                match out_res {
+                    OutgoingFlowDirection::LayerDown(LayerDownType::Normal(net_layer_type)) => {
+                        process_queue.push(((RoutingStep::Outgoing, net_layer_type, 0), packet))
+                    }
+                    OutgoingFlowDirection::LayerDown(LayerDownType::Nic(nic)) => nic.send_packet(packet),
+                    OutgoingFlowDirection::Loopback => {
+                        process_queue.push(((RoutingStep::Loopback, current_layer_type, 0), packet))
+                    }
+                    OutgoingFlowDirection::Both(net_layer_type) => {
+                        process_queue.push(((RoutingStep::Outgoing, net_layer_type, 0), packet.clone()));
+                        process_queue.push(((RoutingStep::Loopback, current_layer_type, 0), packet));
+                    }
+                    OutgoingFlowDirection::Drop => {}
+                }
+            }
+            RoutingStep::Loopback => {
+                let hook_filter = process_loopback(&mut packet, current_layer_type);
+                if matches!(hook_filter, HookFilter::Continue) {
+                    process_queue.push(((RoutingStep::Outgoing, current_layer_type, 0), packet));
+                }
+            }
         }
     }
 }
 
-pub(in crate::net) fn process_inbound_packet(mut packet: NetPacketListNode, layer_type: NetLayerType, layer_offset: usize) {
+fn process_inbound_packet(
+    packet: &mut NetPacketListNode,
+    layer_type: NetLayerType,
+    layer_offset: usize,
+) -> IncomingFlowDirection {
+    println!(
+        "processing inbound packet at layer {:?} with offset {}",
+        layer_type, layer_offset
+    );
     if matches!(layer_type, NetLayerType::None) {
-        return; //no more layers to process
+        println!("packet has no more layers to process, dropping");
+        return IncomingFlowDirection::Drop; //no more layers to process
     }
 
-    let Some(parsed) = protocols::parse_layer(&mut packet.raw_data, layer_type, layer_offset) else {
-        call_hooks(&mut packet, HookStage::BadPacket);
-        return; //bad packet, drop it
+    let Some(parsed) = protocols::parse_layer(&mut packet.data, layer_type, layer_offset) else {
+        println!("failed to parse layer, dropping packet");
+        call_hooks(packet, HookStage::BadPacket);
+        return IncomingFlowDirection::Drop; //bad packet, drop it
     };
 
     let is_known = parsed.is_known();
 
-    packet.raw_data.parsed_layers.push(parsed);
+    packet.data.parsed_layers.push(parsed);
 
-    call_hooks(&mut packet, HookStage::Inbound(layer_type));
+    if matches!(call_hooks(packet, HookStage::Inbound(layer_type)), HookFilter::Drop) {
+        println!("hook decided to drop the packet, dropping");
+        return IncomingFlowDirection::Drop; //hook decided to drop the packet
+    }
 
     if !is_known {
-        return; //unknown layer, stop processing
+        println!("unknown layer type, dropping packet");
+        return IncomingFlowDirection::Drop; //unknown layer, stop processing
     }
 
     //Safety: parsed_layers just had a pushed, known layer
     let curr_layer = unsafe { packet.get_highest_layer().unwrap_unchecked() };
 
-    let next_step = curr_layer.incoming_flow_direction();
-    let upper_layer_type = curr_layer.upper_layer_type();
-    let upper_layer_offset = curr_layer.upper_layer_offset() as usize;
-
-    process_next_step(
-        packet,
-        next_step,
-        layer_type,
-        upper_layer_type,
-        upper_layer_offset,
-    );
+    let res = curr_layer.incoming_flow_direction();
+    println!("successfully processed inbound packet, next step: {:?}", res);
+    res
 }
 
 /// Processing a packet on the same layer as before
 /// This does not parse the packet in any way, but may do *something* with it
-/// Examples: protocols like ARP or bridging packets
-fn process_bridge(mut packet: NetPacketListNode, _layer_type: NetLayerType) {
-
-    let layer = unsafe { packet.get_highest_layer().unwrap_unchecked() };
-    layer.action();
-
-
-    //last action if packet is not dropped should be process_outbound_packet(packet, layer_type);
+/// Examples: protocols like ARP/TCP/UDP or bridging packets
+fn process_bridge(packet: &mut NetPacketListNode, layer_type: NetLayerType) -> HookFilter {
+    println!("processing bridge packet at layer {:?}", layer_type);
+    match call_hooks(packet, HookStage::Bridge(layer_type)) {
+        HookFilter::Continue => {
+            packet.data.bridge_to_out_set_layers();
+            let top_layer = packet.get_highest_layer().expect("bridge with no layer");
+            let top_layer_offset = top_layer.current_layer_offset();
+            let _ = packet.data.nuke_lower_layers(top_layer_offset);
+            packet.data.reset_packet();
+            println!("successfully processed bridge, moving to outbound processing");
+            HookFilter::Continue
+        }
+        HookFilter::Drop => {
+            println!("hook decided to drop the packet, dropping");
+            HookFilter::Drop
+        }
+    }
 }
 
 /// Processing a packet to be sent out
-/// This sets up the layer indicated by layer_type. If the layer already exists
-/// (existing_layer_index is Some), it modifies that layer instead of creating a new one.
-fn process_outbound_packet(mut _packet: NetPacketListNode, _layer_type: NetLayerType, _existing_layer_index: Option<usize>) {
-    todo!();
+fn process_outbound_packet(packet: &mut NetPacketListNode, layer_type: NetLayerType, bridged: bool) -> OutgoingFlowDirection {
+    println!("processing outbound packet at layer {:?}, bridged: {}", layer_type, bridged);
+    if matches!(call_hooks(packet, HookStage::Outbound(layer_type)), HookFilter::Drop) {
+        println!("hook decided to drop the packet, dropping");
+        return OutgoingFlowDirection::Drop; //hook decided to drop the packet
+    }
+    let res = protocols::construct_layer(&mut packet.data, layer_type, bridged);
+    println!("successfully processed outbound packet, next step: {:?}", res);
+    res
+}
 
-    //last action if packet is not dropped should be process_outbound_packet(packet, lower_layer_type);
+fn process_loopback(packet: &mut NetPacketListNode, layer_type: NetLayerType) -> HookFilter {
+    //This only allows the most basic processing. No layers are parsed at this point. Lower layers
+    //are also nuked from exiting bridge
+    println!("processing loopback packet at layer {:?} ", layer_type);
+    call_hooks(packet, HookStage::Loopback(layer_type))
 }

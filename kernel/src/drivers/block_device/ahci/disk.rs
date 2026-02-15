@@ -526,7 +526,7 @@ impl VirtualPort {
                 prdt_entry_ptr.write_volatile(PrdtEntry(prdt_entry.0));
             }
 
-            let _ = PAGE_TREE_ALLOCATOR.unmap(cmd_table_virt); //unmap can't fail, was just mapped
+            PAGE_TREE_ALLOCATOR.unmap(cmd_table_virt);
         }
 
         let cmd_issue = 1 << index;

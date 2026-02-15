@@ -1,13 +1,17 @@
 // E1000e Network Device Driver
 // Follows the 82574 specification
 
-use core::mem::MaybeUninit;
+use core::{
+    cell::UnsafeCell,
+    mem::MaybeUninit,
+    sync::atomic::{AtomicBool, Ordering},
+};
 use std::{
     boxed::Box,
     error::ErrorCode,
     mem_utils::{PhysAddr, VirtAddr},
     println, r_lock_w_info,
-    sync::{no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
+    sync::{arc::Arc, no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
     w_lock_w_info,
 };
 
@@ -20,7 +24,8 @@ use crate::{
         },
         pci::{self, BarTrait, NetworkController, PciClass, PcieDriver},
     },
-    memory::paging::PageTree, net::NicIdentifier,
+    memory::paging::PageTree,
+    net::{self, MacAddress, NIC, NicIdentifier, deregister_nic},
 };
 
 mod init;
@@ -48,7 +53,7 @@ pub(super) fn init_driver() {
 }
 
 struct E1000eDriver {
-    device: MaybeUninit<E1000eDevice>,
+    device: MaybeUninit<Arc<E1000eDevice>>,
 }
 
 impl PcieDriver for E1000eDriver {
@@ -58,9 +63,12 @@ impl PcieDriver for E1000eDriver {
         Ok(())
     }
 
-    fn deinit(&mut self, _dev: &pci::PcieDevice) {}
+    fn deinit(&mut self, _dev: &pci::PcieDevice) {
+        deregister_nic(unsafe { self.device.assume_init_ref().identifier });
+    }
 
     fn remove_device(&mut self) {
+        deregister_nic(unsafe { self.device.assume_init_ref().identifier });
         todo!()
     }
 
@@ -70,7 +78,7 @@ impl PcieDriver for E1000eDriver {
     }
 }
 
-fn init_e1000e(dev: &pci::PcieDevice) -> Result<E1000eDevice, ErrorCode> {
+fn init_e1000e(dev: &pci::PcieDevice) -> Result<Arc<E1000eDevice>, ErrorCode> {
     println!("Initializing e1000e device");
     let Ok(mut e1000e_device) = E1000eDevice::new(dev) else {
         println!("e1000e device has incorrect bars");
@@ -78,9 +86,12 @@ fn init_e1000e(dev: &pci::PcieDevice) -> Result<E1000eDevice, ErrorCode> {
     };
     dev.enable_bus_mastering();
     init::init(&mut e1000e_device);
+    let e1000e_device = Arc::new(e1000e_device);
+    net::register_nic(e1000e_device.mac_address, e1000e_device.clone());
     Ok(e1000e_device)
 }
 
+#[derive(Debug)]
 struct E1000eDevice {
     identifier: NicIdentifier,
     memory_bar: VirtAddr,
@@ -88,15 +99,18 @@ struct E1000eDevice {
     registers: RWSpinlock<registers::E1000eRegistersPtr<'static>>, //same value as memory_bar but typed
     phy_addr: PhyAddress,
     phy_id: u32,
-    mac_address: [u8; 6],
-    link_up: bool,
+    mac_address: net::MacAddress,
+    link_up: AtomicBool,
     #[allow(clippy::type_complexity)] //not even that complex
-    receive_queue: Option<(&'static mut [ReceiveDescriptor; RX_DESC_COUNT], (VirtAddr, PhysAddr))>,
+    receive_queue: Option<(&'static [UnsafeCell<ReceiveDescriptor>; RX_DESC_COUNT], (VirtAddr, PhysAddr))>,
     #[allow(clippy::type_complexity)] //not even that complex
-    transmit_queue: Option<(&'static mut [TransmitDescriptor; TX_DESC_COUNT], (VirtAddr, PhysAddr))>,
+    transmit_queue: Option<(&'static [UnsafeCell<TransmitDescriptor>; TX_DESC_COUNT], (VirtAddr, PhysAddr))>,
     receive_lock: NoIntSpinlock<()>,
     transmit_lock: NoIntSpinlock<()>,
 }
+
+unsafe impl Sync for E1000eDevice {}
+unsafe impl Send for E1000eDevice {}
 
 impl E1000eDevice {
     pub fn new(device: &pci::PcieDevice) -> Result<Self, ErrorCode> {
@@ -127,14 +141,14 @@ impl E1000eDevice {
         }
 
         Ok(Self {
-            identifier: crate::net::requset_nic_identifier(),
+            identifier: net::requset_nic_identifier(),
             memory_bar,
             flash_bar,
             registers: RWSpinlock::new(registers),
             phy_addr: PhyAddress::ExternalGigabit,
             phy_id: 0,
-            mac_address: [0; 6],
-            link_up: false,
+            mac_address: MacAddress([0_u8; 6]),
+            link_up: AtomicBool::new(false),
             receive_queue: None,
             transmit_queue: None,
             receive_lock: NoIntSpinlock::new(()),
@@ -194,12 +208,12 @@ impl E1000eDevice {
         registers.rctl().write(rctl);
     }
 
-    fn service_interrupt(&mut self) {
+    fn service_interrupt(&self) {
         let registers = r_lock_w_info!(self.registers);
         let icr = registers.icr().read();
         //we really care only about lsc, rxt0, rxo, rxdmt0, rxq0
         if icr.LSC() {
-            self.link_up = registers.status().read().lu()
+            self.link_up.store(registers.status().read().lu(), Ordering::Relaxed);
         }
 
         drop(registers);
@@ -209,6 +223,16 @@ impl E1000eDevice {
             //process packets
             receive::process_received_packets(self);
         }
+    }
+}
+
+impl NIC for E1000eDevice {
+    fn send_packet(&self, packet: net::NetPacketListNode) {
+        transmit::send_packet(self, packet);
+    }
+
+    fn get_identifier(&self) -> NicIdentifier {
+        self.identifier
     }
 }
 

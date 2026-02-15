@@ -4,11 +4,11 @@ use crate::{
         paging::{self, PageTree},
         physical_allocator,
     },
-    net::{NetPacketListNode, NetPacketSource, RawNetDataChunk},
+    net::{self, MacAddress, NetPacketListNode, RawNetDataChunk},
     rand,
 };
 use bitfield::bitfield;
-use core::sync::atomic::Ordering;
+use core::{cell::UnsafeCell, sync::atomic::Ordering};
 use std::{
     lock_w_info,
     mem_utils::{PhysAddr, translate_virt_phys_addr},
@@ -61,17 +61,17 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
         mac_reg.rah().write(
             (random_mac[4] as u32) | ((random_mac[5] as u32) << 8) | 0x80000000, //set valid bit
         );
-        dev.mac_address = random_mac;
+        dev.mac_address = MacAddress(random_mac);
     } else {
         //valid mac
-        dev.mac_address = [
+        dev.mac_address = MacAddress([
             (mac & 0xFF) as u8,
             ((mac >> 8) & 0xFF) as u8,
             ((mac >> 16) & 0xFF) as u8,
             ((mac >> 24) & 0xFF) as u8,
             ((mac >> 32) & 0xFF) as u8,
             ((mac >> 40) & 0xFF) as u8,
-        ];
+        ]);
     }
 
     //zero out MTA
@@ -119,8 +119,8 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
     let queue_size_pages = queue_size_bytes.div_ceil(4096);
 
     let rx_queue_virt = paging::PageTree::current().allocate_contigious(queue_size_pages as u64, None, false);
-    let rx_queue: &mut [ReceiveDescriptor; RX_DESC_COUNT] =
-        unsafe { &mut *(rx_queue_virt.0 as *mut [ReceiveDescriptor; RX_DESC_COUNT]) };
+    let rx_queue: &mut [UnsafeCell<ReceiveDescriptor>; RX_DESC_COUNT] =
+        unsafe { &mut *(rx_queue_virt.0 as *mut [UnsafeCell<ReceiveDescriptor>; RX_DESC_COUNT]) };
 
     let mut page_tree = PageTree::current();
     for page in 0..queue_size_pages {
@@ -133,15 +133,15 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
         translate_virt_phys_addr(rx_queue_virt, PageTree::get_level4_addr()).expect("Failed to translate RX queue address");
 
     for descriptor in rx_queue[..RX_DESC_COUNT - 1].iter_mut() {
-        let mut default_desc = ReceiveDescriptor::default();
+        let mut default_desc = UnsafeCell::new(ReceiveDescriptor::default());
         core::mem::swap(&mut default_desc, descriptor);
         core::mem::forget(default_desc);
 
         let phys_addr = physical_allocator::allocate_frame();
-        descriptor.buffer_addr = phys_addr;
+        descriptor.get_mut().buffer_addr = phys_addr;
     }
     let last_descriptor = rx_queue.last_mut().expect("?");
-    let mut default_desc = ReceiveDescriptor::default();
+    let mut default_desc = UnsafeCell::new(ReceiveDescriptor::default());
     core::mem::swap(&mut default_desc, last_descriptor);
     core::mem::forget(default_desc);
 
@@ -168,7 +168,7 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
     );
 }
 
-pub(super) fn process_received_packets(dev: &mut E1000eDevice) {
+pub(super) fn process_received_packets(dev: &E1000eDevice) {
     let packets = get_received_packets(dev);
     let net_packets = packets
         .into_iter()
@@ -176,21 +176,21 @@ pub(super) fn process_received_packets(dev: &mut E1000eDevice) {
             let data_chunk = RawNetDataChunk::new(packet.buffer_addr, packet.length.into());
             //each is a separate packet for now
             core::mem::forget(packet);
-            NetPacketListNode::from_single(data_chunk, crate::net::NetLayerType::Ethernet, NetPacketSource::Nic(dev.identifier))
+            NetPacketListNode::from_single(data_chunk, net::NetPacketSource::Nic(dev.identifier))
         })
         .collect::<Vec<NetPacketListNode>>();
     for packet in net_packets {
-        crate::net::debug_packet(packet);
+        net::process_packet_flow(packet, net::RoutingStep::Incoming, net::NetLayerType::Ethernet);
     }
 }
 
-fn get_received_packets(dev: &mut E1000eDevice) -> Vec<ReceiveDescriptor> {
+fn get_received_packets(dev: &E1000eDevice) -> Vec<ReceiveDescriptor> {
     let lock = lock_w_info!(dev.receive_lock);
     let registers = w_lock_w_info!(dev.registers);
     let mut curr_tail = registers.rx_descriptor_queue_info().rdt().read();
     let curr_head = registers.rx_descriptor_queue_info().rdh().read();
 
-    let Some((receive_queue, _)) = &mut dev.receive_queue else {
+    let Some((receive_queue, _)) = dev.receive_queue else {
         return Vec::new();
     };
 
@@ -198,7 +198,8 @@ fn get_received_packets(dev: &mut E1000eDevice) -> Vec<ReceiveDescriptor> {
 
     //first descriptor may have already been processed but can't be advanced. Check
     loop {
-        let curr_descriptor = &mut receive_queue[curr_tail as usize];
+        //safe because we hold dev.receive_lock
+        let curr_descriptor = unsafe { &mut *receive_queue[curr_tail as usize].get() };
         if curr_descriptor.buffer_addr.0 != 0 {
             //process descriptor
             let mut tmp_desc = ReceiveDescriptor::default();
@@ -222,14 +223,14 @@ fn get_received_packets(dev: &mut E1000eDevice) -> Vec<ReceiveDescriptor> {
     desc_vec
 }
 
-pub fn enable_receive(dev: &mut E1000eDevice) {
+pub fn enable_receive(dev: &E1000eDevice) {
     let registers = w_lock_w_info!(dev.registers);
     let mut rctl = registers.rctl().read();
     rctl.set_en(true);
     registers.rctl().write(rctl);
 }
 
-pub fn disable_receive(dev: &mut E1000eDevice) {
+pub fn disable_receive(dev: &E1000eDevice) {
     let registers = w_lock_w_info!(dev.registers);
     let mut rctl = registers.rctl().read();
     rctl.set_en(false);

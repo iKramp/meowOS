@@ -14,6 +14,7 @@
 #![feature(rustc_attrs)]
 #![feature(unsafe_cell_access)]
 #![feature(let_chains)]
+#![feature(downcast_unchecked)]
 #![allow(internal_features)]
 
 extern crate static_cond;
@@ -92,6 +93,7 @@ extern "C" fn _start() -> ! {
     std::thread::sleep(core::time::Duration::from_micros(11));
 
     vfs::init();
+    net::init();
 
     let res = block_task(Box::pin(vfs::mount_blkdev_partition(
         cmd_args.root_partition,

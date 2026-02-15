@@ -2,8 +2,7 @@ use core::ptr::addr_of_mut;
 use std::{cow::Acow, println};
 
 use crate::net::{
-    packet::NetPacket,
-    protocols::{MacAddress, NetLayer, NetLayerType}, routing_tables::is_own_mac,
+    NetPacketSource, address_pair::AddressPair, flow::{LayerDownType, OutgoingFlowDirection}, packet::NetPacket, protocols::{MacAddress, NetLayer, NetLayerFlowID, NetLayerType}, routing_tables::{self, is_own_mac}
 };
 
 #[derive(Debug, Clone)]
@@ -12,7 +11,19 @@ pub(in crate::net) struct EthernetHeader {
     crc_offset: u32,
     source: MacAddress,
     destination: MacAddress,
-    lower_type: u16,
+    upper_type: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::net) struct EthernetFlowId {
+    mac_addr: AddressPair<MacAddress>,
+    ether_type: u16,
+}
+
+impl EthernetFlowId {
+    pub fn new(source: MacAddress, destination: MacAddress, ether_type: u16) -> Self {
+        Self { mac_addr: AddressPair::new(source, destination), ether_type }
+    }
 }
 
 impl NetLayer for EthernetHeader {
@@ -21,14 +32,14 @@ impl NetLayer for EthernetHeader {
         let destination_is_me = is_own_mac(&self.destination);
 
         match (destination_is_broadcast, destination_is_me) {
-            (true, _) => crate::net::flow::IncomingFlowDirection::Both,
-            (false, true) => crate::net::flow::IncomingFlowDirection::LayerUp,
+            (true, _) => crate::net::flow::IncomingFlowDirection::Both(self.upper_layer_type(), self.upper_layer_offset() as usize),
+            (false, true) => crate::net::flow::IncomingFlowDirection::LayerUp(self.upper_layer_type(), self.upper_layer_offset() as usize),
             (false, false) => crate::net::flow::IncomingFlowDirection::Bridge,
         }
     }
 
     fn upper_layer_type(&self) -> NetLayerType {
-        match self.lower_type {
+        match self.upper_type {
             0x0800 => super::NetLayerType::Ipv4,
             0x86DD => super::NetLayerType::Unknown, // IPv6 is not supported yet
             0x0806 => super::NetLayerType::Arp,
@@ -46,6 +57,11 @@ impl NetLayer for EthernetHeader {
 
     fn current_layer_offset(&self) -> u32 {
         self.offset
+    }
+
+    fn bridge_to_out_set_layers(&self, out_layers: &mut std::vec::Vec<super::NetLayerFlowID>) {
+        //bridging doesn't change Ethernet headers
+        out_layers.push(NetLayerFlowID::Ethernet(EthernetFlowId::new(self.source, self.destination, self.upper_type)));
     }
 }
 
@@ -66,11 +82,52 @@ pub(super) fn parse_ethernet_frame(packet: &mut Acow<NetPacket>) -> Option<Ether
     unsafe { core::ptr::copy_nonoverlapping(data.as_ptr().byte_add(6), addr_of_mut!(source) as *mut u8, 6) };
     let lower_type = u16::from_be_bytes([data[12], data[13]]);
 
+    if let NetPacketSource::Nic(nic) = packet.source {
+        routing_tables::register_foreign_mac_address(source, nic);
+    }
+
     Some(EthernetHeader {
         offset: 0,
         crc_offset: packet_len - 4,
         source,
         destination,
-        lower_type,
+        upper_type: lower_type,
     })
+}
+
+fn write_to_packet(packet: &mut [u8], data: EthernetFlowId) {
+    let EthernetFlowId { mac_addr: AddressPair { source, target }, ether_type } = data;
+    packet[0..6].copy_from_slice(&target.0);
+    packet[6..12].copy_from_slice(&source.0);
+    packet[12..14].copy_from_slice(&ether_type.to_be_bytes());
+}
+
+pub(in crate::net::protocols) fn construct_layer(packet: &mut Acow<NetPacket>, bridged: bool) -> OutgoingFlowDirection {
+    let Some(NetLayerFlowID::Ethernet(data)) = packet.layers_to_construct.pop() else {
+        println!(level:error, "construct_layer called for Ethernet but highest layer is not Ethernet");
+        return OutgoingFlowDirection::Drop;
+    };
+
+    if data.mac_addr.target.is_broadcast() {
+        println!(level:warn, "construct_layer for Ethernet got broadcast destination, not implemented yet, dropping");
+        return OutgoingFlowDirection::Drop;
+    }
+
+    let chunk_to_edit = if bridged {
+        packet
+            .get_chunks_mut()
+            .first_mut()
+            .expect("Ethernet layer should always have at least one chunk")
+    } else {
+        packet.insert_chunk_front(14)
+    };
+
+    let chunk_data = chunk_to_edit.data_mut();
+    let Some(nic) = routing_tables::get_mac_nic(data.mac_addr.target()) else {
+        println!(level:warn, "construct_layer for Ethernet failed to find NIC for destination MAC {:?}, dropping packet", data.mac_addr.target());
+        return OutgoingFlowDirection::Drop;
+    };
+    write_to_packet(chunk_data, data);
+
+    OutgoingFlowDirection::LayerDown(LayerDownType::Nic(nic))
 }
