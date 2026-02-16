@@ -30,6 +30,7 @@ impl NetLayer for EthernetHeader {
     fn incoming_flow_direction(&self) -> crate::net::flow::IncomingFlowDirection {
         let destination_is_broadcast = self.destination.is_broadcast();
         let destination_is_me = is_own_mac(&self.destination);
+        println!("Ethernet packet with destination {:?}, is_broadcast: {}, is_me: {}", self.destination, destination_is_broadcast, destination_is_me);
 
         match (destination_is_broadcast, destination_is_me) {
             (true, _) => crate::net::flow::IncomingFlowDirection::Both(self.upper_layer_type(), self.upper_layer_offset() as usize),

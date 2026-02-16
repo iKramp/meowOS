@@ -24,6 +24,8 @@ static NIC_COUNTER: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU3
 
 static IPV4_ADDR: ProtocolAddr = ProtocolAddr::Ipv4([192, 168, 0, 1]);
 
+static mut NET_INITIALIZED: bool = false;
+
 pub fn requset_nic_identifier() -> NicIdentifier {
     NIC_COUNTER.fetch_add(1, core::sync::atomic::Ordering::SeqCst)
 }
@@ -47,4 +49,5 @@ impl Debug for dyn NIC {
 pub fn init() {
     println!("Initializing net subsystem");
     protocols::arp::init();
+    unsafe { NET_INITIALIZED = true; }
 }

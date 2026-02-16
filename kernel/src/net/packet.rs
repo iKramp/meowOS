@@ -1,8 +1,5 @@
 use std::{
-    boxed::Box,
-    cow::Acow,
-    mem_utils::{PhysAddr, translate_phys_virt_addr},
-    vec::Vec,
+    boxed::Box, cow::Acow, mem_utils::{PhysAddr, translate_phys_virt_addr}, println, vec::Vec
 };
 
 use crate::{
@@ -174,6 +171,7 @@ impl NetPacket {
                 break;
             }
         }
+        self.length -= curr_off;
         let to_shift = offset_to_keep - curr_off;
         if to_shift > 0 {
             let first_chunk = self.chunks.first_mut()?;
@@ -186,9 +184,32 @@ impl NetPacket {
                 )
             };
             let new_len = first_chunk.len() - to_shift;
-            first_chunk.shorten(new_len);
+            first_chunk.truncate(new_len);
+            self.length -= to_shift;
         }
         Some(())
+    }
+
+    pub fn truncate(&mut self, new_len: u32) {
+        println!("truncating packet from length {} to {}", self.length, new_len);
+        if new_len >= self.length {
+            return;
+        }
+        let to_delete = self.length - new_len;
+        self.length = new_len;
+        let mut deleted = 0;
+        while deleted < to_delete {
+            let Some(last_chunk) = self.chunks.last_mut() else {
+                break;
+            };
+            if last_chunk.len() <= to_delete - deleted {
+                deleted += last_chunk.len();
+                self.chunks.pop();
+            } else {
+                last_chunk.truncate(last_chunk.len() - (to_delete - deleted));
+                break;
+            }
+        }
     }
 
     pub fn insert_chunk_front(&mut self, length: u32) -> &mut RawNetDataChunk {
@@ -232,7 +253,7 @@ impl RawNetDataChunk {
         unsafe { core::slice::from_raw_parts_mut(ptr, self.length as usize) }
     }
 
-    pub fn shorten(&mut self, new_len: u32) {
+    pub fn truncate(&mut self, new_len: u32) {
         if new_len >= self.length {
             return;
         }

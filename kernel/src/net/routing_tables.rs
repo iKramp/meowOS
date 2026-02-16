@@ -34,7 +34,7 @@ pub fn register_nic(mac_addr: MacAddress, nic: Arc<dyn NIC>) {
     let nic_id = nic.get_identifier();
     let mut table = w_lock_w_info!(MAC_TABLE);
     table.nic_storage.insert(nic_id, nic.clone());
-    table.mac_to_nic.insert(mac_addr, nic_id);
+    table.own_nics.insert(mac_addr, nic_id);
 
     let mut own_arp = w_lock_w_info!(OWN_ARP_TABLE);
     if own_arp.is_empty() {

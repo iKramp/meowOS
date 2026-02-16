@@ -53,7 +53,7 @@ pub(super) fn init_transmit(dev: &mut E1000eDevice) {
             .set_cold(0x3F)
             .set_swxoff(false)
             .set_pbe(false)
-            .set_psp(true),
+            .set_psp(true), //pad short packets
     );
 
     let queue_size_bytes = TX_DESC_COUNT * std::mem::size_of::<TransmitDescriptor>();
@@ -135,6 +135,8 @@ pub(super) fn send_packet(dev: &E1000eDevice, packet: net::NetPacketListNode) {
     };
     chunk.command.set_eop(true);
 
+    println!("sending packet with {} chunks", tx_descriptors.len());
+
     core::sync::atomic::fence(Ordering::Release);
 
     let lock = lock_w_info!(dev.transmit_lock);
@@ -142,6 +144,9 @@ pub(super) fn send_packet(dev: &E1000eDevice, packet: net::NetPacketListNode) {
 
     let tail = registers.tx_descriptor_queue_info().tdt().read() as usize;
     let head = registers.tx_descriptor_queue_info().tdh().read() as usize + TX_DESC_COUNT - 1; //to avoid negative, but can't use last
+
+    println!("Transmit queue head: {}, tail: {}", head % TX_DESC_COUNT, tail);
+
     let available_slots = head - tail;
     if available_slots < tx_descriptors.len() {
         println!(level:error, "Not enough space in transmit queue: available {}, needed {}", available_slots, tx_descriptors.len());
@@ -159,10 +164,13 @@ pub(super) fn send_packet(dev: &E1000eDevice, packet: net::NetPacketListNode) {
         unsafe { *queue[index].get() = descriptor };
     }
 
+    let new_tail = (tail + desc_len) % TX_DESC_COUNT;
+    println!("New transmit queue tail: {}", new_tail);
+
     registers
         .tx_descriptor_queue_info()
         .tdt()
-        .write(((tail + desc_len) % TX_DESC_COUNT) as u32);
+        .write(new_tail as u32);
     drop(lock);
 }
 

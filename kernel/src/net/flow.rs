@@ -36,7 +36,13 @@ pub(in crate::net) enum OutgoingFlowDirection {
 }
 
 pub fn process_packet_flow(packet: NetPacketListNode, initial_routing_step: RoutingStep, initial_layer: NetLayerType) {
+    if !unsafe { crate::net::NET_INITIALIZED } {
+        return;
+    }
     let mut process_queue = Vec::new();
+
+    println!("len of packet data: {}", packet.data.len());
+
     process_queue.push(((initial_routing_step, initial_layer, 0), packet));
 
     while let Some(((routing_step, current_layer_type, current_layer_offset), mut packet)) = process_queue.pop() {

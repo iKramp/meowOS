@@ -254,6 +254,7 @@ pub(in crate::net::protocols) fn construct_layer(packet: &mut Acow<NetPacket>, b
 
 
     let chunk_to_edit = if bridged {
+        packet.truncate(total_length as u32);
         packet
             .get_chunks_mut()
             .first_mut()
