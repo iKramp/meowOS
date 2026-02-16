@@ -234,6 +234,10 @@ impl NIC for E1000eDevice {
     fn get_identifier(&self) -> NicIdentifier {
         self.identifier
     }
+
+    fn nic_type(&self) -> net::NicType {
+        net::NicType::Ethernet
+    }
 }
 
 impl Drop for E1000eDevice {

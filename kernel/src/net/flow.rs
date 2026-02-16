@@ -1,9 +1,7 @@
 use std::{println, sync::arc::Arc, vec::Vec};
 
 use crate::net::{
-    NIC, NetPacketListNode,
-    hook::{HookFilter, HookStage, call_hooks},
-    protocols::{self, NetLayerType},
+    NIC, NetPacketListNode, NetPacketSource, hook::{HookFilter, HookStage, call_hooks}, protocols::{self, NetLayerType}
 };
 
 pub enum RoutingStep {
@@ -25,6 +23,7 @@ pub(in crate::net) enum IncomingFlowDirection {
 pub(in crate::net) enum LayerDownType {
     Normal(NetLayerType),
     Nic(Arc<dyn NIC>),
+    NicGroup(Vec<Arc<dyn NIC>>),
 }
 
 #[derive(Debug)]
@@ -77,6 +76,11 @@ pub fn process_packet_flow(packet: NetPacketListNode, initial_routing_step: Rout
                         process_queue.push(((RoutingStep::Outgoing, net_layer_type, 0), packet))
                     }
                     OutgoingFlowDirection::LayerDown(LayerDownType::Nic(nic)) => nic.send_packet(packet),
+                    OutgoingFlowDirection::LayerDown(LayerDownType::NicGroup(nic_vec)) => {
+                        for nic in nic_vec {
+                            nic.send_packet(packet.clone());
+                        }
+                    },
                     OutgoingFlowDirection::Loopback => {
                         process_queue.push(((RoutingStep::Loopback, current_layer_type, 0), packet))
                     }

@@ -2,7 +2,12 @@ use core::ptr::addr_of_mut;
 use std::{cow::Acow, println};
 
 use crate::net::{
-    NetPacketSource, address_pair::AddressPair, flow::{LayerDownType, OutgoingFlowDirection}, packet::NetPacket, protocols::{MacAddress, NetLayer, NetLayerFlowID, NetLayerType}, routing_tables::{self, is_own_mac}
+    NetPacketSource,
+    address_pair::AddressPair,
+    flow::{LayerDownType, OutgoingFlowDirection},
+    packet::NetPacket,
+    protocols::{MacAddress, NetLayer, NetLayerFlowID, NetLayerType},
+    routing_tables::{self, is_own_mac},
 };
 
 #[derive(Debug, Clone)]
@@ -22,7 +27,10 @@ pub(in crate::net) struct EthernetFlowId {
 
 impl EthernetFlowId {
     pub fn new(source: MacAddress, destination: MacAddress, ether_type: u16) -> Self {
-        Self { mac_addr: AddressPair::new(source, destination), ether_type }
+        Self {
+            mac_addr: AddressPair::new(source, destination),
+            ether_type,
+        }
     }
 }
 
@@ -30,11 +38,18 @@ impl NetLayer for EthernetHeader {
     fn incoming_flow_direction(&self) -> crate::net::flow::IncomingFlowDirection {
         let destination_is_broadcast = self.destination.is_broadcast();
         let destination_is_me = is_own_mac(&self.destination);
-        println!("Ethernet packet with destination {:?}, is_broadcast: {}, is_me: {}", self.destination, destination_is_broadcast, destination_is_me);
+        println!(
+            "Ethernet packet with destination {:?}, is_broadcast: {}, is_me: {}",
+            self.destination, destination_is_broadcast, destination_is_me
+        );
 
         match (destination_is_broadcast, destination_is_me) {
-            (true, _) => crate::net::flow::IncomingFlowDirection::Both(self.upper_layer_type(), self.upper_layer_offset() as usize),
-            (false, true) => crate::net::flow::IncomingFlowDirection::LayerUp(self.upper_layer_type(), self.upper_layer_offset() as usize),
+            (true, _) => {
+                crate::net::flow::IncomingFlowDirection::Both(self.upper_layer_type(), self.upper_layer_offset() as usize)
+            }
+            (false, true) => {
+                crate::net::flow::IncomingFlowDirection::LayerUp(self.upper_layer_type(), self.upper_layer_offset() as usize)
+            }
             (false, false) => crate::net::flow::IncomingFlowDirection::Bridge,
         }
     }
@@ -62,7 +77,11 @@ impl NetLayer for EthernetHeader {
 
     fn bridge_to_out_set_layers(&self, out_layers: &mut std::vec::Vec<super::NetLayerFlowID>) {
         //bridging doesn't change Ethernet headers
-        out_layers.push(NetLayerFlowID::Ethernet(EthernetFlowId::new(self.source, self.destination, self.upper_type)));
+        out_layers.push(NetLayerFlowID::Ethernet(EthernetFlowId::new(
+            self.source,
+            self.destination,
+            self.upper_type,
+        )));
     }
 }
 
@@ -97,7 +116,10 @@ pub(super) fn parse_ethernet_frame(packet: &mut Acow<NetPacket>) -> Option<Ether
 }
 
 fn write_to_packet(packet: &mut [u8], data: EthernetFlowId) {
-    let EthernetFlowId { mac_addr: AddressPair { source, target }, ether_type } = data;
+    let EthernetFlowId {
+        mac_addr: AddressPair { source, target },
+        ether_type,
+    } = data;
     packet[0..6].copy_from_slice(&target.0);
     packet[6..12].copy_from_slice(&source.0);
     packet[12..14].copy_from_slice(&ether_type.to_be_bytes());
@@ -109,10 +131,11 @@ pub(in crate::net::protocols) fn construct_layer(packet: &mut Acow<NetPacket>, b
         return OutgoingFlowDirection::Drop;
     };
 
-    if data.mac_addr.target.is_broadcast() {
-        println!(level:warn, "construct_layer for Ethernet got broadcast destination, not implemented yet, dropping");
-        return OutgoingFlowDirection::Drop;
-    }
+    let target_mac = *data.mac_addr.target();
+    let in_nic = match packet.source {
+        NetPacketSource::Nic(nic) => Some(nic),
+        _ => None,
+    };
 
     let chunk_to_edit = if bridged {
         packet
@@ -124,11 +147,16 @@ pub(in crate::net::protocols) fn construct_layer(packet: &mut Acow<NetPacket>, b
     };
 
     let chunk_data = chunk_to_edit.data_mut();
-    let Some(nic) = routing_tables::get_mac_nic(data.mac_addr.target()) else {
-        println!(level:warn, "construct_layer for Ethernet failed to find NIC for destination MAC {:?}, dropping packet", data.mac_addr.target());
-        return OutgoingFlowDirection::Drop;
-    };
     write_to_packet(chunk_data, data);
 
-    OutgoingFlowDirection::LayerDown(LayerDownType::Nic(nic))
+    if target_mac.is_broadcast() {
+        let nices = routing_tables::get_broadcast_nices(in_nic);
+        OutgoingFlowDirection::LayerDown(LayerDownType::NicGroup(nices))
+    } else {
+        let Some(nic) = routing_tables::get_mac_nic(&target_mac) else {
+            println!(level:warn, "construct_layer for Ethernet failed to find NIC for destination MAC {:?}, dropping packet", target_mac);
+            return OutgoingFlowDirection::Drop;
+        };
+        OutgoingFlowDirection::LayerDown(LayerDownType::Nic(nic))
+    }
 }

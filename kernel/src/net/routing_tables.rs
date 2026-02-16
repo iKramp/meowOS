@@ -1,4 +1,4 @@
-use std::{collections::btree_map::BTreeMap, println, r_lock_w_info, sync::{arc::Arc, rw_lock::RWSpinlock}, w_lock_w_info};
+use std::{collections::btree_map::BTreeMap, println, r_lock_w_info, sync::{arc::Arc, rw_lock::RWSpinlock}, vec::Vec, w_lock_w_info};
 
 use crate::net::{
     NIC, NicIdentifier, protocols::{MacAddress, arp}
@@ -50,8 +50,18 @@ pub fn deregister_nic(nic_id: NicIdentifier) {
     mac_tables.nic_storage.remove(&nic_id);
 }
 
+pub(in crate::net) fn get_broadcast_nices(in_nic_id: Option<NicIdentifier>) -> Vec<Arc<dyn NIC>> {
+    let in_nic_id = in_nic_id.unwrap_or(u32::MAX);
+    r_lock_w_info!(MAC_TABLE).nic_storage.values().filter(|nic| matches!(nic.nic_type(), crate::net::NicType::Ethernet) && nic.get_identifier() != in_nic_id).cloned().collect()
+}
+
 pub(in crate::net) fn get_mac_nic(mac_addr: &MacAddress) -> Option<Arc<dyn NIC>> {
     let tables = r_lock_w_info!(MAC_TABLE);
+
+    if mac_addr.is_broadcast() {
+        return None; //should have called a different function for broadcast address
+    }
+
     let nic_id = tables.mac_to_nic.get(mac_addr)?;
     if let Some(nic) = tables.nic_storage.get(nic_id) {
         Some(nic.clone())

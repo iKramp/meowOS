@@ -19,6 +19,9 @@ pub use protocols::MacAddress;
 use crate::net::protocols::arp::ProtocolAddr;
 
 pub type NicIdentifier = u32;
+pub enum NicType {
+    Ethernet,
+}
 
 static NIC_COUNTER: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
@@ -38,6 +41,7 @@ pub fn debug_packet(mut _packet: NetPacketListNode, layer_type: NetLayerType) {
 pub trait NIC: Sync + Send {
     fn send_packet(&self, packet: NetPacketListNode);
     fn get_identifier(&self) -> NicIdentifier;
+    fn nic_type(&self) -> NicType;
 }
 
 impl Debug for dyn NIC {
