@@ -8,6 +8,9 @@ pub struct Acow<T: Clone> {
     data: Arc<UnsafeCell<T>>
 }
 
+unsafe impl<T: Send + Sync + Clone> Send for Acow<T> {}
+unsafe impl<T: Send + Sync + Clone> Sync for Acow<T> {}
+
 impl<T: Clone> Acow<T> {
     pub fn new(data: T) -> Self {
         Self {

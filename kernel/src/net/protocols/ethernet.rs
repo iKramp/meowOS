@@ -1,10 +1,12 @@
+use core::any::Any;
 use core::ptr::addr_of_mut;
-use std::{cow::Acow, println};
+use std::{cow::Acow, println, w_lock_w_info};
 
 use crate::net::{
-    NetPacketSource,
+    self, NetPacketListNode, NetPacketSource,
     address_pair::AddressPair,
     flow::{LayerDownType, OutgoingFlowDirection},
+    hook::HookResult,
     packet::NetPacket,
     protocols::{MacAddress, NetLayer, NetLayerFlowID, NetLayerType},
     routing_tables::{self, is_own_mac},
@@ -32,6 +34,22 @@ impl EthernetFlowId {
             ether_type,
         }
     }
+}
+
+pub(super) fn init() {
+    w_lock_w_info!(net::hook::NET_HOOK_STORAGE).register_hook(bridge_hook, net::hook::HookStage::Bridge(NetLayerType::Ethernet));
+}
+
+fn bridge_hook(packet: &mut NetPacketListNode) -> HookResult {
+    let ether_layer = match packet
+        .get_highest_layer()
+        .and_then(|layer| (layer as &dyn Any).downcast_ref::<EthernetHeader>())
+    {
+        Some(layer) => layer,
+        None => return HookResult::Drop,
+    };
+
+    let //IDFK what i was doing here
 }
 
 impl NetLayer for EthernetHeader {

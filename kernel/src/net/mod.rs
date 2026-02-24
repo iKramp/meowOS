@@ -8,6 +8,7 @@ mod address_pair;
 
 use core::fmt::Debug;
 use std::println;
+use std::sync::no_int_spinlock::NoIntSpinlock;
 
 pub use packet::{NetPacketListNode, RawNetDataChunk, NetPacketSource};
 pub use protocols::NetLayerType;
@@ -16,6 +17,7 @@ pub use routing_tables::deregister_nic;
 pub use flow::{process_packet_flow, RoutingStep};
 pub use protocols::MacAddress;
 
+use crate::net::net_queue::NetQueueHead;
 use crate::net::protocols::arp::ProtocolAddr;
 
 pub type NicIdentifier = u32;
@@ -25,9 +27,9 @@ pub enum NicType {
 
 static NIC_COUNTER: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
-static IPV4_ADDR: ProtocolAddr = ProtocolAddr::Ipv4([192, 168, 0, 1]);
-
 static mut NET_INITIALIZED: bool = false;
+
+static NET_QUEUE: NoIntSpinlock<NetQueueHead> = NoIntSpinlock::new(NetQueueHead::new(512));
 
 pub fn requset_nic_identifier() -> NicIdentifier {
     NIC_COUNTER.fetch_add(1, core::sync::atomic::Ordering::SeqCst)
@@ -52,6 +54,6 @@ impl Debug for dyn NIC {
 
 pub fn init() {
     println!("Initializing net subsystem");
-    protocols::arp::init();
+    protocols::init();
     unsafe { NET_INITIALIZED = true; }
 }

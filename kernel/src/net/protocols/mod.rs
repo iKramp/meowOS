@@ -6,12 +6,19 @@ use crate::net::{
     packet::NetPacket,
     protocols::{
         arp::{ArpFlowId, ArpHeader},
-        ethernet::{EthernetFlowId, EthernetHeader, parse_ethernet_frame},
+        ethernet::{EthernetFlowId, EthernetHeader, parse_ethernet_frame}, ipv4::Ipv4FlowId,
     },
 };
 
 pub(in crate::net) mod arp;
 pub(in crate::net) mod ethernet;
+pub(in crate::net) mod ipv4;
+
+pub(in crate::net) fn init() {
+    arp::init();
+    ethernet::init();
+    ipv4::init();
+}
 
 pub(in crate::net) fn parse_layer(
     packet: &mut Acow<NetPacket>,
@@ -102,7 +109,7 @@ pub enum NetLayerType {
 pub enum NetLayerFlowID {
     Ethernet(EthernetFlowId),
     Arp(ArpFlowId),
-    Ipv4,
+    Ipv4(Ipv4FlowId),
     Ipv6,
     Tcp,
     Udp,

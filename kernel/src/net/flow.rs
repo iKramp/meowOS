@@ -1,7 +1,7 @@
 use std::{println, sync::arc::Arc, vec::Vec};
 
 use crate::net::{
-    NIC, NetPacketListNode, NetPacketSource, hook::{HookFilter, HookStage, call_hooks}, protocols::{self, NetLayerType}
+    NIC, NetPacketListNode, hook::{HookFilter, HookStage, call_hooks}, protocols::{self, NetLayerType}
 };
 
 pub enum RoutingStep {

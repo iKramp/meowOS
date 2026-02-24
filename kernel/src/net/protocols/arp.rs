@@ -2,7 +2,7 @@ use core::any::Any;
 use std::{cow::Acow, println, w_lock_w_info};
 
 use crate::net::{
-    self, NetLayerType, NetPacketListNode, address_pair::AddressPair, flow::{IncomingFlowDirection, LayerDownType, OutgoingFlowDirection}, hook::HookResult, packet::NetPacket, protocols::{MacAddress, NetLayer, NetLayerFlowID, ethernet::EthernetFlowId}, routing_tables::{self, get_self_arp_entry}
+    self, NetLayerType, NetPacketListNode, address_pair::AddressPair, flow::{IncomingFlowDirection, LayerDownType, OutgoingFlowDirection}, hook::HookResult, packet::NetPacket, protocols::{MacAddress, NetLayer, NetLayerFlowID, ethernet::EthernetFlowId, ipv4}, routing_tables::{self, get_self_arp_entry}
 };
 
 #[derive(Debug, Clone)]
@@ -18,7 +18,7 @@ pub(in crate::net) struct ArpFlowId {
     hardware: AddressPair<HardwareAddr>,
 }
 
-pub(in crate::net) fn init() {
+pub(super) fn init() {
     w_lock_w_info!(net::hook::NET_HOOK_STORAGE).register_hook(process_arp, net::hook::HookStage::Bridge(NetLayerType::Arp));
 }
 
@@ -44,8 +44,6 @@ impl NetLayer for ArpHeader {
     }
 
     fn bridge_to_out_set_layers(&self, out_layers: &mut std::vec::Vec<super::NetLayerFlowID>) {
-        out_layers.clear(); //arp controls everything
-        
         let arp_data = super::NetLayerFlowID::Arp(ArpFlowId {
             operation: 2, // packet through arp bridge means response
             protocol: self.flow_id.protocol.reverse(),
@@ -84,7 +82,7 @@ impl HardwareAddr {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(in crate::net) enum ProtocolAddr {
-    Ipv4([u8; 4]),
+    Ipv4(ipv4::Ipv4Address),
     Ipv6([u8; 16]), //not really used
 }
 
@@ -94,7 +92,7 @@ impl ProtocolAddr {
             0x0800 => {
                 let mut addr = [0u8; 4];
                 addr.copy_from_slice(&data[0..4]);
-                Some(ProtocolAddr::Ipv4(addr))
+                Some(ProtocolAddr::Ipv4(ipv4::Ipv4Address(addr)))
             }
             0x86DD => {
                 let mut addr = [0u8; 16];
@@ -205,7 +203,7 @@ fn write_data_to_packet(packet: &mut [u8], data: ArpFlowId, offset: usize) {
         ProtocolAddr::Ipv4(v4_addr) => {
             packet[offset + 2..offset + 4].copy_from_slice(&0x0800u16.to_be_bytes());
             packet[offset + 5] = 4_u8; //len
-            packet[addr_offset..(addr_offset + 4)].copy_from_slice(v4_addr);
+            packet[addr_offset..(addr_offset + 4)].copy_from_slice(&v4_addr.0);
             addr_offset += 4;
         }
         ProtocolAddr::Ipv6(v6_addr) => {
@@ -225,7 +223,7 @@ fn write_data_to_packet(packet: &mut [u8], data: ArpFlowId, offset: usize) {
 
     match data.protocol.target() {
         ProtocolAddr::Ipv4(v4_addr) => {
-            packet[addr_offset..(addr_offset + 4)].copy_from_slice(v4_addr);
+            packet[addr_offset..(addr_offset + 4)].copy_from_slice(&v4_addr.0);
             addr_offset += 4;
         }
         ProtocolAddr::Ipv6(v6_addr) => {

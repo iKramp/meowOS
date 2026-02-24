@@ -2,15 +2,17 @@ use std::boxed::Box;
 
 use crate::net::packet::NetPacketListNode;
 
-struct NetQueueHead {
+pub struct NetQueueHead {
     first_packet: Option<Box<NetPacketListNode>>,
     last_packet: Option<*mut NetPacketListNode>,
     max_packets: usize,
     curr_packets: usize,
 }
 
+unsafe impl Send for NetQueueHead {} //only accessed through these functions
+
 impl NetQueueHead {
-    fn new(max_packets: usize) -> Self {
+    pub const fn new(max_packets: usize) -> Self {
         Self {
             first_packet: None,
             last_packet: None,
