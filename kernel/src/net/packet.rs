@@ -1,11 +1,16 @@
 use std::{
-    boxed::Box, cow::Acow, mem_utils::{PhysAddr, translate_phys_virt_addr}, println, vec::Vec
+    boxed::Box,
+    cow::Acow,
+    mem_utils::{PhysAddr, translate_phys_virt_addr},
+    println,
+    vec::Vec,
 };
 
 use crate::{
     memory::physical_allocator,
     net::{
-        NicIdentifier, protocols::{NetLayer, NetLayerData, NetLayerFlowID}
+        NetLayerType, NicIdentifier, RoutingStep,
+        protocols::{NetLayer, NetLayerData, NetLayerFlowID},
     },
     proc::Pid,
 };
@@ -21,19 +26,33 @@ pub enum NetPacketSource {
 pub struct NetPacketListNode {
     pub(in crate::net) data: Acow<NetPacket>,
     pub(in crate::net) next_packet: Option<Box<NetPacketListNode>>,
+    pub(in crate::net) routing_step: RoutingStep,
+    pub(in crate::net) layer: NetLayerType,
 }
 
 impl NetPacketListNode {
-    pub fn new(raw_data: Vec<RawNetDataChunk>, source: NetPacketSource) -> Self {
+    pub fn new(
+        raw_data: Vec<RawNetDataChunk>,
+        source: NetPacketSource,
+        initial_routing_step: RoutingStep,
+        initial_layer: NetLayerType,
+    ) -> Self {
         let raw_data = Acow::new(NetPacket::new(raw_data, source));
 
         NetPacketListNode {
             data: raw_data,
             next_packet: None,
+            routing_step: initial_routing_step,
+            layer: initial_layer,
         }
     }
 
-    pub fn from_single(raw_data: RawNetDataChunk, source: NetPacketSource) -> Self {
+    pub fn from_single(
+        raw_data: RawNetDataChunk,
+        source: NetPacketSource,
+        initial_routing_step: RoutingStep,
+        initial_layer: NetLayerType,
+    ) -> Self {
         let mut tmp_vec = Vec::new();
         tmp_vec.push(raw_data);
         let raw_data = Acow::new(NetPacket::new(tmp_vec, source));
@@ -41,6 +60,8 @@ impl NetPacketListNode {
         NetPacketListNode {
             data: raw_data,
             next_packet: None,
+            routing_step: initial_routing_step,
+            layer: initial_layer,
         }
     }
 
@@ -63,7 +84,7 @@ impl NetPacketListNode {
                 .expect("can't call get_highest_layer on unparsed layer"),
         )
     }
-    
+
     pub fn into_raw_data(self) -> Vec<RawNetDataChunk> {
         self.data.chunks.clone()
     }
@@ -71,7 +92,12 @@ impl NetPacketListNode {
 
 impl Clone for NetPacketListNode {
     fn clone(&self) -> Self {
-        Self { data: self.data.clone(), next_packet: None }
+        Self {
+            data: self.data.clone(),
+            next_packet: None,
+            routing_step: self.routing_step,
+            layer: self.layer,
+        }
     }
 }
 

@@ -7,6 +7,8 @@ mod hook;
 mod address_pair;
 
 use core::fmt::Debug;
+use std::boxed::Box;
+use std::lock_w_info;
 use std::println;
 use std::sync::no_int_spinlock::NoIntSpinlock;
 
@@ -56,4 +58,18 @@ pub fn init() {
     println!("Initializing net subsystem");
     protocols::init();
     unsafe { NET_INITIALIZED = true; }
+}
+
+pub fn add_net_packet_to_queue(packet: Box<NetPacketListNode>) {
+    if !unsafe { NET_INITIALIZED } {
+        return;
+    }
+    lock_w_info!(NET_QUEUE).push(packet);
+}
+
+pub fn append_net_queue(other: NetQueueHead) {
+    if !unsafe { NET_INITIALIZED } {
+        return;
+    }
+    lock_w_info!(NET_QUEUE).append(other);
 }

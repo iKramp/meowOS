@@ -4,11 +4,11 @@ use crate::net::{
     NIC, NetPacketListNode, hook::{HookFilter, HookStage, call_hooks}, protocols::{self, NetLayerType}
 };
 
+#[derive(Debug, Clone, Copy)]
 pub enum RoutingStep {
     Incoming,
     Bridge,
     Outgoing,
-    Loopback,
 }
 
 #[derive(Debug)]
@@ -23,18 +23,15 @@ pub(in crate::net) enum IncomingFlowDirection {
 pub(in crate::net) enum LayerDownType {
     Normal(NetLayerType),
     Nic(Arc<dyn NIC>),
-    NicGroup(Vec<Arc<dyn NIC>>),
 }
 
 #[derive(Debug)]
 pub(in crate::net) enum OutgoingFlowDirection {
     LayerDown(LayerDownType),
-    Loopback,
-    Both(NetLayerType),
     Drop,
 }
 
-pub fn process_packet_flow(packet: NetPacketListNode, initial_routing_step: RoutingStep, initial_layer: NetLayerType) {
+pub fn process_packet_flow(packet: NetPacketListNode) {
     if !unsafe { crate::net::NET_INITIALIZED } {
         return;
     }
@@ -42,59 +39,57 @@ pub fn process_packet_flow(packet: NetPacketListNode, initial_routing_step: Rout
 
     println!("len of packet data: {}", packet.data.len());
 
-    process_queue.push(((initial_routing_step, initial_layer, 0), packet));
+    process_queue.push((0, packet));
 
-    while let Some(((routing_step, current_layer_type, current_layer_offset), mut packet)) = process_queue.pop() {
+    while let Some((current_layer_offset, mut packet)) = process_queue.pop() {
+        let routing_step = packet.routing_step;
+        let layer_type = packet.layer;
         match routing_step {
             RoutingStep::Incoming => {
-                let proc_res = process_inbound_packet(&mut packet, current_layer_type, current_layer_offset);
+                let proc_res = process_inbound_packet(&mut packet, layer_type, current_layer_offset);
                 match proc_res {
                     IncomingFlowDirection::LayerUp(next_layer_type, next_layer_offset) => {
-                        process_queue.push(((RoutingStep::Incoming, next_layer_type, next_layer_offset), packet));
+                        packet.routing_step = RoutingStep::Incoming;
+                        packet.layer = next_layer_type;
+                        process_queue.push((next_layer_offset, packet));
                     }
                     IncomingFlowDirection::Bridge => {
-                        process_queue.push(((RoutingStep::Bridge, current_layer_type, 0), packet));
+                        packet.routing_step = RoutingStep::Bridge;
+                        packet.layer = layer_type;
+                        process_queue.push((0, packet));
                     }
                     IncomingFlowDirection::Both(next_layer_type, next_layer_offset) => {
-                        process_queue.push(((RoutingStep::Incoming, next_layer_type, next_layer_offset), packet.clone()));
-                        process_queue.push(((RoutingStep::Bridge, current_layer_type, 0), packet));
+                        let mut cloned_packet = packet.clone();
+                        cloned_packet.routing_step = RoutingStep::Incoming;
+                        cloned_packet.layer = next_layer_type;
+                        process_queue.push((next_layer_offset, cloned_packet));
+
+                        packet.routing_step = RoutingStep::Bridge;
+                        packet.layer = layer_type;
+                        process_queue.push((0, packet));
                     }
                     IncomingFlowDirection::Drop => {}
                 }
             }
             RoutingStep::Bridge => {
-                let hook_filter = process_bridge(&mut packet, current_layer_type);
+                let hook_filter = process_bridge(&mut packet, layer_type);
                 if matches!(hook_filter, HookFilter::Continue) {
-                    process_queue.push(((RoutingStep::Outgoing, current_layer_type, 1), packet));
+                    packet.routing_step = RoutingStep::Outgoing;
+                    packet.layer = layer_type;
+                    process_queue.push((0, packet));
                 }
             }
             RoutingStep::Outgoing => {
-                let bridged = current_layer_offset == 1; //hacky way to track if this packet was bridged or not
-                let out_res = process_outbound_packet(&mut packet, current_layer_type, bridged);
+                let out_res = process_outbound_packet(&mut packet, layer_type);
                 match out_res {
                     OutgoingFlowDirection::LayerDown(LayerDownType::Normal(net_layer_type)) => {
-                        process_queue.push(((RoutingStep::Outgoing, net_layer_type, 0), packet))
+                        packet.routing_step = RoutingStep::Outgoing;
+                        packet.layer = net_layer_type;
+
+                        process_queue.push((0, packet))
                     }
                     OutgoingFlowDirection::LayerDown(LayerDownType::Nic(nic)) => nic.send_packet(packet),
-                    OutgoingFlowDirection::LayerDown(LayerDownType::NicGroup(nic_vec)) => {
-                        for nic in nic_vec {
-                            nic.send_packet(packet.clone());
-                        }
-                    },
-                    OutgoingFlowDirection::Loopback => {
-                        process_queue.push(((RoutingStep::Loopback, current_layer_type, 0), packet))
-                    }
-                    OutgoingFlowDirection::Both(net_layer_type) => {
-                        process_queue.push(((RoutingStep::Outgoing, net_layer_type, 0), packet.clone()));
-                        process_queue.push(((RoutingStep::Loopback, current_layer_type, 0), packet));
-                    }
                     OutgoingFlowDirection::Drop => {}
-                }
-            }
-            RoutingStep::Loopback => {
-                let hook_filter = process_loopback(&mut packet, current_layer_type);
-                if matches!(hook_filter, HookFilter::Continue) {
-                    process_queue.push(((RoutingStep::Outgoing, current_layer_type, 0), packet));
                 }
             }
         }
@@ -152,7 +147,7 @@ fn process_bridge(packet: &mut NetPacketListNode, layer_type: NetLayerType) -> H
         HookFilter::Continue => {
             packet.data.bridge_to_out_set_layers();
             let top_layer = packet.get_highest_layer().expect("bridge with no layer");
-            let top_layer_offset = top_layer.current_layer_offset();
+            let top_layer_offset = top_layer.upper_layer_offset();
             let _ = packet.data.nuke_lower_layers(top_layer_offset);
             packet.data.reset_packet();
             println!("successfully processed bridge, moving to outbound processing");
@@ -166,20 +161,13 @@ fn process_bridge(packet: &mut NetPacketListNode, layer_type: NetLayerType) -> H
 }
 
 /// Processing a packet to be sent out
-fn process_outbound_packet(packet: &mut NetPacketListNode, layer_type: NetLayerType, bridged: bool) -> OutgoingFlowDirection {
-    println!("processing outbound packet at layer {:?}, bridged: {}", layer_type, bridged);
+fn process_outbound_packet(packet: &mut NetPacketListNode, layer_type: NetLayerType) -> OutgoingFlowDirection {
+    println!("processing outbound packet at layer {:?}", layer_type);
     if matches!(call_hooks(packet, HookStage::Outbound(layer_type)), HookFilter::Drop) {
         println!("hook decided to drop the packet, dropping");
         return OutgoingFlowDirection::Drop; //hook decided to drop the packet
     }
-    let res = protocols::construct_layer(&mut packet.data, layer_type, bridged);
+    let res = protocols::construct_layer(&mut packet.data, layer_type);
     println!("successfully processed outbound packet, next step: {:?}", res);
     res
-}
-
-fn process_loopback(packet: &mut NetPacketListNode, layer_type: NetLayerType) -> HookFilter {
-    //This only allows the most basic processing. No layers are parsed at this point. Lower layers
-    //are also nuked from exiting bridge
-    println!("processing loopback packet at layer {:?} ", layer_type);
-    call_hooks(packet, HookStage::Loopback(layer_type))
 }

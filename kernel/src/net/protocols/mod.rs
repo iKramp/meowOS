@@ -36,10 +36,10 @@ pub(in crate::net) fn parse_layer(
     Some(data)
 }
 
-pub(in crate::net) fn construct_layer(packet: &mut Acow<NetPacket>, layer_type: NetLayerType, bridged: bool) -> OutgoingFlowDirection {
+pub(in crate::net) fn construct_layer(packet: &mut Acow<NetPacket>, layer_type: NetLayerType) -> OutgoingFlowDirection {
     match layer_type {
-        NetLayerType::Ethernet => ethernet::construct_layer(packet, bridged),
-        NetLayerType::Arp => arp::construct_layer(packet, bridged),
+        NetLayerType::Ethernet => ethernet::construct_layer(packet),
+        NetLayerType::Arp => arp::construct_layer(packet),
         _ => panic!("construct_layer not implemented for layer type {:?}", layer_type),
     }
 }

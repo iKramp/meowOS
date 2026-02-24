@@ -21,7 +21,7 @@ impl NetQueueHead {
         }
     }
 
-    fn push(&mut self, mut packet: Box<NetPacketListNode>) {
+    pub fn push(&mut self, mut packet: Box<NetPacketListNode>) {
         while self.curr_packets >= self.max_packets {
             //drop oldest
             let _ = self.get_first();
@@ -40,7 +40,7 @@ impl NetQueueHead {
         self.last_packet = Some(new_raw_ptr);
     }
 
-    fn get_first(&mut self) -> Option<Box<NetPacketListNode>> {
+    pub fn get_first(&mut self) -> Option<Box<NetPacketListNode>> {
         let mut dummy = Option::None;
         core::mem::swap(&mut dummy, &mut self.first_packet);
         let mut first_packet = dummy?;
@@ -51,5 +51,29 @@ impl NetQueueHead {
         }
 
         Some(first_packet)
+    }
+
+    pub fn append(&mut self, other: NetQueueHead) {
+        if other.curr_packets == 0 {
+            return;
+        }
+
+        while self.curr_packets + other.curr_packets > self.max_packets {
+            //drop oldest
+            let _ = self.get_first();
+        }
+
+        if self.first_packet.is_none() {
+            *self = other;
+            return;
+        }
+
+        let Some(last_packet_ptr) = self.last_packet else {
+            unreachable!();
+        };
+
+        let last_packet = unsafe { &mut *last_packet_ptr };
+        last_packet.next_packet = other.first_packet;
+        self.last_packet = other.last_packet;
     }
 }

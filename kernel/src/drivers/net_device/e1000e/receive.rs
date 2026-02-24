@@ -176,11 +176,16 @@ pub(super) fn process_received_packets(dev: &E1000eDevice) {
             let data_chunk = RawNetDataChunk::new(packet.buffer_addr, packet.length.into());
             //each is a separate packet for now
             core::mem::forget(packet);
-            NetPacketListNode::from_single(data_chunk, net::NetPacketSource::Nic(dev.identifier))
+            NetPacketListNode::from_single(
+                data_chunk,
+                net::NetPacketSource::Nic(dev.identifier),
+                net::RoutingStep::Incoming,
+                net::NetLayerType::Ethernet,
+            )
         })
         .collect::<Vec<NetPacketListNode>>();
     for packet in net_packets {
-        net::process_packet_flow(packet, net::RoutingStep::Incoming, net::NetLayerType::Ethernet);
+        net::process_packet_flow(packet);
     }
 }
 

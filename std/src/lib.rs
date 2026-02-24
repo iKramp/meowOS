@@ -25,6 +25,7 @@ pub use print::set_print;
 
 pub mod mem_utils;
 pub mod error;
+pub mod double_map;
 
 pub mod cow;
 pub use core::any;

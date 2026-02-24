@@ -2,7 +2,13 @@ use core::any::Any;
 use std::{cow::Acow, println, w_lock_w_info};
 
 use crate::net::{
-    self, NetLayerType, NetPacketListNode, address_pair::AddressPair, flow::{IncomingFlowDirection, LayerDownType, OutgoingFlowDirection}, hook::HookResult, packet::NetPacket, protocols::{MacAddress, NetLayer, NetLayerFlowID, ethernet::EthernetFlowId, ipv4}, routing_tables::{self, get_self_arp_entry}
+    self, NetLayerType, NetPacketListNode,
+    address_pair::AddressPair,
+    flow::{IncomingFlowDirection, LayerDownType, OutgoingFlowDirection},
+    hook::HookResult,
+    packet::NetPacket,
+    protocols::{MacAddress, NetLayer, NetLayerFlowID, ethernet::EthernetFlowId, ipv4},
+    routing_tables::{self, get_self_arp_entry},
 };
 
 #[derive(Debug, Clone)]
@@ -129,10 +135,17 @@ fn process_arp(packet: &mut NetPacketListNode) -> HookResult {
         return HookResult::Drop;
     }
     let Some(self_entry) = get_self_arp_entry(arp_layer.flow_id.protocol.target()) else {
-        println!("Received ARP request for {:?}, but it does not match any of our addresses, ignoring", arp_layer.flow_id.protocol.target());
+        println!(
+            "Received ARP request for {:?}, but it does not match any of our addresses, ignoring",
+            arp_layer.flow_id.protocol.target()
+        );
         return HookResult::Drop; //drop packet, it is not meant for us
     };
-    println!("Received ARP request for {:?}, responding with {:?}", arp_layer.flow_id.protocol.target(), self_entry);
+    println!(
+        "Received ARP request for {:?}, responding with {:?}",
+        arp_layer.flow_id.protocol.target(),
+        self_entry
+    );
     arp_layer.flow_id.hardware.target = self_entry;
 
     HookResult::Nothing
@@ -234,32 +247,26 @@ fn write_data_to_packet(packet: &mut [u8], data: ArpFlowId, offset: usize) {
     let _ = addr_offset;
 }
 
-pub(in crate::net::protocols) fn construct_layer(packet: &mut Acow<NetPacket>, bridged: bool) -> OutgoingFlowDirection {
+pub(in crate::net::protocols) fn construct_layer(packet: &mut Acow<NetPacket>) -> OutgoingFlowDirection {
     let Some(NetLayerFlowID::Arp(data)) = packet.layers_to_construct.pop() else {
         println!(level:error, "construct_layer called for ARP but highest layer is not ArpFlowId");
         return OutgoingFlowDirection::Drop;
     };
 
     match data.hardware {
-        AddressPair { source: HardwareAddr::Ethernet(source_mac), target: HardwareAddr::Ethernet(dest_mac) } => {
-            packet.layers_to_construct.push(NetLayerFlowID::Ethernet(EthernetFlowId::new(source_mac, dest_mac, 0x0806)));
+        AddressPair {
+            source: HardwareAddr::Ethernet(source_mac),
+            target: HardwareAddr::Ethernet(dest_mac),
+        } => {
+            packet
+                .layers_to_construct
+                .push(NetLayerFlowID::Ethernet(EthernetFlowId::new(source_mac, dest_mac, 0x0806)));
         }
     }
 
-    let total_length = 8
-        + data.hardware.source().length() * 2
-        + data.protocol.source().length() * 2;
+    let total_length = 8 + data.hardware.source().length() * 2 + data.protocol.source().length() * 2;
 
-
-    let chunk_to_edit = if bridged {
-        packet.truncate(total_length as u32);
-        packet
-            .get_chunks_mut()
-            .first_mut()
-            .expect("ARP layer should always have at least one chunk")
-    } else {
-        packet.insert_chunk_front(total_length as u32)
-    };
+    let chunk_to_edit = packet.insert_chunk_front(total_length as u32);
 
     let chunk_data = chunk_to_edit.data_mut();
     write_data_to_packet(chunk_data, data, 0);
