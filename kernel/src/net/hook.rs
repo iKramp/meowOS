@@ -82,7 +82,6 @@ pub(in crate::net) enum HookStage {
     Inbound(NetLayerType),
     Bridge(NetLayerType),
     Outbound(NetLayerType),
-    Loopback(NetLayerType),
 }
 
 

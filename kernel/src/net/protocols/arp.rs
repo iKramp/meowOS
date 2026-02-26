@@ -2,19 +2,20 @@ use core::any::Any;
 use std::{cow::Acow, println, w_lock_w_info};
 
 use crate::net::{
-    self, NetLayerType, NetPacketListNode,
+    self, NetLayerType, NetPacketListNode, NetPacketSource,
     address_pair::AddressPair,
     flow::{IncomingFlowDirection, LayerDownType, OutgoingFlowDirection},
     hook::HookResult,
     packet::NetPacket,
     protocols::{MacAddress, NetLayer, NetLayerFlowID, ethernet::EthernetFlowId, ipv4},
-    routing_tables::{self, get_self_arp_entry},
+    routing_tables,
 };
 
 #[derive(Debug, Clone)]
 pub(in crate::net) struct ArpHeader {
     offset: u32,
     flow_id: ArpFlowId,
+    size: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,7 +47,7 @@ impl NetLayer for ArpHeader {
     }
 
     fn upper_layer_offset(&self) -> u32 {
-        self.offset
+        self.offset + self.size
     }
 
     fn bridge_to_out_set_layers(&self, out_layers: &mut std::vec::Vec<super::NetLayerFlowID>) {
@@ -62,7 +63,7 @@ impl NetLayer for ArpHeader {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(in crate::net) enum HardwareAddr {
     Ethernet(MacAddress),
 }
@@ -118,6 +119,11 @@ impl ProtocolAddr {
 }
 
 fn process_arp(packet: &mut NetPacketListNode) -> HookResult {
+    let NetPacketSource::Nic(in_nic) = packet.data.source else {
+        println!(level:error, "ARP hook called but packet source is not NIC");
+        return HookResult::Drop;
+    };
+
     let Some(arp_layer) = packet
         .get_highest_layer_mut()
         .and_then(|layer| (layer as &mut dyn Any).downcast_mut::<ArpHeader>())
@@ -125,28 +131,40 @@ fn process_arp(packet: &mut NetPacketListNode) -> HookResult {
         println!(level:error, "ARP hook called but highest layer is not ArpHeader");
         return HookResult::Drop;
     };
+
+    let Some(nic_info) = routing_tables::get_nic_addresses_from_id(&in_nic) else {
+        println!(level:error, "ARP hook failed to get NIC info for incoming NIC {:?}", in_nic);
+        return HookResult::Drop;
+    };
+    let Some(self_hw_addr) = nic_info.iter().find_map(|addr| addr.clone().into_hardware()) else {
+        println!(level:error, "ARP hook failed to find MAC address for incoming NIC {:?}", in_nic);
+        return HookResult::Drop;
+    };
+
     routing_tables::update_arp_entry(
         arp_layer.flow_id.hardware.source().clone(),
+        self_hw_addr.clone(),
         arp_layer.flow_id.protocol.source().clone(),
     );
+
     if arp_layer.flow_id.operation == 2 {
-        //response to some other request, ignore
-        println!("Received ARP response, ignoring");
+        routing_tables::update_arp_entry(
+            arp_layer.flow_id.hardware.target().clone(),
+            self_hw_addr,
+            arp_layer.flow_id.protocol.target().clone(),
+        );
+
         return HookResult::Drop;
     }
-    let Some(self_entry) = get_self_arp_entry(arp_layer.flow_id.protocol.target()) else {
-        println!(
-            "Received ARP request for {:?}, but it does not match any of our addresses, ignoring",
-            arp_layer.flow_id.protocol.target()
-        );
-        return HookResult::Drop; //drop packet, it is not meant for us
-    };
-    println!(
-        "Received ARP request for {:?}, responding with {:?}",
-        arp_layer.flow_id.protocol.target(),
-        self_entry
-    );
-    arp_layer.flow_id.hardware.target = self_entry;
+
+    let is_self = nic_info.iter().any(|addr| addr.clone().into_protocol() == Some(arp_layer.flow_id.protocol.target().clone()));
+
+    if !is_self {
+        println!("Received ARP packet not intended for us, dropping. Target protocol: {:?}, our NIC info: {:?}", arp_layer.flow_id.protocol.target(), nic_info);
+        return HookResult::Drop;
+    }
+
+    arp_layer.flow_id.hardware.target = self_hw_addr;
 
     HookResult::Nothing
 }
@@ -181,6 +199,9 @@ pub(in crate::net::protocols) fn parse_arp(packet: &mut Acow<NetPacket>, mut off
     offset += hardware_size;
 
     let target_protocol = ProtocolAddr::from_bytes(protocol_type, &data[offset..(offset + hardware_size)])?;
+    offset += protocol_size;
+
+    let size = offset as u32 - arp_offset;
 
     let arp_header = ArpHeader {
         offset: arp_offset,
@@ -189,6 +210,7 @@ pub(in crate::net::protocols) fn parse_arp(packet: &mut Acow<NetPacket>, mut off
             hardware: AddressPair::new(sender_hardware, target_hardware),
             protocol: AddressPair::new(sender_protocol, target_protocol),
         },
+        size,
     };
     Some(arp_header)
 }

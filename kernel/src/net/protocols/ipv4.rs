@@ -1,25 +1,40 @@
-use std::cow::Acow;
+use std::{cow::Acow, println, vec::Vec, w_lock_w_info};
 
-use crate::net::{NetLayerType, ProtocolAddr, address_pair::AddressPair, packet::NetPacket, protocols::NetLayer, routing_tables};
+use crate::net::{
+    self, NetLayerType, NetPacketListNode, NicType, ProtocolAddr,
+    address_pair::AddressPair,
+    flow::{LayerDownType, OutgoingFlowDirection},
+    hook::HookResult,
+    packet::NetPacket,
+    protocols::{NetAddress, NetLayer, NetLayerFlowID, arp::HardwareAddr},
+    routing_tables,
+};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::net) struct Ipv4FragmentInfo {
+    pub identification: u16,
+    pub flags: Ipv4Flags,
+    pub fragment_offset: u32,
+}
+
+#[derive(Debug, Clone)]
 pub(in crate::net) struct Ipv4Header {
     offset: u32,
     ihl: u8,
     diff_services: u8,
     total_length: u16,
-    identification: u16,
-    flags: Ipv4Flags,
-    fragment_offset: u32,
+    fragment_info: Ipv4FragmentInfo,
     ttl: u8,
     protocol: u8,
     header_checksum: u16,
-    source: Ipv4Address,
-    destination: Ipv4Address,
+    pub address: AddressPair<Ipv4Address>,
+    in_interface_networks: Vec<Ipv4Network>,
     checksum_checked: bool,
 }
 
 bitfield::bitfield! {
-    struct Ipv4Flags(u8);
+    #[derive(PartialEq, Eq)]
+    pub(in crate::net) struct Ipv4Flags(u8);
     impl Debug;
     pub reserved, set_reserved: 2;
     pub dont_fragment, set_dont_fragment: 1;
@@ -28,8 +43,11 @@ bitfield::bitfield! {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::net) struct Ipv4FlowId {
-    address: AddressPair<Ipv4Address>,
-    protocol: u8,
+    pub address: AddressPair<Ipv4Address>,
+    pub protocol: u8,
+    pub diff_services: u8,
+    pub ttl: u8,
+    pub fragment_info: Ipv4FragmentInfo,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -37,8 +55,22 @@ pub(in crate::net) struct Ipv4Address(pub [u8; 4]);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::net) struct Ipv4Network {
-    address: Ipv4Address,
-    mask: Ipv4Address,
+    pub address: Ipv4Address,
+    pub mask: Ipv4Address,
+}
+
+impl Ord for Ipv4Network {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        let self_prefix_len = self.prefix_len();
+        let other_prefix_len = other.prefix_len();
+        self_prefix_len.cmp(&other_prefix_len).reverse()
+    }
+}
+
+impl PartialOrd for Ipv4Network {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl Ipv4Network {
@@ -55,21 +87,40 @@ impl Ipv4Network {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::net) struct Ipv4NetworkInterface {
-    pub network: Ipv4Network,
-    pub interface_ip: Ipv4Address,
+pub(super) fn init() {
+    w_lock_w_info!(net::hook::NET_HOOK_STORAGE).register_hook(ipv4_bridge_hook, net::hook::HookStage::Bridge(NetLayerType::Ipv4));
 }
 
-pub(super) fn init() {
-    todo!()
+fn ipv4_bridge_hook(packet: &mut NetPacketListNode) -> HookResult {
+    let Some(ipv4_layer) = packet
+        .get_highest_layer()
+        .and_then(|layer| (layer as &dyn std::any::Any).downcast_ref::<Ipv4Header>())
+    else {
+        return HookResult::Drop;
+    };
+
+    if ipv4_layer.ttl == 1 {
+        //send ICMP Time Exceeded here
+        return HookResult::Drop; //drop packets that would expire after bridging
+    }
+
+    //NAT here
+
+    HookResult::Nothing
 }
 
 impl NetLayer for Ipv4Header {
     fn incoming_flow_direction(&self) -> crate::net::flow::IncomingFlowDirection {
-        let is_own_ip = routing_tables::is_own_protocol_addr(&ProtocolAddr::Ipv4(self.destination));
-
-        todo!()
+        let matching_network = self
+            .in_interface_networks
+            .iter()
+            .find(|net| net.contains(&self.address.target));
+        if matching_network.is_some() {
+            //is for us
+            crate::net::flow::IncomingFlowDirection::LayerUp(self.upper_layer_type(), self.upper_layer_offset() as usize)
+        } else {
+            crate::net::flow::IncomingFlowDirection::Bridge
+        }
     }
 
     fn current_layer_type(&self) -> NetLayerType {
@@ -82,12 +133,12 @@ impl NetLayer for Ipv4Header {
 
     fn upper_layer_type(&self) -> NetLayerType {
         match self.protocol {
-            1 => NetLayerType::Unknown, //ICMP, not yet supported
+            1 => NetLayerType::Icmp, //ICMP, not yet supported
             2 => NetLayerType::Unknown, //IGMP, not yet supported
             6 => NetLayerType::Tcp,
             17 => NetLayerType::Udp,
             41 => NetLayerType::Ipv6,
-            89 => NetLayerType::Unknown, //OSPF, not yet supported
+            89 => NetLayerType::Unknown,  //OSPF, not yet supported
             132 => NetLayerType::Unknown, //SCTP, not yet supported
             _ => NetLayerType::Unknown,
         }
@@ -99,16 +150,20 @@ impl NetLayer for Ipv4Header {
 
     fn bridge_to_out_set_layers(&self, out_layers: &mut std::vec::Vec<super::NetLayerFlowID>) {
         let flow_id = Ipv4FlowId {
-            address: AddressPair::new(self.source, self.destination),
+            address: self.address.clone(),
             protocol: self.protocol,
+            diff_services: self.diff_services,
+            ttl: self.ttl - 1,
+            fragment_info: self.fragment_info.clone(),
         };
 
         out_layers.push(super::NetLayerFlowID::Ipv4(flow_id));
     }
 }
 
-pub(super) fn parse_ipv4_packet(packet: &mut Acow<NetPacket>, offset: u32) -> Option<Ipv4Header> {
+pub(super) fn parse_ipv4_packet(packet: &mut Acow<NetPacket>, offset: usize) -> Option<Ipv4Header> {
     let packet_len = packet.len();
+    let offset = offset as u32;
     if packet_len < offset + 1 {
         return None;
     }
@@ -139,19 +194,153 @@ pub(super) fn parse_ipv4_packet(packet: &mut Acow<NetPacket>, offset: u32) -> Op
     let destination = Ipv4Address([data[16], data[17], data[18], data[19]]);
     //ignore potential options
 
+
+    let upper_layer_size = total_length as u32 - header_len;
+    packet.upper_layer_size = Some(upper_layer_size as usize);
+
+    let mut interface_addresses = match packet.source {
+        crate::net::NetPacketSource::Nic(nic_id) => {
+            if let Some(addresses) = routing_tables::get_nic_addresses_from_id(&nic_id) {
+                addresses
+                    .into_iter()
+                    .filter_map(|addr| {
+                        if let NetAddress::Ipv4(ipv4_addr) = addr {
+                            Some(ipv4_addr)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        }
+        _ => Vec::new(),
+    };
+
+    interface_addresses.sort();
+
     Some(Ipv4Header {
         offset,
         ihl: v_ihl & 0x0F,
         diff_services: differentated_services,
         total_length,
-        identification,
-        flags,
-        fragment_offset,
+        fragment_info: Ipv4FragmentInfo {
+            identification,
+            flags,
+            fragment_offset,
+        },
         ttl,
         protocol,
         header_checksum,
-        source,
-        destination,
+        address: AddressPair::new(source, destination),
         checksum_checked: false,
+        in_interface_networks: interface_addresses,
     })
+}
+
+fn write_data_to_packet(packet: &mut [u8], data: Ipv4FlowId, offset: usize, upper_layers_length: usize) {
+    let Ipv4FlowId {
+        address: AddressPair { source, target },
+        protocol,
+        diff_services,
+        ttl,
+        fragment_info: Ipv4FragmentInfo {
+            identification,
+            flags,
+            fragment_offset,
+        },
+    } = data;
+
+    let total_length = (upper_layers_length + 20) as u16;
+
+    packet[offset] = (4 << 4) | 5; //version and IHL
+    packet[offset + 1] = diff_services << 2;
+    packet[offset + 2..offset + 4].copy_from_slice(&total_length.to_be_bytes());
+    packet[offset + 4..offset + 6].copy_from_slice(&identification.to_be_bytes());
+    packet[offset + 6..offset + 8].copy_from_slice(&(((flags.0 as u16) << 13) | (fragment_offset as u16)).to_be_bytes());
+    packet[offset + 8] = ttl;
+    packet[offset + 9] = protocol;
+    packet[offset + 12..offset + 16].copy_from_slice(&source.0);
+    packet[offset + 16..offset + 20].copy_from_slice(&target.0);
+
+    let checksum = net::compute_internet_checksum(&packet[offset..offset + 20]);
+    packet[offset + 10..offset + 12].copy_from_slice(&checksum.to_be_bytes());
+}
+
+pub(super) fn construct_layer(packet: &mut Acow<NetPacket>) -> OutgoingFlowDirection {
+    let Some(NetLayerFlowID::Ipv4(data)) = packet.layers_to_construct.pop() else {
+        println!(level:error, "construct_layer called for IPv4 but highest layer is not Ipv4FlowId");
+        return OutgoingFlowDirection::Drop;
+    };
+
+    let out_flow_direction: OutgoingFlowDirection;
+
+    if packet.layers_to_construct.is_empty() {
+        println!("out ipv4 packet doesn't have lower layer set");
+        println!("target is: {:?}", &data.address.target);
+        let Some(route) = routing_tables::get_ipv4_route(&data.address.target) else {
+            println!("no ipv4 route found");
+            return OutgoingFlowDirection::Drop; //no route to destination
+        };
+
+        let Some(own_mac) = routing_tables::get_own_ipv4_mac(&route.network.address) else {
+            println!(level:error, "construct_layer for IPv4 failed to get own MAC for interface IP {:?}", route.network.address);
+            return OutgoingFlowDirection::Drop;
+        };
+
+        println!("next hop via: {:?}", route.via);
+        let Some(remote_hardware) = routing_tables::get_arp_entry(ProtocolAddr::Ipv4(route.via), HardwareAddr::Ethernet(own_mac))
+        else {
+            println!(level:warn, "construct_layer for IPv4 failed to find ARP entry for next hop {:?}, dropping packet", route.via);
+            return OutgoingFlowDirection::Drop;
+        };
+
+        let Some(nic_info) = routing_tables::get_nic_info_from_own_addr(&NetAddress::Mac(own_mac)).first().cloned() else {
+            println!(level:error, "construct_layer for IPv4 failed to find NIC for own MAC address {:?}", own_mac);
+            return OutgoingFlowDirection::Drop;
+        };
+
+        match nic_info.1.1 {
+            NicType::Ethernet => {
+                #[allow(irrefutable_let_patterns)] //might add more hw addresses later
+                let HardwareAddr::Ethernet(remote_mac) = remote_hardware else {
+                    println!(level:error, "construct_layer for IPv4 expected Ethernet hardware address for next hop but got different type");
+                    return OutgoingFlowDirection::Drop;
+                };
+
+                packet
+                    .layers_to_construct
+                    .push(NetLayerFlowID::Ethernet(super::ethernet::EthernetFlowId {
+                        mac_addr: AddressPair::new(own_mac, remote_mac),
+                        ether_type: 0x0800,
+                        out_interface: None,
+                    }));
+
+                out_flow_direction = OutgoingFlowDirection::LayerDown(LayerDownType::Normal(NetLayerType::Ethernet));
+            },
+            NicType::Ipv4 => {
+                let Some(nic) = routing_tables::get_nic_from_id(&nic_info.0) else {
+                    println!(level:error, "construct_layer for IPv4 failed to get NIC from ID {:?}", nic_info.0);
+                    return OutgoingFlowDirection::Drop;
+                };
+
+                out_flow_direction = OutgoingFlowDirection::LayerDown(LayerDownType::Nic(nic));
+            }
+        }
+    } else {
+        match packet.layers_to_construct.last().expect("layers was checked, has at least 1 layer") {
+            NetLayerFlowID::Ethernet(_) => out_flow_direction = OutgoingFlowDirection::LayerDown(LayerDownType::Normal(NetLayerType::Ethernet)),
+            NetLayerFlowID::Ipv4(_) => out_flow_direction = OutgoingFlowDirection::LayerDown(LayerDownType::Normal(NetLayerType::Ipv4)), //nested v4 yippie
+            _ => {
+                println!(level:error, "construct_layer for IPv4 found unsupported upper layer type in layers_to_construct");
+                return OutgoingFlowDirection::Drop;
+            }
+        }
+    }
+
+    let packet_len = packet.len();
+    let chunk_to_edit = packet.insert_chunk_front(20);
+    write_data_to_packet(chunk_to_edit.data_mut(), data, 0, packet_len as usize);
+    out_flow_direction
 }

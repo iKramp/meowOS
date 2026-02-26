@@ -4,17 +4,13 @@ use crate::{
         paging::{self, PageTree},
         physical_allocator,
     },
-    net::{self, MacAddress, NetPacketListNode, RawNetDataChunk},
+    net::{self, MacAddress, NetPacketListNode, RawNetDataChunk, net_queue::NetQueueHead},
     rand,
 };
 use bitfield::bitfield;
 use core::{cell::UnsafeCell, sync::atomic::Ordering};
 use std::{
-    lock_w_info,
-    mem_utils::{PhysAddr, translate_virt_phys_addr},
-    println,
-    vec::Vec,
-    w_lock_w_info,
+    boxed::Box, lock_w_info, mem_utils::{PhysAddr, translate_virt_phys_addr}, println, vec::Vec, w_lock_w_info
 };
 
 pub(super) const RX_DESC_COUNT: usize = 256;
@@ -170,7 +166,8 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
 
 pub(super) fn process_received_packets(dev: &E1000eDevice) {
     let packets = get_received_packets(dev);
-    let net_packets = packets
+    let mut net_packet_list = NetQueueHead::new(packets.len());
+    packets
         .into_iter()
         .map(|packet| {
             let data_chunk = RawNetDataChunk::new(packet.buffer_addr, packet.length.into());
@@ -183,10 +180,10 @@ pub(super) fn process_received_packets(dev: &E1000eDevice) {
                 net::NetLayerType::Ethernet,
             )
         })
-        .collect::<Vec<NetPacketListNode>>();
-    for packet in net_packets {
-        net::process_packet_flow(packet);
-    }
+        .for_each(|packet| net_packet_list.push(Box::new(packet)));
+
+    println!("adding {} packets from e1000e", net_packet_list.len());
+    net::append_net_queue(net_packet_list);
 }
 
 fn get_received_packets(dev: &E1000eDevice) -> Vec<ReceiveDescriptor> {

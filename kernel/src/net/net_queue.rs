@@ -31,6 +31,7 @@ impl NetQueueHead {
             let raw_ptr = packet.as_mut() as *mut NetPacketListNode;
             self.first_packet = Some(packet);
             self.last_packet = Some(raw_ptr);
+            self.curr_packets = 1;
             return;
         };
 
@@ -38,6 +39,7 @@ impl NetQueueHead {
         let new_raw_ptr = packet.as_mut() as *mut NetPacketListNode;
         last_packet.next_packet = Some(packet);
         self.last_packet = Some(new_raw_ptr);
+        self.curr_packets += 1;
     }
 
     pub fn get_first(&mut self) -> Option<Box<NetPacketListNode>> {
@@ -58,13 +60,19 @@ impl NetQueueHead {
             return;
         }
 
-        while self.curr_packets + other.curr_packets > self.max_packets {
+        let max_packets = self.max_packets;
+
+        while self.curr_packets + other.curr_packets > self.max_packets && self.curr_packets > 0 {
             //drop oldest
             let _ = self.get_first();
         }
 
         if self.first_packet.is_none() {
             *self = other;
+            self.max_packets = max_packets;
+            while self.curr_packets > max_packets {
+                let _ = self.get_first();
+            }
             return;
         }
 
@@ -75,5 +83,10 @@ impl NetQueueHead {
         let last_packet = unsafe { &mut *last_packet_ptr };
         last_packet.next_packet = other.first_packet;
         self.last_packet = other.last_packet;
+        self.curr_packets += other.curr_packets;
+    }
+
+    pub fn len(&self) -> usize {
+        self.curr_packets
     }
 }

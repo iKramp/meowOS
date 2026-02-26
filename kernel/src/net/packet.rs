@@ -85,6 +85,16 @@ impl NetPacketListNode {
         )
     }
 
+    pub(in crate::net) fn get_layer(&self, index_from_top: usize) -> Option<&dyn NetLayer> {
+        Some(
+            self.data
+                .parsed_layers
+                .get(self.data.parsed_layers.len() - 1 - index_from_top)?
+                .get()
+                .expect("can't call get_layer on unparsed layer"),
+        )
+    }
+
     pub fn into_raw_data(self) -> Vec<RawNetDataChunk> {
         self.data.chunks.clone()
     }
@@ -111,6 +121,7 @@ pub(in crate::net) struct NetPacket {
     /// After each layer is constructed, the first element is popped. If there is nothing left, the
     /// layer must either make up data, or reject the packet
     pub layers_to_construct: Vec<NetLayerFlowID>,
+    pub upper_layer_size: Option<usize>,
 }
 
 impl NetPacket {
@@ -123,6 +134,7 @@ impl NetPacket {
             length: len,
             layers_to_construct: Vec::new(),
             source,
+            upper_layer_size: None,
         }
     }
 

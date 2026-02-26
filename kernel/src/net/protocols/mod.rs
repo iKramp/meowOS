@@ -5,19 +5,20 @@ use crate::net::{
     flow::{IncomingFlowDirection, OutgoingFlowDirection},
     packet::NetPacket,
     protocols::{
-        arp::{ArpFlowId, ArpHeader},
-        ethernet::{EthernetFlowId, EthernetHeader, parse_ethernet_frame}, ipv4::Ipv4FlowId,
+        arp::{ArpFlowId, ArpHeader}, ethernet::{EthernetFlowId, EthernetHeader, parse_ethernet_frame}, icmp::{IcmpFlowId, IcmpHeader}, ipv4::{Ipv4FlowId, Ipv4Header, Ipv4Network}
     },
 };
 
 pub(in crate::net) mod arp;
 pub(in crate::net) mod ethernet;
 pub(in crate::net) mod ipv4;
+pub(in crate::net) mod icmp;
 
 pub(in crate::net) fn init() {
     arp::init();
     ethernet::init();
     ipv4::init();
+    icmp::init();
 }
 
 pub(in crate::net) fn parse_layer(
@@ -28,6 +29,8 @@ pub(in crate::net) fn parse_layer(
     let data = match packet_type {
         NetLayerType::Ethernet => NetLayerData::Ethernet(parse_ethernet_frame(packet)?),
         NetLayerType::Arp => NetLayerData::Arp(arp::parse_arp(packet, offset)?),
+        NetLayerType::Ipv4 => NetLayerData::Ipv4(ipv4::parse_ipv4_packet(packet, offset)?),
+        NetLayerType::Icmp => NetLayerData::Icmp(icmp::parse_icmp(packet, offset)?),
         NetLayerType::Unknown => NetLayerData::Unknown(UnknownLayer { offset }),
         NetLayerType::None => NetLayerData::None,
         _ => return None,
@@ -40,6 +43,8 @@ pub(in crate::net) fn construct_layer(packet: &mut Acow<NetPacket>, layer_type: 
     match layer_type {
         NetLayerType::Ethernet => ethernet::construct_layer(packet),
         NetLayerType::Arp => arp::construct_layer(packet),
+        NetLayerType::Ipv4 => ipv4::construct_layer(packet),
+        NetLayerType::Icmp => icmp::construct_layer(packet),
         _ => panic!("construct_layer not implemented for layer type {:?}", layer_type),
     }
 }
@@ -59,7 +64,8 @@ pub(in crate::net) enum NetLayerData {
     Unknown(UnknownLayer),
     None, //for example above TCP, no longer a kernel thing
     Ethernet(EthernetHeader),
-    Ipv4,
+    Ipv4(Ipv4Header),
+    Icmp(IcmpHeader),
     Ipv6,
     Arp(ArpHeader),
     Tcp,
@@ -79,6 +85,8 @@ impl NetLayerData {
         match self {
             NetLayerData::Ethernet(header) => Some(header),
             NetLayerData::Arp(header) => Some(header),
+            NetLayerData::Ipv4(header) => Some(header),
+            NetLayerData::Icmp(header) => Some(header),
             _ => None,
         }
     }
@@ -87,6 +95,8 @@ impl NetLayerData {
         match self {
             NetLayerData::Ethernet(header) => Some(header),
             NetLayerData::Arp(header) => Some(header),
+            NetLayerData::Ipv4(header) => Some(header),
+            NetLayerData::Icmp(header) => Some(header),
             _ => None,
         }
     }
@@ -99,6 +109,7 @@ pub enum NetLayerType {
     None,
     Ethernet,
     Ipv4,
+    Icmp,
     Ipv6,
     Arp,
     Tcp,
@@ -106,13 +117,42 @@ pub enum NetLayerType {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum NetLayerFlowID {
+pub(in crate::net) enum NetLayerFlowID {
     Ethernet(EthernetFlowId),
     Arp(ArpFlowId),
     Ipv4(Ipv4FlowId),
+    Icmp(IcmpFlowId),
     Ipv6,
     Tcp,
     Udp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::net) enum NetAddress {
+    Ipv4(Ipv4Network),
+    Mac(MacAddress),
+}
+
+impl NetAddress {
+    pub fn into_hardware(self) -> Option<arp::HardwareAddr> {
+        match self {
+            NetAddress::Mac(mac) => Some(arp::HardwareAddr::Ethernet(mac)),
+            _ => None,
+        }
+    }
+
+    pub fn into_protocol(self) -> Option<arp::ProtocolAddr> {
+        match self {
+            NetAddress::Ipv4(ipv4) => Some(arp::ProtocolAddr::Ipv4(ipv4.address)),
+            _ => None,
+        }
+    }
+
+    pub fn from_hardware(hardware: &arp::HardwareAddr) -> Option<Self> {
+        match hardware {
+            arp::HardwareAddr::Ethernet(mac) => Some(NetAddress::Mac(*mac)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

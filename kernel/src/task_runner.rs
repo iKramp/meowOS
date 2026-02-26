@@ -2,7 +2,7 @@ use core::{
     pin::Pin, sync::atomic::AtomicU64, task::{Context, Poll, RawWaker, RawWakerVTable, Waker}
 };
 use std::{
-    boxed::Box, lock_w_info, println, sync::{arc::Arc, no_int_spinlock::NoIntSpinlock}, vec::Vec
+    boxed::Box, lock_w_info, println, sync::{arc::Arc, no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock}, vec::Vec, w_lock_w_info
 };
 
 use crate::{
@@ -10,6 +10,20 @@ use crate::{
     memory::paging,
     proc::{self, Pid, ProcessData, switch_to_generic_mem_tree},
 };
+
+static REPEATING_TASKS: RWSpinlock<Vec<fn()>> = RWSpinlock::new(Vec::new());
+
+pub fn add_repeating_task(task: fn()) {
+    let mut tasks = w_lock_w_info!(REPEATING_TASKS);
+    tasks.push(task);
+}
+
+pub fn run_repeating_tasks() {
+    let tasks = w_lock_w_info!(REPEATING_TASKS);
+    for task in tasks.iter() {
+        task();
+    }
+}
 
 fn nop(_: *const ()) {}
 fn nop_clone(_: *const ()) -> RawWaker {

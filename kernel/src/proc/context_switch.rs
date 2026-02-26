@@ -31,6 +31,7 @@ pub fn no_ret_context_switch() -> ! {
     // Switch to the next process
     loop {
         task_runner::process_tasks();
+        task_runner::run_repeating_tasks();
 
         let mut scheduler_lock = lock_w_info!(SCHEDULER);
         let scheduler = unsafe { scheduler_lock.assume_init_mut() };
