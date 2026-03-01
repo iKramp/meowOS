@@ -16,6 +16,8 @@ use crate::net::{
     },
 };
 
+const DEFAULT_IP: [u8; 4] = [10, 0, 0, 2];
+
 struct MacTables {
     nic_storage: BTreeMap<NicIdentifier, Arc<dyn NIC>>,
     foreign_mac_nic: Vec<(NicIdentifier, MacAddress)>,
@@ -30,7 +32,8 @@ struct MacBridgeDomain {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::net) struct Ipv4Route {
     pub network: ipv4::Ipv4Network, //local interface ip and mask
-    pub via: ipv4::Ipv4Address,       //next hop ip
+    pub first_hop_ip: ipv4::Ipv4Address,
+    pub local_interface_ip: Ipv4Address,
     pub priority: u32,
 }
 
@@ -112,21 +115,22 @@ pub fn register_nic(mac_addr: MacAddress, nic: Arc<dyn NIC>) {
     //temporary
     if !FIRST_IP_ADDED.swap(true, core::sync::atomic::Ordering::SeqCst) {
         let interface_network = ipv4::Ipv4Network {
-            address: ipv4::Ipv4Address([10, 0, 0, 2]),
+            address: ipv4::Ipv4Address(DEFAULT_IP),
             mask: ipv4::Ipv4Address([255, 255, 255, 0]),
         };
 
         nic_address_vec.push(protocols::NetAddress::Ipv4(interface_network.clone()));
 
-        let default_network = ipv4::Ipv4Network {
-            address: ipv4::Ipv4Address([10, 0, 0, 2]),
+        let default_network = ipv4::Ipv4Network { //all goes here
+            address: ipv4::Ipv4Address([0, 0, 0, 0]),
             mask: ipv4::Ipv4Address([0, 0, 0, 0]),
         };
 
         w_lock_w_info!(IPV4_ROUTING_TABLE).0.push(interface_network.clone());
         w_lock_w_info!(IPV4_ROUTING_TABLE).1.push(Ipv4Route {
             network: default_network,
-            via: ipv4::Ipv4Address([10, 0, 0, 1]), //tap0 addr
+            first_hop_ip: ipv4::Ipv4Address([10, 0, 0, 1]), //tap0 addr
+            local_interface_ip: interface_network.address,
             priority: 100,
         });
     }
@@ -243,11 +247,12 @@ pub fn add_ipv4_route(network: ipv4::Ipv4Network) {
     routing_table.0.insert(pos, network);
 }
 
-pub fn add_default_ipv4_route(network: ipv4::Ipv4Network, via: Ipv4Address, priority: u32) {
+pub fn add_default_ipv4_route(network: ipv4::Ipv4Network, first_hop_ip: Ipv4Address, local_ip: Ipv4Address, priority: u32) {
     let mut routing_table = w_lock_w_info!(IPV4_ROUTING_TABLE);
     let info = Ipv4Route {
         network,
-        via,
+        first_hop_ip,
+        local_interface_ip: local_ip,
         priority,
     };
     let pos = routing_table.1.binary_search(&info).unwrap_or_else(|e| e);
@@ -262,7 +267,8 @@ pub(in crate::net) fn get_ipv4_route(destination: &ipv4::Ipv4Address) -> Option<
             println!("returning interface network: {:?}", network);
             return Some(Ipv4Route {
                 network: network.clone(),
-                via: *destination,
+                first_hop_ip: *destination,
+                local_interface_ip: network.address,
                 priority: 0,
             });
         }

@@ -289,10 +289,10 @@ pub(super) fn construct_layer(packet: &mut Acow<NetPacket>) -> OutgoingFlowDirec
             return OutgoingFlowDirection::Drop;
         };
 
-        println!("next hop via: {:?}", route.via);
-        let Some(remote_hardware) = routing_tables::get_arp_entry(ProtocolAddr::Ipv4(route.via), HardwareAddr::Ethernet(own_mac))
+        println!("next hop via: {:?}", route.first_hop_ip);
+        let Some(remote_hardware) = routing_tables::get_arp_entry(ProtocolAddr::Ipv4(route.first_hop_ip), HardwareAddr::Ethernet(own_mac))
         else {
-            println!(level:warn, "construct_layer for IPv4 failed to find ARP entry for next hop {:?}, dropping packet", route.via);
+            println!(level:warn, "construct_layer for IPv4 failed to find ARP entry for next hop {:?}, dropping packet", route.first_hop_ip);
             return OutgoingFlowDirection::Drop;
         };
 
