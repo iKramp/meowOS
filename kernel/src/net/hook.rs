@@ -1,8 +1,8 @@
-use std::{collections::btree_map::BTreeMap, r_lock_w_info, sync::rw_lock::RWSpinlock, vec::Vec};
+use std::{collections::btree_map::BTreeMap, cow::Acow, r_lock_w_info, sync::rw_lock::RWSpinlock, vec::Vec};
 
-use crate::net::{NetLayerType, NetPacketListNode};
+use crate::net::{NetLayerType, packet::NetPacket};
 
-type NetHookFunction = fn(&mut NetPacketListNode) -> HookResult;
+type NetHookFunction = fn(&mut Acow<NetPacket>) -> HookResult;
 
 pub(in crate::net) static NET_HOOK_STORAGE: RWSpinlock<HookStorage> = RWSpinlock::new(HookStorage::new());
 
@@ -47,7 +47,7 @@ impl HookStorage {
         curr_hook_index
     }
 
-    pub fn call_hooks(&self, packet: &mut NetPacketListNode, stage: HookStage) -> HookResult {
+    pub fn call_hooks(&self, packet: &mut Acow<NetPacket>, stage: HookStage) -> HookResult {
         let Some(hooks) = self.hook_registrations.get(&stage) else {
             return HookResult::Nothing;
         };
@@ -57,7 +57,7 @@ impl HookStorage {
                 continue;
             };
             match handler(packet) {
-                HookResult::Nothing => {},
+                HookResult::Nothing => {}
                 HookResult::LayerModified => hook_result = HookResult::LayerModified,
                 HookResult::Drop => return HookResult::Drop,
             }
@@ -84,14 +84,13 @@ pub(in crate::net) enum HookStage {
     Outbound(NetLayerType),
 }
 
-
-pub(in crate::net) fn call_hooks(packet: &mut NetPacketListNode, stage: HookStage) -> HookFilter {
+pub(in crate::net) fn call_hooks(packet: &mut Acow<NetPacket>, stage: HookStage) -> HookFilter {
     match r_lock_w_info!(NET_HOOK_STORAGE).call_hooks(packet, stage) {
         HookResult::Nothing => HookFilter::Continue,
         HookResult::LayerModified => {
             //modify packet bytes
             HookFilter::Continue
-        },
+        }
         HookResult::Drop => HookFilter::Drop,
     }
 }

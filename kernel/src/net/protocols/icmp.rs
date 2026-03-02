@@ -128,10 +128,7 @@ pub(in crate::net) fn construct_layer(packet: &mut Acow<NetPacket>) -> OutgoingF
 }
 
 pub(in crate::net) fn send_icmp_error(packet: &mut Acow<NetPacket>, type_: u8, code: u8, data: u32) {
-    let Some(ipv4_layer) = packet
-        .get_highest_layer()
-        .and_then(|layer| (layer as &dyn std::any::Any).downcast_ref::<Ipv4Header>())
-    else {
+    let Some(ipv4_layer) = packet.parsed_layers.iter().rev().find_map(|layer| (layer as &dyn std::any::Any).downcast_ref::<Ipv4Header>()) else {
         println!("can't send ICMP error as a reply if original packet doesn't have IPv4 layer");
         return;
     };

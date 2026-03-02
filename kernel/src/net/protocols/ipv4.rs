@@ -1,7 +1,13 @@
 use std::{cow::Acow, println, vec::Vec, w_lock_w_info};
 
 use crate::net::{
-    self, NetLayerType, NetPacketListNode, NetPacketSource, NicType, ProtocolAddr, address_pair::AddressPair, flow::{LayerDownType, OutgoingFlowDirection}, hook::HookResult, packet::NetPacket, protocols::{NetAddress, NetLayer, NetLayerFlowID, arp::HardwareAddr, icmp::{self, IcmpFlowId}}, routing_tables
+    self, NetLayerType, NetPacketListNode, NetPacketSource, NicType, ProtocolAddr,
+    address_pair::AddressPair,
+    flow::{LayerDownType, OutgoingFlowDirection},
+    hook::HookResult,
+    packet::NetPacket,
+    protocols::{NetAddress, NetLayer, NetLayerFlowID, arp::HardwareAddr, icmp},
+    routing_tables,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,12 +100,20 @@ impl Ipv4Network {
     }
 }
 
+enum Ipv4Error {
+    NetworkUnreachable,
+    HostUnreachable,
+    OtherNonFatal,
+    OtherFatal, //net stream must be closed
+}
+
 pub(super) fn init() {
     w_lock_w_info!(net::hook::NET_HOOK_STORAGE).register_hook(ipv4_bridge_hook, net::hook::HookStage::Bridge(NetLayerType::Ipv4));
 }
 
 fn ipv4_bridge_hook(packet: &mut NetPacketListNode) -> HookResult {
-    let Some(ipv4_layer) = packet.data
+    let Some(ipv4_layer) = packet
+        .data
         .get_highest_layer()
         .and_then(|layer| (layer as &dyn std::any::Any).downcast_ref::<Ipv4Header>())
     else {
@@ -142,7 +156,7 @@ impl NetLayer for Ipv4Header {
 
     fn upper_layer_type(&self) -> NetLayerType {
         match self.protocol {
-            1 => NetLayerType::Icmp, //ICMP, not yet supported
+            1 => NetLayerType::Icmp,    //ICMP, not yet supported
             2 => NetLayerType::Unknown, //IGMP, not yet supported
             6 => NetLayerType::Tcp,
             17 => NetLayerType::Udp,
@@ -189,6 +203,12 @@ pub(super) fn parse_ipv4_packet(packet: &mut Acow<NetPacket>, offset: usize) -> 
         return None;
     }
 
+    let checksum = net::compute_internet_checksum(&packet.get_chunks()[0].data()[offset as usize..(offset + header_len) as usize]);
+    if checksum != 0 {
+        println!(level:warn, "IPv4 header checksum mismatch, expected 0 got {:04x}, dropping packet", checksum);
+        return None;
+    }
+
     packet.ensure_length(header_len);
     let data = &packet.get_chunks()[0].data()[offset as usize..];
     let differentated_services = data[1] >> 2;
@@ -202,7 +222,6 @@ pub(super) fn parse_ipv4_packet(packet: &mut Acow<NetPacket>, offset: usize) -> 
     let source = Ipv4Address([data[12], data[13], data[14], data[15]]);
     let destination = Ipv4Address([data[16], data[17], data[18], data[19]]);
     //ignore potential options
-
 
     let upper_layer_size = total_length as u32 - header_len;
     packet.upper_layer_size = Some(upper_layer_size as usize);
@@ -280,9 +299,50 @@ fn write_data_to_packet(packet: &mut [u8], data: Ipv4FlowId, offset: usize, uppe
 }
 
 pub(super) fn construct_layer(packet: &mut Acow<NetPacket>) -> OutgoingFlowDirection {
+    match construct_layer_internal(packet) {
+        Ok(direction) => direction,
+        Err(err) => {
+            match err {
+                Ipv4Error::NetworkUnreachable => {
+                    println!(level:error, "construct_layer for IPv4 failed: Network Unreachable");
+
+                    match packet.source {
+                        NetPacketSource::Nic(_) => unreachable!("packets bridged from nices should have OtherPacket source"),
+                        NetPacketSource::Proc(_pid) => todo!(),
+                        NetPacketSource::OtherPacket(ref mut og_packet) => {
+                            icmp::send_icmp_error(og_packet, 3, 0, 0);
+                        }
+                        NetPacketSource::Other => {}
+                    }
+                }
+                Ipv4Error::HostUnreachable => {
+                    println!(level:error, "construct_layer for IPv4 failed: Host Unreachable");
+
+                    match packet.source {
+                        NetPacketSource::Nic(_) => unreachable!("packets bridged from nices should have OtherPacket source"),
+                        NetPacketSource::Proc(_pid) => todo!(),
+                        NetPacketSource::OtherPacket(ref mut og_packet) => {
+                            icmp::send_icmp_error(og_packet, 3, 1, 0);
+                        }
+                        NetPacketSource::Other => {}
+                    }
+                }
+                Ipv4Error::OtherNonFatal => {}
+                Ipv4Error::OtherFatal => {
+                    todo!(
+                        "handle fatal error in construct_layer for IPv4, currently just drops packet but should also close stream if applicable"
+                    );
+                }
+            }
+            OutgoingFlowDirection::Drop
+        }
+    }
+}
+
+fn construct_layer_internal(packet: &mut Acow<NetPacket>) -> Result<OutgoingFlowDirection, Ipv4Error> {
     let Some(NetLayerFlowID::Ipv4(data)) = packet.layers_to_construct.pop() else {
         println!(level:error, "construct_layer called for IPv4 but highest layer is not Ipv4FlowId");
-        return OutgoingFlowDirection::Drop;
+        return Err(Ipv4Error::OtherNonFatal); //error in some driver, no need to break any stream
     };
 
     let out_flow_direction: OutgoingFlowDirection;
@@ -291,35 +351,33 @@ pub(super) fn construct_layer(packet: &mut Acow<NetPacket>) -> OutgoingFlowDirec
         println!("out ipv4 packet doesn't have lower layer set");
         println!("target is: {:?}", &data.address.target);
         let Some(route) = routing_tables::get_ipv4_route(&data.address.target) else {
-            println!("no ipv4 route found");
-
-            let NetPacketSource::OtherPacket(ref mut orig_packet) = packet.source else {
-                println!("can't send ICMP error as a reply if source is not OtherPacket");
-                return OutgoingFlowDirection::Drop;
-            };
-
-            let type_ = 3; //Destination Unreachable
-            let code = 0; //Net Unreachable
-
-            icmp::send_icmp_error(orig_packet, type_, code, 0);
-            return OutgoingFlowDirection::Drop; //no route to destination
+            println!(level:error, "construct_layer for IPv4 failed to find route for target {:?}", data.address.target);
+            return Err(Ipv4Error::NetworkUnreachable);
         };
 
         let Some(own_mac) = routing_tables::get_own_ipv4_mac(&route.network.address) else {
             println!(level:error, "construct_layer for IPv4 failed to get own MAC for interface IP {:?}", route.network.address);
-            return OutgoingFlowDirection::Drop;
+            return Err(Ipv4Error::OtherFatal); //rare enough to not need a specific error type
         };
 
         println!("next hop via: {:?}", route.first_hop_ip);
-        let Some(remote_hardware) = routing_tables::get_arp_entry(ProtocolAddr::Ipv4(route.first_hop_ip), HardwareAddr::Ethernet(own_mac))
+        let Some(remote_hardware) =
+            routing_tables::get_arp_entry(ProtocolAddr::Ipv4(route.first_hop_ip), HardwareAddr::Ethernet(own_mac))
         else {
             println!(level:warn, "construct_layer for IPv4 failed to find ARP entry for next hop {:?}, dropping packet", route.first_hop_ip);
-            return OutgoingFlowDirection::Drop;
+            if route.first_hop_ip == data.address.target {
+                return Err(Ipv4Error::HostUnreachable);
+            } else {
+                return Err(Ipv4Error::NetworkUnreachable);
+            }
         };
 
-        let Some(nic_info) = routing_tables::get_nic_info_from_own_addr(&NetAddress::Mac(own_mac)).first().cloned() else {
+        let Some(nic_info) = routing_tables::get_nic_info_from_own_addr(&NetAddress::Mac(own_mac))
+            .first()
+            .cloned()
+        else {
             println!(level:error, "construct_layer for IPv4 failed to find NIC for own MAC address {:?}", own_mac);
-            return OutgoingFlowDirection::Drop;
+            return Err(Ipv4Error::OtherFatal); //rare enough to not need a specific error type
         };
 
         match nic_info.1.1 {
@@ -327,7 +385,7 @@ pub(super) fn construct_layer(packet: &mut Acow<NetPacket>) -> OutgoingFlowDirec
                 #[allow(irrefutable_let_patterns)] //might add more hw addresses later
                 let HardwareAddr::Ethernet(remote_mac) = remote_hardware else {
                     println!(level:error, "construct_layer for IPv4 expected Ethernet hardware address for next hop but got different type");
-                    return OutgoingFlowDirection::Drop;
+                    return Err(Ipv4Error::OtherFatal);
                 };
 
                 packet
@@ -339,23 +397,31 @@ pub(super) fn construct_layer(packet: &mut Acow<NetPacket>) -> OutgoingFlowDirec
                     }));
 
                 out_flow_direction = OutgoingFlowDirection::LayerDown(LayerDownType::Normal(NetLayerType::Ethernet));
-            },
+            }
             NicType::Ipv4 => {
                 let Some(nic) = routing_tables::get_nic_from_id(&nic_info.0) else {
                     println!(level:error, "construct_layer for IPv4 failed to get NIC from ID {:?}", nic_info.0);
-                    return OutgoingFlowDirection::Drop;
+                    return Err(Ipv4Error::OtherFatal);
                 };
 
                 out_flow_direction = OutgoingFlowDirection::LayerDown(LayerDownType::Nic(nic));
             }
         }
     } else {
-        match packet.layers_to_construct.last().expect("layers was checked, has at least 1 layer") {
-            NetLayerFlowID::Ethernet(_) => out_flow_direction = OutgoingFlowDirection::LayerDown(LayerDownType::Normal(NetLayerType::Ethernet)),
-            NetLayerFlowID::Ipv4(_) => out_flow_direction = OutgoingFlowDirection::LayerDown(LayerDownType::Normal(NetLayerType::Ipv4)), //nested v4 yippie
+        match packet
+            .layers_to_construct
+            .last()
+            .expect("layers was checked, has at least 1 layer")
+        {
+            NetLayerFlowID::Ethernet(_) => {
+                out_flow_direction = OutgoingFlowDirection::LayerDown(LayerDownType::Normal(NetLayerType::Ethernet))
+            }
+            NetLayerFlowID::Ipv4(_) => {
+                out_flow_direction = OutgoingFlowDirection::LayerDown(LayerDownType::Normal(NetLayerType::Ipv4))
+            } //nested v4 yippie
             _ => {
                 println!(level:error, "construct_layer for IPv4 found unsupported upper layer type in layers_to_construct");
-                return OutgoingFlowDirection::Drop;
+                return Err(Ipv4Error::OtherFatal);
             }
         }
     }
@@ -364,5 +430,5 @@ pub(super) fn construct_layer(packet: &mut Acow<NetPacket>) -> OutgoingFlowDirec
     let chunk_to_edit = packet.insert_chunk_front(20);
     write_data_to_packet(chunk_to_edit.data_mut(), data, 0, packet_len as usize);
 
-    out_flow_direction
+    Ok(out_flow_direction)
 }

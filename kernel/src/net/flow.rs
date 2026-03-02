@@ -1,7 +1,7 @@
-use std::{println, sync::arc::Arc, vec::Vec};
+use std::{cow::Acow, println, sync::arc::Arc, vec::Vec};
 
 use crate::net::{
-    NIC, NetPacketListNode, NetPacketSource, hook::{HookFilter, HookStage, call_hooks}, protocols::{self, NetLayerType}
+    NIC, NetPacketListNode, NetPacketSource, hook::{HookFilter, HookStage, call_hooks}, packet::NetPacket, protocols::{self, NetLayerType}
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -46,7 +46,7 @@ pub fn process_packet_flow(packet: NetPacketListNode) {
         let layer_type = packet.layer;
         match routing_step {
             RoutingStep::Incoming => {
-                let proc_res = process_inbound_packet(&mut packet, layer_type, current_layer_offset);
+                let proc_res = process_inbound_packet(&mut packet.data, layer_type, current_layer_offset);
                 match proc_res {
                     IncomingFlowDirection::LayerUp(next_layer_type, next_layer_offset) => {
                         packet.routing_step = RoutingStep::Incoming;
@@ -72,7 +72,7 @@ pub fn process_packet_flow(packet: NetPacketListNode) {
                 }
             }
             RoutingStep::Bridge => {
-                let hook_filter = process_bridge(&mut packet, layer_type);
+                let hook_filter = process_bridge(&mut packet.data, layer_type);
                 if matches!(hook_filter, HookFilter::Continue) {
                     packet.routing_step = RoutingStep::Outgoing;
                     packet.layer = layer_type;
@@ -80,7 +80,7 @@ pub fn process_packet_flow(packet: NetPacketListNode) {
                 }
             }
             RoutingStep::Outgoing => {
-                let out_res = process_outbound_packet(&mut packet, layer_type);
+                let out_res = process_outbound_packet(&mut packet.data, layer_type);
                 match out_res {
                     OutgoingFlowDirection::LayerDown(LayerDownType::Normal(net_layer_type)) => {
                         packet.routing_step = RoutingStep::Outgoing;
@@ -97,7 +97,7 @@ pub fn process_packet_flow(packet: NetPacketListNode) {
 }
 
 fn process_inbound_packet(
-    packet: &mut NetPacketListNode,
+    packet: &mut Acow<NetPacket>,
     layer_type: NetLayerType,
     layer_offset: usize,
 ) -> IncomingFlowDirection {
@@ -110,7 +110,7 @@ fn process_inbound_packet(
         return IncomingFlowDirection::Drop; //no more layers to process
     }
 
-    let Some(parsed) = protocols::parse_layer(&mut packet.data, layer_type, layer_offset) else {
+    let Some(parsed) = protocols::parse_layer(packet, layer_type, layer_offset) else {
         println!("failed to parse layer, dropping packet");
         call_hooks(packet, HookStage::BadPacket);
         return IncomingFlowDirection::Drop; //bad packet, drop it
@@ -118,7 +118,7 @@ fn process_inbound_packet(
 
     let is_known = parsed.is_known();
 
-    packet.data.parsed_layers.push(parsed);
+    packet.parsed_layers.push(parsed);
 
     if matches!(call_hooks(packet, HookStage::Inbound(layer_type)), HookFilter::Drop) {
         println!("hook decided to drop the packet, dropping");
@@ -131,7 +131,7 @@ fn process_inbound_packet(
     }
 
     //Safety: parsed_layers just had a pushed, known layer
-    let curr_layer = unsafe { packet.data.get_highest_layer().unwrap_unchecked() };
+    let curr_layer = unsafe { packet.get_highest_layer().unwrap_unchecked() };
 
     let res = curr_layer.incoming_flow_direction();
     println!("successfully processed inbound packet, next step: {:?}", res);
@@ -141,18 +141,18 @@ fn process_inbound_packet(
 /// Processing a packet on the same layer as before
 /// This does not parse the packet in any way, but may do *something* with it
 /// Examples: protocols like ARP/TCP/UDP or bridging packets
-fn process_bridge(packet: &mut NetPacketListNode, layer_type: NetLayerType) -> HookFilter {
+fn process_bridge(packet: &mut Acow<NetPacket>, layer_type: NetLayerType) -> HookFilter {
     println!("processing bridge packet at layer {:?}", layer_type);
     match call_hooks(packet, HookStage::Bridge(layer_type)) {
         HookFilter::Continue => {
-            let original_packet = packet.data.clone();
+            let original_packet = packet.clone();
 
-            packet.data.bridge_to_out_set_layers();
-            let top_layer = packet.data.get_highest_layer().expect("bridge with no layer");
+            packet.bridge_to_out_set_layers();
+            let top_layer = packet.get_highest_layer().expect("bridge with no layer");
             let top_layer_offset = top_layer.upper_layer_offset();
-            let _ = packet.data.nuke_lower_layers(top_layer_offset);
-            packet.data.reset_packet();
-            packet.data.source = NetPacketSource::OtherPacket(original_packet);
+            let _ = packet.nuke_lower_layers(top_layer_offset);
+            packet.reset_packet();
+            packet.source = NetPacketSource::OtherPacket(original_packet);
             println!("successfully processed bridge, moving to outbound processing");
             HookFilter::Continue
         }
@@ -164,13 +164,13 @@ fn process_bridge(packet: &mut NetPacketListNode, layer_type: NetLayerType) -> H
 }
 
 /// Processing a packet to be sent out
-fn process_outbound_packet(packet: &mut NetPacketListNode, layer_type: NetLayerType) -> OutgoingFlowDirection {
+fn process_outbound_packet(packet: &mut Acow<NetPacket>, layer_type: NetLayerType) -> OutgoingFlowDirection {
     println!("processing outbound packet at layer {:?}", layer_type);
     if matches!(call_hooks(packet, HookStage::Outbound(layer_type)), HookFilter::Drop) {
         println!("hook decided to drop the packet, dropping");
         return OutgoingFlowDirection::Drop; //hook decided to drop the packet
     }
-    let res = protocols::construct_layer(&mut packet.data, layer_type);
+    let res = protocols::construct_layer(packet, layer_type);
     println!("successfully processed outbound packet, next step: {:?}", res);
     res
 }
