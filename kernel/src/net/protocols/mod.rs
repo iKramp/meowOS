@@ -5,7 +5,7 @@ use crate::net::{
     flow::{IncomingFlowDirection, OutgoingFlowDirection},
     packet::NetPacket,
     protocols::{
-        arp::{ArpFlowId, ArpHeader}, ethernet::{EthernetFlowId, EthernetHeader, parse_ethernet_frame}, icmp::{IcmpFlowId, IcmpHeader}, ipv4::{Ipv4FlowId, Ipv4Header, Ipv4Network}
+        arp::{ArpFlowId, ArpHeader}, ethernet::{EthernetFlowId, EthernetHeader, parse_ethernet_frame}, icmp::{IcmpFlowId, IcmpHeader}, ipv4::{Ipv4FlowId, Ipv4Header, Ipv4Network}, udp::{UdpFlowId, UdpHeader}
     },
 };
 
@@ -13,12 +13,14 @@ pub(in crate::net) mod arp;
 pub(in crate::net) mod ethernet;
 pub(in crate::net) mod ipv4;
 pub(in crate::net) mod icmp;
+pub(in crate::net) mod udp;
 
 pub(in crate::net) fn init() {
     arp::init();
     ethernet::init();
     ipv4::init();
     icmp::init();
+    udp::init();
 }
 
 pub(in crate::net) fn parse_layer(
@@ -31,6 +33,7 @@ pub(in crate::net) fn parse_layer(
         NetLayerType::Arp => NetLayerData::Arp(arp::parse_arp(packet, offset)?),
         NetLayerType::Ipv4 => NetLayerData::Ipv4(ipv4::parse_ipv4_packet(packet, offset)?),
         NetLayerType::Icmp => NetLayerData::Icmp(icmp::parse_icmp(packet, offset)?),
+        NetLayerType::Udp => NetLayerData::Udp(udp::parse_udp(packet, offset)?),
         NetLayerType::Unknown => NetLayerData::Unknown(UnknownLayer { offset }),
         NetLayerType::None => NetLayerData::None,
         _ => return None,
@@ -45,6 +48,7 @@ pub(in crate::net) fn construct_layer(packet: &mut Acow<NetPacket>, layer_type: 
         NetLayerType::Arp => arp::construct_layer(packet),
         NetLayerType::Ipv4 => ipv4::construct_layer(packet),
         NetLayerType::Icmp => icmp::construct_layer(packet),
+        NetLayerType::Udp => udp::construct_layer(packet),
         _ => panic!("construct_layer not implemented for layer type {:?}", layer_type),
     }
 }
@@ -69,7 +73,7 @@ pub(in crate::net) enum NetLayerData {
     Ipv6,
     Arp(ArpHeader),
     Tcp,
-    Udp,
+    Udp(UdpHeader),
 }
 
 impl NetLayerData {
@@ -87,6 +91,7 @@ impl NetLayerData {
             NetLayerData::Arp(header) => Some(header),
             NetLayerData::Ipv4(header) => Some(header),
             NetLayerData::Icmp(header) => Some(header),
+            NetLayerData::Udp(header) => Some(header),
             _ => None,
         }
     }
@@ -97,6 +102,7 @@ impl NetLayerData {
             NetLayerData::Arp(header) => Some(header),
             NetLayerData::Ipv4(header) => Some(header),
             NetLayerData::Icmp(header) => Some(header),
+            NetLayerData::Udp(header) => Some(header),
             _ => None,
         }
     }
@@ -124,7 +130,7 @@ pub(in crate::net) enum NetLayerFlowID {
     Icmp(IcmpFlowId),
     Ipv6,
     Tcp,
-    Udp,
+    Udp(UdpFlowId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

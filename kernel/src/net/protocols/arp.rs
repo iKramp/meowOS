@@ -118,13 +118,13 @@ impl ProtocolAddr {
     }
 }
 
-fn process_arp(packet: &mut NetPacketListNode) -> HookResult {
-    let NetPacketSource::Nic(in_nic) = packet.data.source else {
+fn process_arp(packet: &mut Acow<NetPacket>) -> HookResult {
+    let NetPacketSource::Nic(in_nic) = packet.source else {
         println!(level:error, "ARP hook called but packet source is not NIC");
         return HookResult::Drop;
     };
 
-    let Some(arp_layer) = packet.data
+    let Some(arp_layer) = packet
         .get_highest_layer_mut()
         .and_then(|layer| (layer as &mut dyn Any).downcast_mut::<ArpHeader>())
     else {

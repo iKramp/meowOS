@@ -111,9 +111,8 @@ pub(super) fn init() {
     w_lock_w_info!(net::hook::NET_HOOK_STORAGE).register_hook(ipv4_bridge_hook, net::hook::HookStage::Bridge(NetLayerType::Ipv4));
 }
 
-fn ipv4_bridge_hook(packet: &mut NetPacketListNode) -> HookResult {
+fn ipv4_bridge_hook(packet: &mut Acow<NetPacket>) -> HookResult {
     let Some(ipv4_layer) = packet
-        .data
         .get_highest_layer()
         .and_then(|layer| (layer as &dyn std::any::Any).downcast_ref::<Ipv4Header>())
     else {
@@ -122,7 +121,7 @@ fn ipv4_bridge_hook(packet: &mut NetPacketListNode) -> HookResult {
 
     if ipv4_layer.ttl == 1 {
         //ICMP TTL
-        icmp::send_icmp_error(&mut packet.data, 11, 0, 0);
+        icmp::send_icmp_error(packet, 11, 0, 0);
 
         return HookResult::Drop; //drop packets that would expire after bridging
     }

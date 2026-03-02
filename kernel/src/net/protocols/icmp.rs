@@ -187,12 +187,12 @@ pub(in crate::net) fn send_icmp_error(packet: &mut Acow<NetPacket>, type_: u8, c
     net::add_net_packet_to_queue(Box::new(new_packet));
 }
 
-fn icmp_in_hook(packet: &mut NetPacketListNode) -> HookResult {
+fn icmp_in_hook(packet: &mut Acow<NetPacket>) -> HookResult {
 
-    let original_packet = packet.data.clone();
+    let original_packet = packet.clone();
 
     println!("icmp in hook running");
-    let icmp_layer = match packet.data
+    let icmp_layer = match packet
         .get_highest_layer()
         .and_then(|layer| (layer as &dyn std::any::Any).downcast_ref::<IcmpHeader>())
     {
@@ -200,7 +200,7 @@ fn icmp_in_hook(packet: &mut NetPacketListNode) -> HookResult {
         None => return HookResult::Drop,
     };
 
-    let ipv4_layer = match packet.data
+    let ipv4_layer = match packet
         .get_layer(1)
         .and_then(|layer| (layer as &dyn std::any::Any).downcast_ref::<net::protocols::ipv4::Ipv4Header>())
     {

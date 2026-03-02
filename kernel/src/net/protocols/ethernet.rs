@@ -44,8 +44,8 @@ pub(super) fn init() {
     w_lock_w_info!(net::hook::NET_HOOK_STORAGE).register_hook(bridge_hook, net::hook::HookStage::Bridge(NetLayerType::Ethernet));
 }
 
-fn bridge_hook(packet: &mut NetPacketListNode) -> HookResult {
-    let ether_layer = match packet.data
+fn bridge_hook(packet: &mut Acow<NetPacket>) -> HookResult {
+    let ether_layer = match packet
         .get_highest_layer()
         .and_then(|layer| (layer as &dyn Any).downcast_ref::<EthernetHeader>())
     {
@@ -53,7 +53,7 @@ fn bridge_hook(packet: &mut NetPacketListNode) -> HookResult {
         None => return HookResult::Drop,
     };
 
-    let NetPacketSource::Nic(in_nic) = packet.data.source else {
+    let NetPacketSource::Nic(in_nic) = packet.source else {
         return HookResult::Drop;
     };
 
@@ -78,9 +78,11 @@ fn bridge_hook(packet: &mut NetPacketListNode) -> HookResult {
         };
 
         let mut new_packet = packet.clone();
-        new_packet.data.nuke_lower_layers(ether_layer.upper_layer_offset()); //keep only above ethernet
+        new_packet.nuke_lower_layers(ether_layer.upper_layer_offset()); //keep only above ethernet
 
         let mut layers = Vec::new();
+        #[allow(clippy::needless_late_init)]
+        let layer;
 
         match nic_type {
             net::NicType::Ethernet => {
@@ -89,13 +91,17 @@ fn bridge_hook(packet: &mut NetPacketListNode) -> HookResult {
                     ether_type: ether_layer.upper_type,
                     out_interface: Some(out_mac),
                 }));
-                new_packet.layer = NetLayerType::Ethernet;
+                layer = NetLayerType::Ethernet;
             }
-            net::NicType::Ipv4 => {}
+            net::NicType::Ipv4 => {
+                panic!("ethernet on top of ipv4??");
+            }
         }
 
-        new_packet.data.layers_to_construct = layers;
-        new_packet.routing_step = RoutingStep::Outgoing;
+        new_packet.layers_to_construct = layers;
+
+        let routing_step = RoutingStep::Outgoing;
+        let new_packet = NetPacketListNode::from_net_packet(new_packet, routing_step, layer);
 
         out_queue.push(Box::new(new_packet));
     }

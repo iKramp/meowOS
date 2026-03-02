@@ -66,6 +66,19 @@ impl NetPacketListNode {
         }
     }
 
+    pub fn from_net_packet(
+        packet: Acow<NetPacket>,
+        initial_routing_step: RoutingStep,
+        initial_layer: NetLayerType,
+    ) -> Self {
+        NetPacketListNode {
+            data: packet,
+            next_packet: None,
+            routing_step: initial_routing_step,
+            layer: initial_layer,
+        }
+    }
+
     pub fn into_raw_data(self) -> Vec<RawNetDataChunk> {
         self.data.chunks.clone()
     }
@@ -256,6 +269,19 @@ impl NetPacket {
         self.length += length;
         unsafe { self.chunks.first_mut().unwrap_unchecked() }
     }
+
+    pub fn insert_existing_chunk(&mut self, chunk: RawNetDataChunk) {
+        self.length += chunk.len();
+        self.chunks.insert(0, chunk);
+    }
+
+    pub fn print(&self) {
+        println!("NetPacket: length {}, source {:?}, layers_to_construct: {:?}, parsed_layers: {:?}", self.length, self.source, self.layers_to_construct, self.parsed_layers);
+        println!("Chunks:");
+        for chunk in &self.chunks {
+            println!("{:?}", chunk.data());
+        }
+    }
 }
 
 //must be contigious
@@ -269,6 +295,12 @@ pub struct RawNetDataChunk {
 impl RawNetDataChunk {
     pub fn new(data: PhysAddr, length: u32) -> Self {
         RawNetDataChunk { data, length }
+    }
+
+    pub fn allocate_new(length: u32) -> Self {
+        let pages = length.div_ceil(4096);
+        let phys_addr = physical_allocator::allocate_contiguius_high(pages as u64);
+        RawNetDataChunk { data: phys_addr, length }
     }
 
     pub fn len(&self) -> u32 {
