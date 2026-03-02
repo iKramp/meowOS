@@ -1,7 +1,7 @@
 use std::{println, sync::arc::Arc, vec::Vec};
 
 use crate::net::{
-    NIC, NetPacketListNode, hook::{HookFilter, HookStage, call_hooks}, protocols::{self, NetLayerType}
+    NIC, NetPacketListNode, NetPacketSource, hook::{HookFilter, HookStage, call_hooks}, protocols::{self, NetLayerType}
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -131,7 +131,7 @@ fn process_inbound_packet(
     }
 
     //Safety: parsed_layers just had a pushed, known layer
-    let curr_layer = unsafe { packet.get_highest_layer().unwrap_unchecked() };
+    let curr_layer = unsafe { packet.data.get_highest_layer().unwrap_unchecked() };
 
     let res = curr_layer.incoming_flow_direction();
     println!("successfully processed inbound packet, next step: {:?}", res);
@@ -145,11 +145,14 @@ fn process_bridge(packet: &mut NetPacketListNode, layer_type: NetLayerType) -> H
     println!("processing bridge packet at layer {:?}", layer_type);
     match call_hooks(packet, HookStage::Bridge(layer_type)) {
         HookFilter::Continue => {
+            let original_packet = packet.data.clone();
+
             packet.data.bridge_to_out_set_layers();
-            let top_layer = packet.get_highest_layer().expect("bridge with no layer");
+            let top_layer = packet.data.get_highest_layer().expect("bridge with no layer");
             let top_layer_offset = top_layer.upper_layer_offset();
             let _ = packet.data.nuke_lower_layers(top_layer_offset);
             packet.data.reset_packet();
+            packet.data.source = NetPacketSource::OtherPacket(original_packet);
             println!("successfully processed bridge, moving to outbound processing");
             HookFilter::Continue
         }

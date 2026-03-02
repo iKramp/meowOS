@@ -45,7 +45,7 @@ pub(super) fn init() {
 }
 
 fn bridge_hook(packet: &mut NetPacketListNode) -> HookResult {
-    let ether_layer = match packet
+    let ether_layer = match packet.data
         .get_highest_layer()
         .and_then(|layer| (layer as &dyn Any).downcast_ref::<EthernetHeader>())
     {

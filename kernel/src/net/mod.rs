@@ -101,6 +101,7 @@ pub fn append_net_queue(other: NetQueueHead) {
 }
 
 fn compute_internet_checksum(header: &[u8]) -> u16 {
+    println!("Computing checksum for header: {:x?}", header);
     let mut sum = 0u32;
     for i in (0..header.len()).step_by(2) {
         let word = u16::from_be_bytes([header[i], header[i + 1]]) as u32;
@@ -109,6 +110,8 @@ fn compute_internet_checksum(header: &[u8]) -> u16 {
     while (sum >> 16) != 0 {
         sum = (sum & 0xFFFF) + (sum >> 16);
     }
-    !(sum as u16)
+    let res = !(sum as u16);
+    println!("Computed checksum: {:#x}", res);
+    res
 }
 

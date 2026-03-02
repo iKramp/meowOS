@@ -19,6 +19,7 @@ use crate::{
 pub enum NetPacketSource {
     Nic(NicIdentifier),
     Proc(Pid),
+    OtherPacket(Acow<NetPacket>),
     Other,
 }
 
@@ -65,36 +66,6 @@ impl NetPacketListNode {
         }
     }
 
-    pub(in crate::net) fn get_highest_layer(&self) -> Option<&dyn NetLayer> {
-        Some(
-            self.data
-                .parsed_layers
-                .last()?
-                .get()
-                .expect("can't call get_highest_layer on unparsed layer"),
-        )
-    }
-
-    pub(in crate::net) fn get_highest_layer_mut(&mut self) -> Option<&mut dyn NetLayer> {
-        Some(
-            self.data
-                .parsed_layers
-                .last_mut()?
-                .get_mut()
-                .expect("can't call get_highest_layer on unparsed layer"),
-        )
-    }
-
-    pub(in crate::net) fn get_layer(&self, index_from_top: usize) -> Option<&dyn NetLayer> {
-        Some(
-            self.data
-                .parsed_layers
-                .get(self.data.parsed_layers.len() - 1 - index_from_top)?
-                .get()
-                .expect("can't call get_layer on unparsed layer"),
-        )
-    }
-
     pub fn into_raw_data(self) -> Vec<RawNetDataChunk> {
         self.data.chunks.clone()
     }
@@ -136,6 +107,33 @@ impl NetPacket {
             source,
             upper_layer_size: None,
         }
+    }
+
+    pub(in crate::net) fn get_highest_layer(&self) -> Option<&dyn NetLayer> {
+        Some(
+            self.parsed_layers
+                .last()?
+                .get()
+                .expect("can't call get_highest_layer on unparsed layer"),
+        )
+    }
+
+    pub(in crate::net) fn get_highest_layer_mut(&mut self) -> Option<&mut dyn NetLayer> {
+        Some(
+            self.parsed_layers
+                .last_mut()?
+                .get_mut()
+                .expect("can't call get_highest_layer on unparsed layer"),
+        )
+    }
+
+    pub(in crate::net) fn get_layer(&self, index_from_top: usize) -> Option<&dyn NetLayer> {
+        Some(
+            self.parsed_layers
+                .get(self.parsed_layers.len() - 1 - index_from_top)?
+                .get()
+                .expect("can't call get_layer on unparsed layer"),
+        )
     }
 
     pub fn linearize(&mut self) {

@@ -124,7 +124,7 @@ fn process_arp(packet: &mut NetPacketListNode) -> HookResult {
         return HookResult::Drop;
     };
 
-    let Some(arp_layer) = packet
+    let Some(arp_layer) = packet.data
         .get_highest_layer_mut()
         .and_then(|layer| (layer as &mut dyn Any).downcast_mut::<ArpHeader>())
     else {
@@ -156,6 +156,8 @@ fn process_arp(packet: &mut NetPacketListNode) -> HookResult {
 
         return HookResult::Drop;
     }
+
+    println!("Received ARP packet, requested addr: {:?}, own addresses {:?}", arp_layer.flow_id.protocol.target(), nic_info);
 
     let is_self = nic_info.iter().any(|addr| addr.clone().into_protocol() == Some(arp_layer.flow_id.protocol.target().clone()));
 

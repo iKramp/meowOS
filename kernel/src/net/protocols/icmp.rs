@@ -1,7 +1,14 @@
 use std::{boxed::Box, cow::Acow, println, vec::Vec, w_lock_w_info};
 
-use crate::net::{self, NetLayerType, NetPacketListNode, RoutingStep, address_pair::AddressPair, flow::{IncomingFlowDirection, LayerDownType, OutgoingFlowDirection}, hook::{HookResult, NET_HOOK_STORAGE}, packet::NetPacket, protocols::{NetLayer, NetLayerFlowID, ipv4::{Ipv4Address, Ipv4Flags, Ipv4FlowId, Ipv4FragmentInfo}}};
+use crate::net::{self, NetLayerType, NetPacketListNode, RoutingStep, address_pair::AddressPair, flow::{IncomingFlowDirection, LayerDownType, OutgoingFlowDirection}, hook::{HookResult, NET_HOOK_STORAGE}, packet::NetPacket, protocols::{NetLayer, NetLayerFlowID, ipv4::{Ipv4Address, Ipv4Flags, Ipv4FlowId, Ipv4FragmentInfo, Ipv4Header}}, routing_tables};
 
+const ICMP_ERROR_CODES: &[u8] = &[
+    3,
+    4,
+    5,
+    11,
+    12,
+];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::net) struct IcmpFlowId {
@@ -120,9 +127,75 @@ pub(in crate::net) fn construct_layer(packet: &mut Acow<NetPacket>) -> OutgoingF
     
 }
 
+pub(in crate::net) fn send_icmp_error(packet: &mut Acow<NetPacket>, type_: u8, code: u8, data: u32) {
+    let Some(ipv4_layer) = packet
+        .get_highest_layer()
+        .and_then(|layer| (layer as &dyn std::any::Any).downcast_ref::<Ipv4Header>())
+    else {
+        println!("can't send ICMP error as a reply if original packet doesn't have IPv4 layer");
+        return;
+    };
+
+    let ihl = ipv4_layer.ihl;
+    let ipv4_header_off = ipv4_layer.current_layer_offset();
+
+    let destination_addr = ipv4_layer.address.source;
+
+    let is_broadcast = ipv4_layer.in_interface_networks.iter().any(|net| net.broadcast_for(&destination_addr));
+    let is_multicast = destination_addr.is_multicast();
+    let mut is_icmp_error = false;
+    if ipv4_layer.upper_layer_type() == NetLayerType::Icmp {
+        let icmp_code = packet.get_chunks()[0].data()[ipv4_header_off as usize + (ihl as usize * 4)];
+        is_icmp_error = ICMP_ERROR_CODES.contains(&icmp_code);
+    }
+
+    if is_broadcast || is_multicast || is_icmp_error {
+        println!(level:warn, "send_icmp_error called but destination {:?} is broadcast/multicast or original packet is ICMP error, dropping", destination_addr);
+        return;
+    }
+
+    let Some(route) = routing_tables::get_ipv4_route(&destination_addr) else {
+        println!(level:warn, "send_icmp_error called but no route to destination {:?}, dropping", destination_addr);
+        return;
+    };
+
+    let source_addr = route.local_interface_ip;
+
+
+    packet.ensure_length(ipv4_header_off + (ihl as u32 * 4) + 8);
+    
+    if packet.get_chunks()[0].len() < (ipv4_header_off + (ihl as u32 * 4) + 8) {
+        println!(level:error, "send_icmp_error called but packet is too short to contain required data, dropping");
+        return;
+    }
+
+    let payload = packet.get_chunks()[0].data()[ipv4_header_off as usize..(ipv4_header_off + (ihl as u32 * 4) + 8) as usize].to_vec();
+
+    let original_packet = packet.clone();
+
+    let mut layers = Vec::new();
+    layers.push(NetLayerFlowID::Icmp(IcmpFlowId {
+        icmp_type: type_,
+        code,
+        address: AddressPair {
+            source: source_addr,
+            target: destination_addr,
+        },
+        data,
+        payload,
+    }));
+
+    let mut new_packet = NetPacketListNode::new(Vec::new(), net::NetPacketSource::OtherPacket(original_packet), RoutingStep::Outgoing, NetLayerType::Icmp);
+    new_packet.data.layers_to_construct = layers;
+    net::add_net_packet_to_queue(Box::new(new_packet));
+}
+
 fn icmp_in_hook(packet: &mut NetPacketListNode) -> HookResult {
+
+    let original_packet = packet.data.clone();
+
     println!("icmp in hook running");
-    let icmp_layer = match packet
+    let icmp_layer = match packet.data
         .get_highest_layer()
         .and_then(|layer| (layer as &dyn std::any::Any).downcast_ref::<IcmpHeader>())
     {
@@ -130,7 +203,7 @@ fn icmp_in_hook(packet: &mut NetPacketListNode) -> HookResult {
         None => return HookResult::Drop,
     };
 
-    let ipv4_layer = match packet
+    let ipv4_layer = match packet.data
         .get_layer(1)
         .and_then(|layer| (layer as &dyn std::any::Any).downcast_ref::<net::protocols::ipv4::Ipv4Header>())
     {
@@ -151,7 +224,7 @@ fn icmp_in_hook(packet: &mut NetPacketListNode) -> HookResult {
                 payload: icmp_layer.payload.clone(),
             }));
 
-            let mut new_packet = NetPacketListNode::new(Vec::new(), net::NetPacketSource::Other, RoutingStep::Outgoing, NetLayerType::Icmp);
+            let mut new_packet = NetPacketListNode::new(Vec::new(), net::NetPacketSource::OtherPacket(original_packet), RoutingStep::Outgoing, NetLayerType::Icmp);
             new_packet.data.layers_to_construct = layers;
 
             net::add_net_packet_to_queue(Box::new(new_packet));

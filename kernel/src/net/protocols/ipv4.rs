@@ -1,13 +1,7 @@
 use std::{cow::Acow, println, vec::Vec, w_lock_w_info};
 
 use crate::net::{
-    self, NetLayerType, NetPacketListNode, NicType, ProtocolAddr,
-    address_pair::AddressPair,
-    flow::{LayerDownType, OutgoingFlowDirection},
-    hook::HookResult,
-    packet::NetPacket,
-    protocols::{NetAddress, NetLayer, NetLayerFlowID, arp::HardwareAddr},
-    routing_tables,
+    self, NetLayerType, NetPacketListNode, NetPacketSource, NicType, ProtocolAddr, address_pair::AddressPair, flow::{LayerDownType, OutgoingFlowDirection}, hook::HookResult, packet::NetPacket, protocols::{NetAddress, NetLayer, NetLayerFlowID, arp::HardwareAddr, icmp::{self, IcmpFlowId}}, routing_tables
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,7 +14,7 @@ pub(in crate::net) struct Ipv4FragmentInfo {
 #[derive(Debug, Clone)]
 pub(in crate::net) struct Ipv4Header {
     offset: u32,
-    ihl: u8,
+    pub ihl: u8,
     diff_services: u8,
     total_length: u16,
     fragment_info: Ipv4FragmentInfo,
@@ -28,7 +22,7 @@ pub(in crate::net) struct Ipv4Header {
     protocol: u8,
     header_checksum: u16,
     pub address: AddressPair<Ipv4Address>,
-    in_interface_networks: Vec<Ipv4Network>,
+    pub in_interface_networks: Vec<Ipv4Network>,
     checksum_checked: bool,
 }
 
@@ -52,6 +46,12 @@ pub(in crate::net) struct Ipv4FlowId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(in crate::net) struct Ipv4Address(pub [u8; 4]);
+
+impl Ipv4Address {
+    pub fn is_multicast(&self) -> bool {
+        (self.0[0] & 0xF0) == 0xE0
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::net) struct Ipv4Network {
@@ -81,6 +81,13 @@ impl Ipv4Network {
         (ip_u32 & mask_u32) == (network_u32 & mask_u32)
     }
 
+    pub fn broadcast_for(&self, ip: &Ipv4Address) -> bool {
+        let ip_u32 = u32::from_be_bytes(ip.0);
+        let network_u32 = u32::from_be_bytes(self.address.0);
+        let mask_u32 = u32::from_be_bytes(self.mask.0);
+        ip_u32 == (network_u32 | !mask_u32)
+    }
+
     pub fn prefix_len(&self) -> u32 {
         let mask_u32 = u32::from_be_bytes(self.mask.0);
         mask_u32.count_ones()
@@ -92,7 +99,7 @@ pub(super) fn init() {
 }
 
 fn ipv4_bridge_hook(packet: &mut NetPacketListNode) -> HookResult {
-    let Some(ipv4_layer) = packet
+    let Some(ipv4_layer) = packet.data
         .get_highest_layer()
         .and_then(|layer| (layer as &dyn std::any::Any).downcast_ref::<Ipv4Header>())
     else {
@@ -100,7 +107,9 @@ fn ipv4_bridge_hook(packet: &mut NetPacketListNode) -> HookResult {
     };
 
     if ipv4_layer.ttl == 1 {
-        //send ICMP Time Exceeded here
+        //ICMP TTL
+        icmp::send_icmp_error(&mut packet.data, 11, 0, 0);
+
         return HookResult::Drop; //drop packets that would expire after bridging
     }
 
@@ -261,9 +270,11 @@ fn write_data_to_packet(packet: &mut [u8], data: Ipv4FlowId, offset: usize, uppe
     packet[offset + 6..offset + 8].copy_from_slice(&(((flags.0 as u16) << 13) | (fragment_offset as u16)).to_be_bytes());
     packet[offset + 8] = ttl;
     packet[offset + 9] = protocol;
+    packet[offset + 10..offset + 12].copy_from_slice(&0u16.to_be_bytes()); //checksum placeholder
     packet[offset + 12..offset + 16].copy_from_slice(&source.0);
     packet[offset + 16..offset + 20].copy_from_slice(&target.0);
 
+    println!("computing ipv4 checksum");
     let checksum = net::compute_internet_checksum(&packet[offset..offset + 20]);
     packet[offset + 10..offset + 12].copy_from_slice(&checksum.to_be_bytes());
 }
@@ -281,6 +292,16 @@ pub(super) fn construct_layer(packet: &mut Acow<NetPacket>) -> OutgoingFlowDirec
         println!("target is: {:?}", &data.address.target);
         let Some(route) = routing_tables::get_ipv4_route(&data.address.target) else {
             println!("no ipv4 route found");
+
+            let NetPacketSource::OtherPacket(ref mut orig_packet) = packet.source else {
+                println!("can't send ICMP error as a reply if source is not OtherPacket");
+                return OutgoingFlowDirection::Drop;
+            };
+
+            let type_ = 3; //Destination Unreachable
+            let code = 0; //Net Unreachable
+
+            icmp::send_icmp_error(orig_packet, type_, code, 0);
             return OutgoingFlowDirection::Drop; //no route to destination
         };
 
@@ -342,5 +363,6 @@ pub(super) fn construct_layer(packet: &mut Acow<NetPacket>) -> OutgoingFlowDirec
     let packet_len = packet.len();
     let chunk_to_edit = packet.insert_chunk_front(20);
     write_data_to_packet(chunk_to_edit.data_mut(), data, 0, packet_len as usize);
+
     out_flow_direction
 }
