@@ -1,14 +1,19 @@
 use std::{boxed::Box, mem_utils::PhysAddr, sync::arc::Arc, vec::Vec};
 
-use crate::{proc::{syscall::SyscallArgs, ProcessData}, task_runner};
+use crate::{proc::{ProcessData, syscall::{self, SyscallArgs}}, task_runner};
 
 
 pub fn fwrite(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
     let fd = args.arg1;
-    let buffer_ptr = args.arg2 as *const u8;
-    let size = args.arg3;
+    let size = args.arg2;
+    let buffer_ptr = args.arg3 as *const u8;
     let proc = proc.clone();
     let pid = proc.pid();
+    
+    if !syscall::verify_memory(buffer_ptr as u64, buffer_ptr as u64 + size) {
+        args.syscall_number = u64::MAX;
+        return false;
+    }
 
     if size == 0 {
         args.arg1 = 0;

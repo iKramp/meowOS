@@ -1,14 +1,19 @@
-use std::{boxed::Box, cow::Acow, println, vec::Vec, w_lock_w_info};
+use std::{cow::Acow, println, vec::Vec, w_lock_w_info};
 
-use crate::net::{self, NetLayerType, PacketInRouting, RoutingStep, address_pair::AddressPair, flow::{IncomingFlowDirection, LayerDownType, OutgoingFlowDirection}, hook::{HookResult, NET_HOOK_STORAGE}, packet::NetPacket, protocols::{NetLayer, NetLayerFlowID, ipv4::{Ipv4Address, Ipv4Flags, Ipv4FlowId, Ipv4FragmentInfo, Ipv4Header}}, routing_tables};
+use crate::net::{
+    self, NetLayerType, PacketInRouting, RoutingStep,
+    address_pair::AddressPair,
+    flow::{IncomingFlowDirection, LayerDownType, OutgoingFlowDirection},
+    hook::{HookResult, NET_HOOK_STORAGE},
+    packet::{NetPacket, NetPacketSource},
+    protocols::{
+        NetLayer, NetLayerFlowID,
+        ipv4::{Ipv4Address, Ipv4Flags, Ipv4FlowId, Ipv4FragmentInfo, Ipv4Header},
+    },
+    routing_tables,
+};
 
-const ICMP_ERROR_CODES: &[u8] = &[
-    3,
-    4,
-    5,
-    11,
-    12,
-];
+const ICMP_ERROR_CODES: &[u8] = &[3, 4, 5, 11, 12];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::net) struct IcmpFlowId {
@@ -18,7 +23,6 @@ pub(in crate::net) struct IcmpFlowId {
     pub data: u32,
     pub payload: Vec<u8>,
 }
-
 
 #[derive(Debug, Clone)]
 pub(in crate::net) struct IcmpHeader {
@@ -70,12 +74,7 @@ pub(in crate::net) fn parse_icmp(packet: &mut Acow<NetPacket>, offset: usize) ->
     let icmp_type = data[offset];
     let code = data[offset + 1];
     let checksum = u16::from_be_bytes([data[offset + 2], data[offset + 3]]);
-    let _data = u32::from_be_bytes([
-        data[offset + 4],
-        data[offset + 5],
-        data[offset + 6],
-        data[offset + 7],
-    ]);
+    let _data = u32::from_be_bytes([data[offset + 4], data[offset + 5], data[offset + 6], data[offset + 7]]);
 
     let payload = data[offset + 8..offset + len].to_vec();
 
@@ -120,15 +119,19 @@ pub(in crate::net) fn construct_layer(packet: &mut Acow<NetPacket>) -> OutgoingF
             identification: 0,
             flags: Ipv4Flags(0),
             fragment_offset: 0,
-        }
+        },
     }));
 
     OutgoingFlowDirection::LayerDown(LayerDownType::Normal(NetLayerType::Ipv4))
-    
 }
 
 pub(in crate::net) fn send_icmp_error(packet: &mut Acow<NetPacket>, type_: u8, code: u8, data: u32) {
-    let Some(ipv4_layer) = packet.parsed_layers.iter().rev().find_map(|layer| (layer as &dyn std::any::Any).downcast_ref::<Ipv4Header>()) else {
+    let Some(ipv4_layer) = packet
+        .parsed_layers
+        .iter()
+        .rev()
+        .find_map(|layer| (layer as &dyn std::any::Any).downcast_ref::<Ipv4Header>())
+    else {
         println!("can't send ICMP error as a reply if original packet doesn't have IPv4 layer");
         return;
     };
@@ -138,7 +141,10 @@ pub(in crate::net) fn send_icmp_error(packet: &mut Acow<NetPacket>, type_: u8, c
 
     let destination_addr = ipv4_layer.address.source;
 
-    let is_broadcast = ipv4_layer.in_interface_networks.iter().any(|net| net.broadcast_for(&destination_addr));
+    let is_broadcast = ipv4_layer
+        .in_interface_networks
+        .iter()
+        .any(|net| net.broadcast_for(&destination_addr));
     let is_multicast = destination_addr.is_multicast();
     let mut is_icmp_error = false;
     if ipv4_layer.upper_layer_type() == NetLayerType::Icmp {
@@ -158,15 +164,15 @@ pub(in crate::net) fn send_icmp_error(packet: &mut Acow<NetPacket>, type_: u8, c
 
     let source_addr = route.local_interface_ip;
 
-
     packet.ensure_length(ipv4_header_off + (ihl as u32 * 4) + 8);
-    
+
     if packet.get_chunks()[0].len() < (ipv4_header_off + (ihl as u32 * 4) + 8) {
         println!(level:error, "send_icmp_error called but packet is too short to contain required data, dropping");
         return;
     }
 
-    let payload = packet.get_chunks()[0].data()[ipv4_header_off as usize..(ipv4_header_off + (ihl as u32 * 4) + 8) as usize].to_vec();
+    let payload =
+        packet.get_chunks()[0].data()[ipv4_header_off as usize..(ipv4_header_off + (ihl as u32 * 4) + 8) as usize].to_vec();
 
     let original_packet = packet.clone();
 
@@ -182,13 +188,17 @@ pub(in crate::net) fn send_icmp_error(packet: &mut Acow<NetPacket>, type_: u8, c
         payload,
     }));
 
-    let mut new_packet = PacketInRouting::new(Vec::new(), net::NetPacketSource::OtherPacket(original_packet), RoutingStep::Outgoing, NetLayerType::Icmp);
+    let mut new_packet = PacketInRouting::new(
+        Vec::new(),
+        NetPacketSource::OtherPacket(original_packet),
+        RoutingStep::Outgoing,
+        NetLayerType::Icmp,
+    );
     new_packet.data.layers_to_construct = layers;
     net::add_net_packet_to_queue(new_packet);
 }
 
 fn icmp_in_hook(packet: &mut Acow<NetPacket>) -> HookResult {
-
     let original_packet = packet.clone();
 
     println!("icmp in hook running");
@@ -221,7 +231,12 @@ fn icmp_in_hook(packet: &mut Acow<NetPacket>) -> HookResult {
                 payload: icmp_layer.payload.clone(),
             }));
 
-            let mut new_packet = PacketInRouting::new(Vec::new(), net::NetPacketSource::OtherPacket(original_packet), RoutingStep::Outgoing, NetLayerType::Icmp);
+            let mut new_packet = PacketInRouting::new(
+                Vec::new(),
+                NetPacketSource::OtherPacket(original_packet),
+                RoutingStep::Outgoing,
+                NetLayerType::Icmp,
+            );
             new_packet.data.layers_to_construct = layers;
 
             net::add_net_packet_to_queue(new_packet);

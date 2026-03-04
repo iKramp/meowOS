@@ -25,15 +25,30 @@ pub struct ProcessData {
     pid: Pid,
     is_32_bit: bool,
     cmdline: Box<str>,
+    page_tree_root: PageTree,
     internal: NoIntSpinlock<ProcessDataMutable>,
-    memory_context: Arc<MemoryContext>,
+}
+
+impl ProcessData {
+    pub fn cleanup(&self) {
+        let mut internal = lock_w_info!(self.internal);
+        internal.memory_context = Arc::new(MemoryContext::default());
+        internal.file_handles.clear();
+    }
+
+    pub fn set_ret_status(&self, status: u64) {
+        let internal = &mut lock_w_info!(self.internal);
+        internal.return_status = Some(status);
+    }
 }
 
 #[derive(Debug)]
 pub struct ProcessDataMutable {
     cpu_state: CpuStateType,
+    return_status: Option<u64>,
     file_handles: BTreeMap<u64, FileHandle>,
     file_handle_index: FileDescriptor,
+    memory_context: Arc<MemoryContext>,
 }
 
 #[derive(Debug)]
@@ -60,8 +75,10 @@ impl ProcessData {
             pid,
             is_32_bit,
             cmdline,
-            memory_context,
+            page_tree_root: memory_context.page_tree.clone(),
             internal: NoIntSpinlock::new(ProcessDataMutable {
+                return_status: None,
+                memory_context,
                 cpu_state,
                 file_handles: BTreeMap::new(),
                 file_handle_index: 0,
@@ -106,7 +123,7 @@ impl ProcessData {
     }
 
     pub fn page_tree(&self) -> &PageTree {
-        &self.memory_context.get().page_tree
+        &self.page_tree_root
     }
 
     pub fn take_cpu_state(&self) -> CpuStateType {

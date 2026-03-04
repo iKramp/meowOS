@@ -9,20 +9,33 @@ mod routing_tables;
 mod socket;
 
 use core::fmt::Debug;
+use core::hash::Hash;
+use core::hash::Hasher;
 use core::hash::SipHasher;
 use core::mem::MaybeUninit;
+use std::boxed::Box;
+use std::cow::Acow;
 use std::lock_w_info;
 use std::println;
+use std::sync::arc::Arc;
 use std::sync::no_int_spinlock::NoIntSpinlock;
+use std::vec::Vec;
 
 pub use flow::RoutingStep;
-pub use packet::{PacketInRouting, RawNetDataChunk};
+pub use packet::RawNetDataChunk;
 pub use protocols::MacAddress;
 pub use protocols::NetLayerType;
 pub use routing_tables::deregister_nic;
 pub use routing_tables::register_nic;
 
+use crate::net::address_pair::AddressPair;
+use crate::net::packet::NetPacket;
+use crate::net::packet::NetPacketSource;
+use crate::net::packet::PacketInRouting;
+use crate::net::protocols::NetAddress;
 use crate::net::protocols::arp::ProtocolAddr;
+use crate::net::protocols::ipv4::Ipv4Address;
+use crate::net::socket::NetSocket;
 use crate::rand::rand_u64;
 use crate::task_runner;
 use std::queue::*;
@@ -44,17 +57,29 @@ static NET_QUEUE: NoIntSpinlock<DataQueueHead<PacketInRouting>> = NoIntSpinlock:
 
 static mut NET_HASHER: MaybeUninit<SipHasher> = MaybeUninit::uninit();
 
+pub(in crate::net) fn hash_addr_slice(addrs: &[AddressPair<NetAddress>]) -> u64 {
+    let mut hasher = unsafe { NET_HASHER.assume_init_ref().clone() };
+    for addr in addrs {
+        addr.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+pub(in crate::net) fn hash_bind_addr_slice(addrs: &[AddressPair<NetAddress>]) -> u64 {
+    let mut hasher = unsafe { NET_HASHER.assume_init_ref().clone() };
+    for addr in addrs {
+        addr.source.hash(&mut hasher); //only local address is relevant for binding
+    }
+    hasher.finish()
+}
+
 pub fn requset_nic_identifier() -> NicIdentifier {
     NIC_COUNTER.fetch_add(1, core::sync::atomic::Ordering::SeqCst)
 }
 
-pub fn debug_packet(mut _packet: PacketInRouting, layer_type: NetLayerType) {
-    println!("Packet at layer {:?}:", layer_type);
-}
-
 #[allow(clippy::upper_case_acronyms)]
 pub trait NIC: Sync + Send {
-    fn send_packet(&self, packet: PacketInRouting);
+    fn send_packet(&self, packet: Vec<RawNetDataChunk>);
     fn get_identifier(&self) -> NicIdentifier;
     fn nic_type(&self) -> NicType;
 }
@@ -72,8 +97,33 @@ pub fn init() {
     }
     protocols::init();
     task_runner::add_repeating_task(process_packets);
+
+    let test_socket = NetSocket::new(Box::new([AddressPair::new(
+        NetAddress::Ipv4Address(Ipv4Address([10, 0, 0, 2])),
+        NetAddress::Ipv4Address(Ipv4Address([10, 0, 0, 1])),
+    )]));
+
+    let test_socket = Arc::new(test_socket);
+
+    unsafe {
+        TEST_SOCKET = MaybeUninit::new(test_socket.clone());
+    }
+    hook::add_socket(test_socket);
+    task_runner::add_repeating_task(test_socket_fn);
+
     unsafe {
         NET_INITIALIZED = true;
+    }
+}
+
+static mut TEST_SOCKET: MaybeUninit<Arc<NetSocket>> = MaybeUninit::uninit();
+
+fn test_socket_fn() {
+    println!("Checking test socket for packets...");
+    let socket = unsafe { TEST_SOCKET.assume_init_ref() };
+    let packet = socket.get_packet();
+    if let Some(packet) = packet {
+        println!("Got packet in test socket: {:?}", packet);
     }
 }
 
@@ -94,14 +144,29 @@ fn process_packets() {
     }
 }
 
-pub fn add_net_packet_to_queue(packet: PacketInRouting) {
+pub(in crate::net) fn add_net_packet_to_queue(packet: PacketInRouting) {
     if !unsafe { NET_INITIALIZED } {
         return;
     }
     lock_w_info!(NET_QUEUE).push(packet);
 }
 
-pub fn append_net_queue(other: DataQueueHead<PacketInRouting>) {
+pub fn append_raw_net_queue(mut other: DataQueueHead<Vec<RawNetDataChunk>>, nic_id: NicIdentifier, routing_step: RoutingStep, layer: NetLayerType) {
+    if !unsafe { NET_INITIALIZED } {
+        return;
+    }
+    let mut net_queue = lock_w_info!(NET_QUEUE);
+    while let Some(packet) = other.get_first() {
+        let packet_in_routing = PacketInRouting {
+            data: Acow::new(NetPacket::new(packet, NetPacketSource::Nic(nic_id))),
+            routing_step,
+            layer,
+        };
+        net_queue.push(packet_in_routing);
+    }
+}
+
+pub(in crate::net) fn append_net_queue(other: DataQueueHead<PacketInRouting>) {
     if !unsafe { NET_INITIALIZED } {
         return;
     }

@@ -1,5 +1,6 @@
+
 use super::{context_switch::no_ret_context_switch, process_data::StackCpuStateData, scheduler::{save_and_release_current, SleepCondition}};
-use crate::{interrupts::enable_interrupts, msr, proc::syscall};
+use crate::{acpi::cpu_locals::PageFaultHandleMode, interrupts::enable_interrupts, memory, msr, proc::syscall};
 
 mod handlers;
 
@@ -34,6 +35,15 @@ fn enable_syscall() {
     let mut efer = msr::get_msr(MSR_EFER);
     efer |= 1;
     msr::set_msr(MSR_EFER, efer);
+}
+
+///performs an exclusive range check if the pointers are valid in userspace
+fn verify_memory(mem_start: u64, mem_end: u64) -> bool {
+    if mem_start > mem_end || mem_end > 0x0000_8000_0000_0000 {
+        return false;
+    }
+
+    memory::probe_pointer_range(mem_start, mem_end)
 }
 
 //sys V abi:
@@ -109,6 +119,7 @@ extern "C" fn handler(args_rsp: u64) -> ! {
 
     let mut locals = crate::acpi::cpu_locals::CpuLocals::get_mut();
     unsafe { core::ptr::addr_of_mut!(locals.int_depth).write_volatile(1) };
+    locals.page_fault_handle_mode = PageFaultHandleMode::KernelPanic;
     let curr_proc = locals.current_process.as_mut().expect("syscalled while no current process in locals").clone();
     drop(locals);
     enable_interrupts();

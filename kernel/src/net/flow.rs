@@ -1,7 +1,7 @@
 use std::{cow::Acow, println, sync::arc::Arc, vec::Vec};
 
 use crate::net::{
-    NIC, PacketInRouting, NetPacketSource, hook::{HookFilter, HookStage, call_hooks}, packet::NetPacket, protocols::{self, NetLayerType}
+    NIC, PacketInRouting, hook::{HookFilter, HookStage, call_hooks}, packet::{NetPacket, NetPacketSource}, protocols::{self, NetLayerType}
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -88,7 +88,7 @@ pub fn process_packet_flow(packet: PacketInRouting) {
 
                         process_queue.push((0, packet))
                     }
-                    OutgoingFlowDirection::LayerDown(LayerDownType::Nic(nic)) => nic.send_packet(packet),
+                    OutgoingFlowDirection::LayerDown(LayerDownType::Nic(nic)) => nic.send_packet(packet.into_raw_data()),
                     OutgoingFlowDirection::Drop => {}
                 }
             }

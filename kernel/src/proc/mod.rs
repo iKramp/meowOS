@@ -42,10 +42,22 @@ pub struct Pid(pub u32);
 /// stack size pages should not be larger than [`context::info::MAX_PROC_STACK_SIZE_PAGES`]
 #[derive(Debug)]
 pub(super) struct MemoryContext {
+    initialized: bool,
     is_32_bit: bool,
     page_tree: PageTree,
-    memory_regions: Vec<MappedMemoryRegion>,
+    owned_memory_regions: Vec<MappedMemoryRegion>,
     //shared regions here?
+}
+
+impl Default for MemoryContext {
+    fn default() -> Self {
+        Self {
+            initialized: false,
+            is_32_bit: false,
+            page_tree: PageTree::new(PhysAddr(0)),
+            owned_memory_regions: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -113,8 +125,12 @@ pub fn get_proc(pid: Pid) -> Option<Arc<ProcessData>> {
 //otherwise clear resources
 //Also return if it was in stopping state. Reason: stopping means it's either running and has been
 //scheduled for stopping (case above), or its resources are actively being freed
-pub fn kill_process(pid: Pid) {
-    unsafe { lock_w_info!(SCHEDULER).assume_init_mut().remove_process(pid) };
+pub fn kill_process(pid: Pid, status: u64) {
+    let Some(process) = (unsafe { lock_w_info!(SCHEDULER).assume_init_mut().remove_process(pid) }) else {
+        return;
+    };
+    process.set_ret_status(status);
+    process.cleanup();
 }
 
 pub fn wake_process(pid: Pid) {

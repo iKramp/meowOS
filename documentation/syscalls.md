@@ -43,6 +43,27 @@ Errno value is 0 on success, otherwise it is the error code. Return value may st
 
 This table will be expanded
 
+## STRINGS AND BUFFERS
+The kernel uses rust style strings and buffers. They are represented as:
+String -> struct where the first field is size (u64) and the second is a pointer to utf8 valid data
+String size does NOT include the null terminator, and is measured in bytes (not utf8 codepoints)
+```C
+struct String {
+    uint64_t str_size;
+    char *data_ptr;
+};
+```
+Buffer -> struct where the first field is size (u64) in count of elements and the second is a pointer to bytes of data
+```C
+//pretend rust style generics exist
+struct Buffer<T> {
+    uint64_t buf_size;
+    T *data_ptr;
+};
+```
+For clarity, whenever these values are passed via registers in syscall args (see exec path, arg list and env list) they
+will be split
+
 ## DETAILED SYSCALL DOCUMENTATION
 
 ### Syscall 1: exit
@@ -53,11 +74,12 @@ This table will be expanded
 
 ### Syscall 2: exec
 #### Args:
-1. const char* path - path to the executable
+1. uint64 path_len - length of the path in bytes
+1. char*  path - path to the executable
 1. uint64 argc - argument count
-1. char** argv - argument list
+1. String *argv - argument list
 1. uint64 envc - environment variable count
-1. char** envp - environment variables
+1. String *envp - environment variables
 #### Return Value:
  - On success, returns the PID of the new process.
  - On failure, returns -1 and sets errno.
@@ -80,7 +102,8 @@ Clones the current process. The new "environment" is identical to the old one, b
 
 ### Syscall 4: fopen
 #### Args:
-1. const char* path - path to the file, absolute or relative to current working directory
+1. uint64 path_len - length of the path in bytes
+1. char* path - path to the file, absolute or relative to current working directory
 1. int64 fd - if set and path is relative, it will be relative to fd, not cwd
 1. uint64 flags - open mode flags
 1. uint64 create_mode - file creation mode
@@ -125,8 +148,8 @@ Closes the given file descriptor, releasing any associated resources and flushin
 ### Syscall 6: fread
 #### Args:
 1. int64 fd - file descriptor to read from
-1. void* buf - buffer to read data into
 1. uint64 count - number of bytes to read
+1. void* buf - buffer to read data into
 #### Return Value:
  - On success, returns the number of bytes read. Errno may still be set to indicate additional information, like EOF (in which case the read succeeded, but reached the end.
  - On failure, returns -1 and sets errno
@@ -136,8 +159,8 @@ Reads up to count bytes from the file descriptor fd into the buffer buf. The act
 ### Syscall 7: fwrite
 #### Args:
 1. int64 fd - file descriptor to write to
-1. const void* buf - buffer containing data to write
 1. uint64 count - number of bytes to write
+1. void* buf - buffer containing data to write
 #### Return Value:
  - On success, returns the number of bytes written. Errno may still be set to indicate additional information.
  - On failure, returns -1 and sets errno

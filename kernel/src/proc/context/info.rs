@@ -196,6 +196,9 @@ pub enum ContextInfoError {
 
 impl Drop for MemoryContext {
     fn drop(&mut self) {
+        if !self.initialized {
+            return; //dummy context
+        }
         //unmap higher half and any shared regions
         todo!("All processes running with this context have been dropped. Clean up")
     }

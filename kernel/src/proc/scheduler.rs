@@ -1,7 +1,7 @@
 use crate::{acpi::cpu_locals::CpuLocals, interrupts::InterruptProcessorState, proc::Pid};
 use std::{
     collections::{btree_map::BTreeMap, btree_set::BTreeSet},
-    lock_w_info,
+    lock_w_info, println,
     sync::arc::Arc,
     vec::Vec,
 };
@@ -25,7 +25,8 @@ pub struct Scheduler {
     ///tasks currently running on the CPU, along with cpu number
     active_tasks: Vec<(Pid, u32)>,
     ready_to_run: Vec<Pid>,
-    purge_queue: BTreeSet<Pid>,
+    cleanup_set: BTreeSet<Pid>,
+    purge_set: BTreeSet<Pid>,
 }
 
 impl Scheduler {
@@ -35,7 +36,8 @@ impl Scheduler {
             sleeping_tasks: Vec::new(),
             active_tasks: Vec::new(),
             ready_to_run: Vec::new(),
-            purge_queue: BTreeSet::new(),
+            cleanup_set: BTreeSet::new(),
+            purge_set: BTreeSet::new(),
         }
     }
 }
@@ -72,7 +74,7 @@ impl Scheduler {
         }
     }
 
-    pub fn remove_process(&mut self, pid: Pid) {
+    pub fn remove_process(&mut self, pid: Pid) -> Option<Arc<ProcessData>> {
         let sleeping_pos = self.sleeping_tasks.iter().position(|(p, _)| *p == pid);
         if let Some(pos) = sleeping_pos {
             self.sleeping_tasks.swap_remove(pos);
@@ -81,7 +83,20 @@ impl Scheduler {
         if let Some(pos) = ready_pos {
             self.ready_to_run.swap_remove(pos);
         }
-        self.purge_queue.insert(pid);
+
+        if sleeping_pos.is_some() || ready_pos.is_some() {
+            let removing_task = self.tasks.get(&pid).cloned();
+            if removing_task.is_some() {
+                self.purge_set.insert(pid);
+            }
+            removing_task
+        } else {
+            let removing_task = self.tasks.get(&pid).cloned();
+            if removing_task.is_some() {
+                self.cleanup_set.insert(pid);
+            }
+            removing_task
+        }
     }
 
     ///Called after all the data has been saved
@@ -92,11 +107,11 @@ impl Scheduler {
         } else {
             //something went seriously wrong. Just in case purge the process. Might crash the pc
             //idk, but this should be unreachable anyway
-            self.purge_queue.insert(pid);
+            self.cleanup_set.insert(pid);
         }
 
-        if self.purge_queue.remove(&pid) {
-            todo!("implement removing a process");
+        if self.cleanup_set.remove(&pid) {
+            self.purge_set.insert(pid);
         } else {
             if let Some(cond) = sleep {
                 self.sleeping_tasks.push((pid, cond));

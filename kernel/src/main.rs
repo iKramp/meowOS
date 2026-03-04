@@ -15,7 +15,9 @@
 #![feature(unsafe_cell_access)]
 #![feature(let_chains)]
 #![feature(downcast_unchecked)]
+#![feature(map_try_insert)]
 #![allow(internal_features)]
+#![allow(clippy::fn_to_numeric_cast)]
 
 extern crate static_cond;
 
@@ -79,6 +81,14 @@ extern "C" fn _start() -> ! {
 
     let cmd_args = cmd_args::CmdArgs::new(str.to_str().expect("Invalid UTF-8 in cmdline"));
     println!(level:info, "cmd_args: {:?}", cmd_args);
+
+    
+    let test_ptr = acpi::read_tables as u64;
+    let probe_res = memory::probe_ptr_u64(test_ptr);
+    println!(level:info, "probe read_tables pointer: {:#x} - result: {:?}", test_ptr, probe_res);
+    
+
+
 
     acpi::read_tables();
 

@@ -70,6 +70,12 @@ impl std::ops::Deref for CpuLocalBindingMut {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageFaultHandleMode {
+    KernelPanic,
+    User,
+}
+
 #[repr(C)]
 pub struct CpuLocals {
     //keep this here
@@ -89,6 +95,7 @@ pub struct CpuLocals {
     pub atomic_context: bool,
     pub async_task_data: AsyncTaskData,
     pub lock_info: LockInfo,
+    pub page_fault_handle_mode: PageFaultHandleMode,
     get_state: CpuLocalGetState,
 }
 
@@ -162,6 +169,7 @@ impl CpuLocals {
             userspace_stack_base: 0,
             self_addr: VirtAddr(0), //will be set later
             lock_info: LockInfo::new(),
+            page_fault_handle_mode: PageFaultHandleMode::KernelPanic,
             get_state: CpuLocalGetState {
                 mut_borrow: AtomicBool::new(false),
                 immut_borrow: AtomicU16::new(0),

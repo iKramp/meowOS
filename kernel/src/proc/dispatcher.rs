@@ -1,4 +1,4 @@
-use crate::{interrupts::{disable_interrupts, InterruptProcessorState}, memory::paging};
+use crate::{acpi::cpu_locals::PageFaultHandleMode, interrupts::{InterruptProcessorState, disable_interrupts}, memory::paging};
 
 use super::{process_data::CpuStateType, syscall::SyscallCpuState, ProcessData};
 
@@ -36,6 +36,7 @@ pub(super) fn dispatch(new_proc: &ProcessData) -> ! {
 
     locals.int_depth -= 1;
     locals.lock_info.assert_no_locks();
+    locals.page_fault_handle_mode = PageFaultHandleMode::User;
     drop(locals);
 
     core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);

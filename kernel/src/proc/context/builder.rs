@@ -28,7 +28,7 @@ pub fn create_process(context_info: &ContextInfo) -> Result<Pid, ErrorCode> {
     let rip = context_info.entry_point().0;
     let memory_context = build_mem_context_for_new_proc(context_info)?;
     let stack = memory_context
-        .memory_regions
+        .owned_memory_regions
         .iter()
         .find(|region| (*region.name).eq("[stack]"))
         .expect("stack must exist for each proc");
@@ -88,9 +88,10 @@ pub fn build_generic_memory_context(context: &ContextInfo) -> MemoryContext {
     }
 
     MemoryContext {
+        initialized: true,
         is_32_bit: context.is_32_bit(),
         page_tree: memory_tree,
-        memory_regions: context.mem_regions().iter().map(|region| MappedMemoryRegion {
+        owned_memory_regions: context.mem_regions().iter().map(|region| MappedMemoryRegion {
             name: context.path().to_string().into_boxed_str(),
             base: VirtAddr(region.start().0),
             size_pages: region.size_pages() as u64,
@@ -175,7 +176,7 @@ pub fn add_stack(context: &mut MemoryContext, stack_size_pages: u8) -> Result<()
         base: VirtAddr(((top_page - stack_size_pages as u64) << 12) + 0x1000),
         size_pages: stack_size_pages as u64,
     };
-    context.memory_regions.push(stack);
+    context.owned_memory_regions.push(stack);
 
     Ok(())
 }

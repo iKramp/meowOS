@@ -14,7 +14,7 @@ fn main() {
             &(out_dir.clone() + "/trampoline.o"),
         ])
         .status()
-        .expect("Failed to run nasm on trampoline.s")
+        .expect("Failed to run nasm on trampoline.asm")
         .success()
         && Command::new("ar")
             .arg("rcs")
@@ -24,7 +24,29 @@ fn main() {
             .expect("Failed to run ar on trampoline.o")
             .success())
     {
-        panic!("Failed to assemble trampoline.s");
+        panic!("Failed to assemble trampoline.asm");
+    }
+
+    if !(Command::new("nasm")
+        .args([
+            "-f",
+            "elf64",
+            "src/memory/probe.asm",
+            "-o",
+            &(out_dir.clone() + "/probe.o"),
+        ])
+        .status()
+        .expect("Failed to run nasm on probe.asm")
+        .success()
+        && Command::new("ar")
+            .arg("rcs")
+            .arg(&(out_dir.clone() + "/libprobe.a"))
+            .arg(&(out_dir.clone() + "/probe.o"))
+            .status()
+            .expect("Failed to run ar on probe.o")
+            .success())
+    {
+        panic!("Failed to assemble probe.asm");
     }
 
     // Set the flag to generate the linker map file
@@ -36,4 +58,5 @@ fn main() {
     println!("cargo:rerun-if-changed=kernel/linker_script.ld");
     println!("cargo:rustc-link-search={}", out_dir);
     println!("cargo:rustc-link-lib=static=trampoline");
+    println!("cargo:rustc-link-lib=static=probe");
 }

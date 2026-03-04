@@ -1,9 +1,10 @@
 use std::{
     collections::btree_map::BTreeMap,
     cow::Acow,
-    r_lock_w_info,
+    println, r_lock_w_info,
     sync::{arc::Arc, rw_lock::RWSpinlock},
     vec::Vec,
+    w_lock_w_info,
 };
 
 use crate::net::{NetLayerType, packet::NetPacket, socket::NetSocket};
@@ -15,7 +16,29 @@ static NET_SOCKETS: RWSpinlock<SocketStorage> = RWSpinlock::new(SocketStorage {
 });
 
 struct SocketStorage {
-    sockets: BTreeMap<u64, Arc<NetSocket>>,
+    sockets: BTreeMap<u64, Vec<Arc<NetSocket>>>,
+}
+
+pub fn add_socket(socket: Arc<NetSocket>) {
+    let mut sockets = w_lock_w_info!(NET_SOCKETS);
+    let sock_hash = socket.get_addr_hash();
+    let _ = sockets.sockets.try_insert(sock_hash, Vec::new());
+    let entry = sockets.sockets.get_mut(&sock_hash).expect("just tried adding smh");
+    entry.push(socket);
+    println!(
+        "adding socket with hash {} to storage, currently has {} sockets",
+        sock_hash,
+        entry.len()
+    );
+}
+
+pub fn remove_socket(socket: &NetSocket) {
+    let mut sockets = w_lock_w_info!(NET_SOCKETS);
+    let Some(sock_vec) = sockets.sockets.get_mut(&socket.get_addr_hash()) else {
+        return;
+    };
+
+    sock_vec.retain(|vec_sock| vec_sock.id() != socket.id());
 }
 
 pub(in crate::net) static NET_HOOK_STORAGE: RWSpinlock<HookStorage> = RWSpinlock::new(HookStorage::new());
@@ -108,6 +131,45 @@ pub(in crate::net) fn call_hooks(packet: &mut Acow<NetPacket>, stage: HookStage)
         HookResult::Drop => return HookFilter::Drop,
     };
 
-    if let HookStage::Inbound(layer) = stage {}
+    'block: {
+        if let HookStage::Inbound(_layer) = stage {
+            println!("packet passed inbound hooks, checking sockets");
+            let sockets = r_lock_w_info!(NET_SOCKETS);
+            let addresses = packet.get_addresses();
+            let addrs_cnt = addresses.len();
+            if addrs_cnt == 0 {
+                break 'block;
+            }
+            println!("packet has {} addresses, checking combinations", addrs_cnt);
+            let top_layer_addr = &addresses[addrs_cnt - 1];
+            for i in 0..(1 << (addrs_cnt - 1)) {
+                let mut addrs_vec = Vec::new();
+                for (j, addr) in addresses.iter().enumerate() {
+                    if i & (1 << j) != 0 {
+                        addrs_vec.push(addr.reverse());
+                    }
+                }
+                addrs_vec.push(top_layer_addr.reverse());
+                println!("checking socket for address combination: {:?}", addrs_vec);
+                let hash = crate::net::hash_addr_slice(&addrs_vec);
+                println!("hash for combination: {}", hash);
+                let relevant_sockets = sockets.sockets.get(&hash);
+                println!(
+                    "found {} relevant sockets for this combination",
+                    relevant_sockets.map(|vec| vec.len()).unwrap_or(0)
+                );
+                if let Some(sockets) = relevant_sockets {
+                    for socket in sockets.iter() {
+                        println!("socket has addresses {:?}", socket.addresses());
+                        let are_same = socket.addresses() == addrs_vec;
+                        println!("{}", are_same);
+                        if are_same {
+                            socket.push_packet(packet.clone().into_processed());
+                        }
+                    }
+                }
+            }
+        }
+    }
     hook_result
 }

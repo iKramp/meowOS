@@ -636,7 +636,7 @@ fn dealloc_huge_page(entry: &PageTableEntry, level: u64) {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PageTree {
     level_4_table: PhysAddr,
 }

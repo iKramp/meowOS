@@ -4,12 +4,30 @@ pub mod physical_allocator;
 pub mod stack;
 
 use crate::LIMINE_BOOTLOADER_REQUESTS;
+use crate::interrupts::{disable_interrupts, enable_interrupts};
 use crate::{println, printlnc};
 use std::mem_utils::{self, PhysAddr};
 
 pub static mut PAGE_TREE_ALLOCATOR: paging::PageTree = paging::PageTree::new(PhysAddr(0));
 
 pub static mut TRAMPOLINE_RESERVED: PhysAddr = PhysAddr(0);
+
+#[repr(C)]
+pub struct ProbeResult {
+    value: u64,
+    valid: bool,
+}
+
+#[link(name = "probe", kind = "static")]
+unsafe extern "C" {
+    pub static probe_functions_start: u8;
+    fn probe_check_u64(ptr: u64) -> ProbeResult;
+    fn probe_check_u32(ptr: u64) -> ProbeResult;
+    fn probe_check_u16(ptr: u64) -> ProbeResult;
+    fn probe_check_u8 (ptr: u64) -> ProbeResult;
+    pub fn probe_fail() -> ProbeResult;
+    pub static probe_functions_end: u8;
+}
 
 pub fn init_memory() {
     println!(level:info, "initializing memory");
@@ -62,9 +80,69 @@ pub fn print_limine_phys_map() {
 pub fn get_hhdm_map_len() -> u64 {
     let mmap = unsafe { &(*LIMINE_BOOTLOADER_REQUESTS.memory_map_request.info) };
     let entries = unsafe { core::slice::from_raw_parts(mmap.memory_map, mmap.memory_map_count as usize) };
-    entries.iter().filter(|entry| {
-        entry.entry_type != 1 && entry.entry_type != 4
-    }).fold(0u64, |acc, entry| {
-        acc.max(entry.base + entry.length)
-    })
+    entries
+        .iter()
+        .filter(|entry| entry.entry_type != 1 && entry.entry_type != 4)
+        .fold(0u64, |acc, entry| acc.max(entry.base + entry.length))
+}
+
+///Performs an exclusive range check for pointers to make sure they're mapped
+pub fn probe_pointer_range(ptr_start: u64, mut ptr_end: u64) -> bool {
+    ptr_end -= 1; //to make inclusive
+    let mut valid = true;
+    let first_page = ptr_start & (!0xfff);
+    let last_page = ptr_end & (!0xfff);
+    let prev_int_state = disable_interrupts();
+
+    for page_addr in first_page..=last_page {
+        if !unsafe { probe_check_u64(page_addr) }.valid {
+            valid = false;
+            break;
+        }
+    }
+
+    if prev_int_state {
+        enable_interrupts();
+    }
+
+    if !valid {
+        println!(level:warn, "pointer range {:#x?} - {:#x?} is invalid", ptr_start, ptr_end);
+    }
+    valid
+}
+
+pub fn probe_ptr_u64(ptr: u64) -> Option<u64> {
+    let res = unsafe { probe_check_u64(ptr) };
+    if res.valid {
+        Some(res.value)
+    } else {
+        None
+    }
+}
+
+pub fn probe_ptr_u32(ptr: u64) -> Option<u32> {
+    let res = unsafe { probe_check_u32(ptr) };
+    if res.valid {
+        Some(res.value as u32)
+    } else {
+        None
+    }
+}
+
+pub fn probe_ptr_u16(ptr: u64) -> Option<u16> {
+    let res = unsafe { probe_check_u16(ptr) };
+    if res.valid {
+        Some(res.value as u16)
+    } else {
+        None
+    }
+}
+
+pub fn probe_ptr_u8(ptr: u64) -> Option<u8> {
+    let res = unsafe { probe_check_u8(ptr) };
+    if res.valid {
+        Some(res.value as u8)
+    } else {
+        None
+    }
 }

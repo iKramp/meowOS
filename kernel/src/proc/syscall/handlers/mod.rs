@@ -4,6 +4,7 @@ mod fread;
 mod fwrite;
 mod fclose;
 mod illegal;
+mod exit;
 
 pub use time::time;
 pub use fopen::fopen;

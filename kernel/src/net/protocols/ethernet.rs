@@ -182,6 +182,8 @@ pub(super) fn parse_ethernet_frame(packet: &mut Acow<NetPacket>) -> Option<Ether
         routing_tables::register_foreign_mac_address(source, nic);
     }
 
+    packet.append_address(AddressPair::new(NetAddress::Mac(source), NetAddress::Mac(destination)));
+
     Some(EthernetHeader {
         offset: 0,
         crc_offset: packet_len - 4,

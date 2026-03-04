@@ -1,20 +1,33 @@
-use std::{boxed::Box, string::ToString, sync::arc::Arc, vec::Vec};
+use core::{slice, str};
+use std::{boxed::Box, sync::arc::Arc, vec::Vec};
 
-use crate::{proc::{self, syscall::SyscallArgs, ProcessData}, task_runner, vfs::{self, file::FileFlags, InodeIdentifierChain}};
-
+use crate::{
+    proc::{
+        self, ProcessData,
+        syscall::{self, SyscallArgs},
+    },
+    task_runner,
+    vfs::{self, InodeIdentifierChain, file::FileFlags},
+};
 
 pub fn fopen(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
     let pid = proc.pid();
-    let c_path = unsafe { core::ffi::c_str::CStr::from_ptr(args.arg1 as *const i8) };
-    let Ok(path) = c_path.to_str() else {
+    let path_len = args.arg1;
+    let path_ptr = args.arg2;
+    let fd = args.arg3;
+    let ftags = args.arg4;
+    let _create_mode = args.arg5;
+
+    let res = syscall::verify_memory(path_ptr, path_ptr + path_len);
+    if !res {
+        args.syscall_number = u64::MAX;
+        return false;
+    }
+
+    let Ok(path) = (unsafe { str::from_utf8(slice::from_raw_parts(path_ptr as *const u8, path_len as usize)) }) else {
         args.syscall_number = u64::MAX;
         return false;
     };
-    let path = path.to_string();
-
-    let fd = args.arg2;
-    let ftags = args.arg3;
-    let _create_mode = args.arg4;
 
     let file_source: Option<InodeIdentifierChain> = if fd == 0 {
         None
@@ -30,7 +43,7 @@ pub fn fopen(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
     };
 
     let task = async move {
-        let resolved_path = vfs::resolve_path(&path);
+        let resolved_path = vfs::resolve_path(path);
         let file_flags = FileFlags(ftags as u8);
         let handle = vfs::open_file((&resolved_path).into(), file_source, file_flags).await;
         let Some(proc) = crate::proc::get_proc(pid) else {
@@ -41,7 +54,7 @@ pub fn fopen(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
                 let proc_lock = proc.get();
                 let f_descriptor = proc_lock.open_file_handle(handle);
                 proc_lock.set_syscall_return(f_descriptor, 0);
-            },
+            }
             Err(_) => {
                 let proc_lock = proc.get();
                 proc_lock.set_syscall_return(u64::MAX, 1);

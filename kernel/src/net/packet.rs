@@ -1,4 +1,3 @@
-use core::hash::{self, Hash, Hasher};
 use std::{
     cow::Acow,
     mem_utils::{PhysAddr, translate_phys_virt_addr},
@@ -14,7 +13,6 @@ use crate::{
         protocols::{NetAddress, NetLayer, NetLayerData, NetLayerFlowID},
     },
     proc::Pid,
-    rand::rand_u64,
 };
 
 #[derive(Debug, Clone)]
@@ -26,19 +24,20 @@ pub(in crate::net) enum NetPacketSource {
 }
 
 #[derive(Debug)]
-pub struct PacketInRouting {
+pub(in crate::net) struct PacketInRouting {
     pub(in crate::net) data: Acow<NetPacket>,
     pub(in crate::net) routing_step: RoutingStep,
     pub(in crate::net) layer: NetLayerType,
 }
 
+#[derive(Debug, Clone)]
 pub struct ProcessedPacket {
     data: Acow<NetPacket>,
     user_data_start: u32,
 }
 
 impl PacketInRouting {
-    pub fn new(
+    pub(in crate::net) fn new(
         raw_data: Vec<RawNetDataChunk>,
         source: NetPacketSource,
         initial_routing_step: RoutingStep,
@@ -70,7 +69,7 @@ impl PacketInRouting {
         }
     }
 
-    pub fn from_net_packet(packet: Acow<NetPacket>, initial_routing_step: RoutingStep, initial_layer: NetLayerType) -> Self {
+    pub(in crate::net) fn from_net_packet(packet: Acow<NetPacket>, initial_routing_step: RoutingStep, initial_layer: NetLayerType) -> Self {
         PacketInRouting {
             data: packet,
             routing_step: initial_routing_step,
@@ -78,8 +77,10 @@ impl PacketInRouting {
         }
     }
 
-    pub fn into_raw_data(self) -> Vec<RawNetDataChunk> {
-        self.data.chunks.clone()
+    pub fn into_raw_data(mut self) -> Vec<RawNetDataChunk> {
+        let mut empty_vec = Vec::new();
+        std::mem::swap(&mut self.data.chunks, &mut empty_vec);
+        empty_vec
     }
 }
 
@@ -122,6 +123,15 @@ impl NetPacket {
         }
     }
 
+    pub fn into_processed(self: Acow<Self>) -> ProcessedPacket {
+        let user_data_offset = self.get_highest_layer().map(|l| l.upper_layer_offset()).unwrap_or(0);
+
+        ProcessedPacket {
+            data: self,
+            user_data_start: user_data_offset,
+        }
+    }
+
     pub fn get_highest_layer(&self) -> Option<&dyn NetLayer> {
         Some(
             self.parsed_layers
@@ -153,12 +163,16 @@ impl NetPacket {
         &self.addresses
     }
 
-    pub fn get_address_hash(&self) -> u64 {
-        let mut hasher = unsafe { net::NET_HASHER.assume_init_ref().clone() };
-        for addr in &self.addresses {
-            addr.hash(&mut hasher);
-        }
-        hasher.finish()
+    pub fn append_address(&mut self, addr: AddressPair<NetAddress>) {
+        self.addresses.push(addr);
+    }
+
+    pub fn get_incoming_address_hash(&self) -> u64 {
+        net::hash_addr_slice(&self.addresses.iter().map(AddressPair::reverse).collect::<Vec<_>>())
+    }
+
+    pub fn get_incoming_bind_address_hash(&self) -> u64 {
+        net::hash_bind_addr_slice(&self.addresses.iter().map(AddressPair::reverse).collect::<Vec<_>>())
     }
 
     pub fn linearize(&mut self) {

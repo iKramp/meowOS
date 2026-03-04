@@ -5,6 +5,7 @@ use std::{println, printlnc};
 #[macro_use]
 pub mod handlers;
 pub mod idt;
+mod page_fault;
 mod macros;
 pub use macros::general_interrupt_handler;
 use crate::utils::byte_to_port;

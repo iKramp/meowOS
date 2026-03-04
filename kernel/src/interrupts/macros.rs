@@ -1,4 +1,4 @@
-use crate::{acpi::cpu_locals::CpuLocals, proc::{StackCpuStateData, interrupt_context_switch, save_and_release_current}};
+use crate::{acpi::cpu_locals::{CpuLocals, PageFaultHandleMode}, proc::{StackCpuStateData, interrupt_context_switch, save_and_release_current}};
 
 use super::{disable_interrupts, enable_interrupts};
 
@@ -193,6 +193,8 @@ pub extern "C" fn general_interrupt_handler(
     locals.int_depth += 1;
     locals.atomic_context |= atomic_int != 0;
     let atomic_context = locals.atomic_context;
+    let prev_mode = locals.page_fault_handle_mode;
+    locals.page_fault_handle_mode = PageFaultHandleMode::KernelPanic;
     drop(locals);
 
     if !atomic_context {
@@ -207,6 +209,7 @@ pub extern "C" fn general_interrupt_handler(
         disable_interrupts();
         locals.int_depth -= 1;
         locals.atomic_context = prev_atomic;
+        locals.page_fault_handle_mode = prev_mode;
         return;
     }
     if let Some(curr_proc) = locals.current_process.as_mut() {
@@ -222,6 +225,7 @@ pub extern "C" fn general_interrupt_handler(
     locals.int_depth -= 1;
     locals.atomic_context = prev_atomic;
     locals.lock_info.assert_no_locks();
+    locals.page_fault_handle_mode = prev_mode;
     drop(locals);
     core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
 }

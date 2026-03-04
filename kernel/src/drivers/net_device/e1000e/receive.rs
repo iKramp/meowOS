@@ -4,13 +4,12 @@ use crate::{
         paging::{self, PageTree},
         physical_allocator,
     },
-    net::{self, MacAddress, PacketInRouting, RawNetDataChunk},
+    net::{self, MacAddress, RawNetDataChunk},
     rand,
 };
 use bitfield::bitfield;
 use core::{cell::UnsafeCell, sync::atomic::Ordering};
 use std::{
-    boxed::Box,
     lock_w_info,
     mem_utils::{PhysAddr, translate_virt_phys_addr},
     println,
@@ -171,24 +170,26 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
 
 pub(super) fn process_received_packets(dev: &E1000eDevice) {
     let packets = get_received_packets(dev);
-    let mut net_packet_list = std::queue::DataQueueHead::<PacketInRouting>::new(packets.len());
-    packets
-        .into_iter()
-        .map(|packet| {
-            let data_chunk = RawNetDataChunk::new(packet.buffer_addr, packet.length.into());
-            //each is a separate packet for now
-            core::mem::forget(packet);
-            PacketInRouting::from_nic_single_chunk(
-                data_chunk,
-                dev.identifier,
-                net::RoutingStep::Incoming,
-                net::NetLayerType::Ethernet,
-            )
-        })
-        .for_each(|packet| net_packet_list.push(packet));
+    let mut net_packet_list = std::queue::DataQueueHead::<Vec<RawNetDataChunk>>::new(packets.len());
+
+    for packet in packets {
+        println!("Received packet with length {}", packet.length);
+        let data_chunk = RawNetDataChunk::new(packet.buffer_addr, packet.length.into());
+        //each is a separate packet for now
+        core::mem::forget(packet);
+
+        let mut data_vec = Vec::new();
+        data_vec.push(data_chunk);
+        net_packet_list.push(data_vec);
+    }
 
     println!("adding {} packets from e1000e", net_packet_list.len());
-    net::append_net_queue(net_packet_list);
+    net::append_raw_net_queue(
+        net_packet_list,
+        dev.identifier,
+        net::RoutingStep::Incoming,
+        net::NetLayerType::Ethernet,
+    );
 }
 
 fn get_received_packets(dev: &E1000eDevice) -> Vec<ReceiveDescriptor> {

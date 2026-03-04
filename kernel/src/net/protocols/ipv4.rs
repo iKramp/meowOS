@@ -228,6 +228,8 @@ pub(super) fn parse_ipv4_packet(packet: &mut Acow<NetPacket>, offset: usize) -> 
     let upper_layer_size = total_length as u32 - header_len;
     packet.upper_layer_size = Some(upper_layer_size as usize);
 
+    packet.append_address(AddressPair::new(NetAddress::Ipv4Address(source), NetAddress::Ipv4Address(destination)));
+
     let mut interface_addresses = match packet.source {
         NetPacketSource::Nic(nic_id) => {
             if let Some(addresses) = routing_tables::get_nic_addresses_from_id(&nic_id) {

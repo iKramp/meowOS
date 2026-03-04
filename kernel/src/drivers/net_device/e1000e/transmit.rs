@@ -13,7 +13,7 @@ use crate::{
         paging::{self, PageTree},
         physical_allocator,
     },
-    net,
+    net::{self, RawNetDataChunk},
 };
 
 #[derive(Debug)]
@@ -114,8 +114,7 @@ pub(super) fn init_transmit(dev: &mut E1000eDevice) {
         .write(*registers.tipg().read().set_ipgt(8).set_ipgr1(2).set_ipgr2(10));
 }
 
-pub(super) fn send_packet(dev: &E1000eDevice, packet: net::PacketInRouting) {
-    let raw_chunks = packet.into_raw_data();
+pub(super) fn send_packet(dev: &E1000eDevice, raw_chunks: Vec<RawNetDataChunk>) {
     let mut tx_descriptors = Vec::new();
     for chunk in raw_chunks {
         let mut command = TxDescCommand(0);

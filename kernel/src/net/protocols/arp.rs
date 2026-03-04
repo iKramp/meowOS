@@ -2,11 +2,11 @@ use core::any::Any;
 use std::{cow::Acow, println, w_lock_w_info};
 
 use crate::net::{
-    self, NetLayerType, PacketInRouting, NetPacketSource,
+    self, NetLayerType,
     address_pair::AddressPair,
     flow::{IncomingFlowDirection, LayerDownType, OutgoingFlowDirection},
     hook::HookResult,
-    packet::NetPacket,
+    packet::{NetPacket, NetPacketSource},
     protocols::{MacAddress, NetLayer, NetLayerFlowID, ethernet::EthernetFlowId, ipv4},
     routing_tables,
 };
@@ -157,12 +157,22 @@ fn process_arp(packet: &mut Acow<NetPacket>) -> HookResult {
         return HookResult::Drop;
     }
 
-    println!("Received ARP packet, requested addr: {:?}, own addresses {:?}", arp_layer.flow_id.protocol.target(), nic_info);
+    println!(
+        "Received ARP packet, requested addr: {:?}, own addresses {:?}",
+        arp_layer.flow_id.protocol.target(),
+        nic_info
+    );
 
-    let is_self = nic_info.iter().any(|addr| addr.clone().into_protocol() == Some(arp_layer.flow_id.protocol.target().clone()));
+    let is_self = nic_info
+        .iter()
+        .any(|addr| addr.clone().into_protocol() == Some(arp_layer.flow_id.protocol.target().clone()));
 
     if !is_self {
-        println!("Received ARP packet not intended for us, dropping. Target protocol: {:?}, our NIC info: {:?}", arp_layer.flow_id.protocol.target(), nic_info);
+        println!(
+            "Received ARP packet not intended for us, dropping. Target protocol: {:?}, our NIC info: {:?}",
+            arp_layer.flow_id.protocol.target(),
+            nic_info
+        );
         return HookResult::Drop;
     }
 

@@ -1,5 +1,6 @@
 use crate::handler;
 use crate::interrupts::macros::InterruptProcessorState;
+use crate::interrupts::page_fault::page_fault;
 
 use super::gdt::{DEBUG_IST, DOUBLE_FAULT_IST, MACHINE_CHECK_IST, NMI_IST};
 use super::handlers::*;
