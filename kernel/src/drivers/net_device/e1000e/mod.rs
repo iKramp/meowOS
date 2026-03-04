@@ -227,7 +227,7 @@ impl E1000eDevice {
 }
 
 impl NIC for E1000eDevice {
-    fn send_packet(&self, packet: net::NetPacketListNode) {
+    fn send_packet(&self, packet: net::PacketInRouting) {
         transmit::send_packet(self, packet);
     }
 

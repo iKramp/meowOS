@@ -1,14 +1,13 @@
 use core::any::Any;
 use core::ptr::addr_of_mut;
-use std::{boxed::Box, cow::Acow, println, vec::Vec, w_lock_w_info};
+use std::{cow::Acow, println, vec::Vec, w_lock_w_info};
 
 use crate::net::{
-    self, NetPacketListNode, NetPacketSource, NicType, RoutingStep,
+    self, NicType, PacketInRouting, RoutingStep,
     address_pair::AddressPair,
     flow::{LayerDownType, OutgoingFlowDirection},
     hook::HookResult,
-    net_queue::NetQueueHead,
-    packet::NetPacket,
+    packet::{NetPacket, NetPacketSource},
     protocols::{MacAddress, NetAddress, NetLayer, NetLayerFlowID, NetLayerType},
     routing_tables::{self, is_own_mac},
 };
@@ -63,7 +62,7 @@ fn bridge_hook(packet: &mut Acow<NetPacket>) -> HookResult {
 
     let out_macs = routing_tables::get_mac_bridges(&mac);
 
-    let mut out_queue = NetQueueHead::new(out_macs.len());
+    let mut out_queue = std::queue::DataQueueHead::<PacketInRouting>::new(out_macs.len());
     for out_mac in out_macs {
         if out_mac == mac {
             continue;
@@ -101,9 +100,9 @@ fn bridge_hook(packet: &mut Acow<NetPacket>) -> HookResult {
         new_packet.layers_to_construct = layers;
 
         let routing_step = RoutingStep::Outgoing;
-        let new_packet = NetPacketListNode::from_net_packet(new_packet, routing_step, layer);
+        let new_packet = PacketInRouting::from_net_packet(new_packet, routing_step, layer);
 
-        out_queue.push(Box::new(new_packet));
+        out_queue.push(new_packet);
     }
 
     net::append_net_queue(out_queue);

@@ -1,11 +1,11 @@
 use std::{cow::Acow, println, vec::Vec, w_lock_w_info};
 
 use crate::net::{
-    self, NetLayerType, NetPacketListNode, NetPacketSource, NicType, ProtocolAddr,
+    self, NetLayerType, NicType, ProtocolAddr,
     address_pair::AddressPair,
     flow::{LayerDownType, OutgoingFlowDirection},
     hook::HookResult,
-    packet::NetPacket,
+    packet::{NetPacket, NetPacketSource},
     protocols::{NetAddress, NetLayer, NetLayerFlowID, arp::HardwareAddr, icmp},
     routing_tables,
 };
@@ -59,7 +59,7 @@ impl Ipv4Address {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(in crate::net) struct Ipv4Network {
     pub address: Ipv4Address,
     pub mask: Ipv4Address,
@@ -88,6 +88,9 @@ impl Ipv4Network {
     }
 
     pub fn broadcast_for(&self, ip: &Ipv4Address) -> bool {
+        if ip.0 == [255, 255, 255, 255] {
+            return true; //global broadcast
+        }
         let ip_u32 = u32::from_be_bytes(ip.0);
         let network_u32 = u32::from_be_bytes(self.address.0);
         let mask_u32 = u32::from_be_bytes(self.mask.0);
@@ -226,12 +229,12 @@ pub(super) fn parse_ipv4_packet(packet: &mut Acow<NetPacket>, offset: usize) -> 
     packet.upper_layer_size = Some(upper_layer_size as usize);
 
     let mut interface_addresses = match packet.source {
-        crate::net::NetPacketSource::Nic(nic_id) => {
+        NetPacketSource::Nic(nic_id) => {
             if let Some(addresses) = routing_tables::get_nic_addresses_from_id(&nic_id) {
                 addresses
                     .into_iter()
                     .filter_map(|addr| {
-                        if let NetAddress::Ipv4(ipv4_addr) = addr {
+                        if let NetAddress::Ipv4Network(ipv4_addr) = addr {
                             Some(ipv4_addr)
                         } else {
                             None

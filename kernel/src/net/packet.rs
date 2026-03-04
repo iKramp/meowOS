@@ -1,5 +1,5 @@
+use core::hash::{self, Hash, Hasher};
 use std::{
-    boxed::Box,
     cow::Acow,
     mem_utils::{PhysAddr, translate_phys_virt_addr},
     println,
@@ -9,14 +9,16 @@ use std::{
 use crate::{
     memory::physical_allocator,
     net::{
-        NetLayerType, NicIdentifier, RoutingStep,
-        protocols::{NetLayer, NetLayerData, NetLayerFlowID},
+        self, NetLayerType, NicIdentifier, RoutingStep,
+        address_pair::AddressPair,
+        protocols::{NetAddress, NetLayer, NetLayerData, NetLayerFlowID},
     },
     proc::Pid,
+    rand::rand_u64,
 };
 
 #[derive(Debug, Clone)]
-pub enum NetPacketSource {
+pub(in crate::net) enum NetPacketSource {
     Nic(NicIdentifier),
     Proc(Pid),
     OtherPacket(Acow<NetPacket>),
@@ -24,14 +26,18 @@ pub enum NetPacketSource {
 }
 
 #[derive(Debug)]
-pub struct NetPacketListNode {
+pub struct PacketInRouting {
     pub(in crate::net) data: Acow<NetPacket>,
-    pub(in crate::net) next_packet: Option<Box<NetPacketListNode>>,
     pub(in crate::net) routing_step: RoutingStep,
     pub(in crate::net) layer: NetLayerType,
 }
 
-impl NetPacketListNode {
+pub struct ProcessedPacket {
+    data: Acow<NetPacket>,
+    user_data_start: u32,
+}
+
+impl PacketInRouting {
     pub fn new(
         raw_data: Vec<RawNetDataChunk>,
         source: NetPacketSource,
@@ -40,40 +46,33 @@ impl NetPacketListNode {
     ) -> Self {
         let raw_data = Acow::new(NetPacket::new(raw_data, source));
 
-        NetPacketListNode {
+        PacketInRouting {
             data: raw_data,
-            next_packet: None,
             routing_step: initial_routing_step,
             layer: initial_layer,
         }
     }
 
-    pub fn from_single(
+    pub fn from_nic_single_chunk(
         raw_data: RawNetDataChunk,
-        source: NetPacketSource,
+        nic_identifier: NicIdentifier,
         initial_routing_step: RoutingStep,
         initial_layer: NetLayerType,
     ) -> Self {
         let mut tmp_vec = Vec::new();
         tmp_vec.push(raw_data);
-        let raw_data = Acow::new(NetPacket::new(tmp_vec, source));
+        let raw_data = Acow::new(NetPacket::new(tmp_vec, NetPacketSource::Nic(nic_identifier)));
 
-        NetPacketListNode {
+        PacketInRouting {
             data: raw_data,
-            next_packet: None,
             routing_step: initial_routing_step,
             layer: initial_layer,
         }
     }
 
-    pub fn from_net_packet(
-        packet: Acow<NetPacket>,
-        initial_routing_step: RoutingStep,
-        initial_layer: NetLayerType,
-    ) -> Self {
-        NetPacketListNode {
+    pub fn from_net_packet(packet: Acow<NetPacket>, initial_routing_step: RoutingStep, initial_layer: NetLayerType) -> Self {
+        PacketInRouting {
             data: packet,
-            next_packet: None,
             routing_step: initial_routing_step,
             layer: initial_layer,
         }
@@ -84,11 +83,10 @@ impl NetPacketListNode {
     }
 }
 
-impl Clone for NetPacketListNode {
+impl Clone for PacketInRouting {
     fn clone(&self) -> Self {
         Self {
             data: self.data.clone(),
-            next_packet: None,
             routing_step: self.routing_step,
             layer: self.layer,
         }
@@ -101,11 +99,12 @@ pub(in crate::net) struct NetPacket {
     pub parsed_layers: Vec<NetLayerData>,
     length: u32,
     pub source: NetPacketSource,
-    /// First element refers to the current layer (where the packet is being processed)
-    /// After each layer is constructed, the first element is popped. If there is nothing left, the
+    /// Last element refers to the current layer (where the packet is being processed)
+    /// After each layer is constructed, the last element is popped. If there is nothing left, the
     /// layer must either make up data, or reject the packet
     pub layers_to_construct: Vec<NetLayerFlowID>,
     pub upper_layer_size: Option<usize>,
+    addresses: Vec<AddressPair<NetAddress>>,
 }
 
 impl NetPacket {
@@ -119,10 +118,11 @@ impl NetPacket {
             layers_to_construct: Vec::new(),
             source,
             upper_layer_size: None,
+            addresses: Vec::new(),
         }
     }
 
-    pub(in crate::net) fn get_highest_layer(&self) -> Option<&dyn NetLayer> {
+    pub fn get_highest_layer(&self) -> Option<&dyn NetLayer> {
         Some(
             self.parsed_layers
                 .last()?
@@ -131,7 +131,7 @@ impl NetPacket {
         )
     }
 
-    pub(in crate::net) fn get_highest_layer_mut(&mut self) -> Option<&mut dyn NetLayer> {
+    pub fn get_highest_layer_mut(&mut self) -> Option<&mut dyn NetLayer> {
         Some(
             self.parsed_layers
                 .last_mut()?
@@ -140,13 +140,25 @@ impl NetPacket {
         )
     }
 
-    pub(in crate::net) fn get_layer(&self, index_from_top: usize) -> Option<&dyn NetLayer> {
+    pub fn get_layer(&self, index_from_top: usize) -> Option<&dyn NetLayer> {
         Some(
             self.parsed_layers
                 .get(self.parsed_layers.len() - 1 - index_from_top)?
                 .get()
                 .expect("can't call get_layer on unparsed layer"),
         )
+    }
+
+    pub fn get_addresses(&self) -> &Vec<AddressPair<NetAddress>> {
+        &self.addresses
+    }
+
+    pub fn get_address_hash(&self) -> u64 {
+        let mut hasher = unsafe { net::NET_HASHER.assume_init_ref().clone() };
+        for addr in &self.addresses {
+            addr.hash(&mut hasher);
+        }
+        hasher.finish()
     }
 
     pub fn linearize(&mut self) {
@@ -276,7 +288,10 @@ impl NetPacket {
     }
 
     pub fn print(&self) {
-        println!("NetPacket: length {}, source {:?}, layers_to_construct: {:?}, parsed_layers: {:?}", self.length, self.source, self.layers_to_construct, self.parsed_layers);
+        println!(
+            "NetPacket: length {}, source {:?}, layers_to_construct: {:?}, parsed_layers: {:?}",
+            self.length, self.source, self.layers_to_construct, self.parsed_layers
+        );
         println!("Chunks:");
         for chunk in &self.chunks {
             println!("{:?}", chunk.data());

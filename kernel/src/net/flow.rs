@@ -1,7 +1,7 @@
 use std::{cow::Acow, println, sync::arc::Arc, vec::Vec};
 
 use crate::net::{
-    NIC, NetPacketListNode, NetPacketSource, hook::{HookFilter, HookStage, call_hooks}, packet::NetPacket, protocols::{self, NetLayerType}
+    NIC, PacketInRouting, NetPacketSource, hook::{HookFilter, HookStage, call_hooks}, packet::NetPacket, protocols::{self, NetLayerType}
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -31,7 +31,7 @@ pub(in crate::net) enum OutgoingFlowDirection {
     Drop,
 }
 
-pub fn process_packet_flow(packet: NetPacketListNode) {
+pub fn process_packet_flow(packet: PacketInRouting) {
     if !unsafe { crate::net::NET_INITIALIZED } {
         return;
     }

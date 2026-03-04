@@ -1,5 +1,5 @@
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub (in crate::net) struct AddressPair<T> {
     pub source: T,
     pub target: T,

@@ -2,7 +2,7 @@ use core::any::Any;
 use std::{cow::Acow, println, w_lock_w_info};
 
 use crate::net::{
-    self, NetLayerType, NetPacketListNode, NetPacketSource,
+    self, NetLayerType, PacketInRouting, NetPacketSource,
     address_pair::AddressPair,
     flow::{IncomingFlowDirection, LayerDownType, OutgoingFlowDirection},
     hook::HookResult,

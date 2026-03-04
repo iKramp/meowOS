@@ -2,17 +2,20 @@ use std::{cow::Acow, println, vec::Vec, w_lock_w_info};
 
 use crate::net::{
     self, NetLayerType, RawNetDataChunk,
+    address_pair::AddressPair,
     flow::{LayerDownType, OutgoingFlowDirection},
     hook::{self, HookResult},
     packet::NetPacket,
     protocols::{NetLayer, NetLayerFlowID},
 };
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(in crate::net) struct UdpPort(pub u16);
+
 #[derive(Debug, Clone)]
 pub(in crate::net) struct UdpHeader {
     pub offset: u32,
-    pub source_port: u16,
-    pub dest_port: u16,
+    pub ports: AddressPair<UdpPort>,
     pub length: u16,
     pub checksum: u16,
 }
@@ -79,8 +82,7 @@ pub(super) fn parse_udp(packet: &mut Acow<NetPacket>, offset: usize) -> Option<U
 
     Some(UdpHeader {
         offset: offset as u32,
-        source_port,
-        dest_port,
+        ports: AddressPair::new(UdpPort(source_port), UdpPort(dest_port)),
         length,
         checksum,
     })

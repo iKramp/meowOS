@@ -1,28 +1,31 @@
+#![allow(deprecated)] //siphasher
+
 mod address_pair;
 mod flow;
 mod hook;
-pub mod net_queue;
 mod packet;
 mod protocols;
 mod routing_tables;
+mod socket;
 
 use core::fmt::Debug;
-use std::boxed::Box;
+use core::hash::SipHasher;
+use core::mem::MaybeUninit;
 use std::lock_w_info;
 use std::println;
 use std::sync::no_int_spinlock::NoIntSpinlock;
-use std::vec::Vec;
 
 pub use flow::RoutingStep;
-pub use packet::{NetPacketListNode, NetPacketSource, RawNetDataChunk};
+pub use packet::{PacketInRouting, RawNetDataChunk};
 pub use protocols::MacAddress;
 pub use protocols::NetLayerType;
 pub use routing_tables::deregister_nic;
 pub use routing_tables::register_nic;
 
-use crate::net::net_queue::NetQueueHead;
 use crate::net::protocols::arp::ProtocolAddr;
+use crate::rand::rand_u64;
 use crate::task_runner;
+use std::queue::*;
 
 pub type NicIdentifier = u32;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,19 +40,21 @@ static NIC_COUNTER: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU3
 
 static mut NET_INITIALIZED: bool = false;
 
-static NET_QUEUE: NoIntSpinlock<NetQueueHead> = NoIntSpinlock::new(NetQueueHead::new(MAX_PACKETS));
+static NET_QUEUE: NoIntSpinlock<DataQueueHead<PacketInRouting>> = NoIntSpinlock::new(DataQueueHead::new(MAX_PACKETS));
+
+static mut NET_HASHER: MaybeUninit<SipHasher> = MaybeUninit::uninit();
 
 pub fn requset_nic_identifier() -> NicIdentifier {
     NIC_COUNTER.fetch_add(1, core::sync::atomic::Ordering::SeqCst)
 }
 
-pub fn debug_packet(mut _packet: NetPacketListNode, layer_type: NetLayerType) {
+pub fn debug_packet(mut _packet: PacketInRouting, layer_type: NetLayerType) {
     println!("Packet at layer {:?}:", layer_type);
 }
 
 #[allow(clippy::upper_case_acronyms)]
 pub trait NIC: Sync + Send {
-    fn send_packet(&self, packet: NetPacketListNode);
+    fn send_packet(&self, packet: PacketInRouting);
     fn get_identifier(&self) -> NicIdentifier;
     fn nic_type(&self) -> NicType;
 }
@@ -62,6 +67,9 @@ impl Debug for dyn NIC {
 
 pub fn init() {
     println!("Initializing net subsystem");
+    unsafe {
+        NET_HASHER = MaybeUninit::new(SipHasher::new_with_keys(rand_u64(), rand_u64()));
+    }
     protocols::init();
     task_runner::add_repeating_task(process_packets);
     unsafe {
@@ -74,7 +82,7 @@ fn process_packets() {
         return;
     }
 
-    let mut new_queue = NetQueueHead::new(MAX_PACKETS);
+    let mut new_queue = DataQueueHead::new(MAX_PACKETS);
     let mut process_queue = lock_w_info!(NET_QUEUE);
     println!("{}", process_queue.len());
     std::mem::swap(&mut new_queue, &mut process_queue);
@@ -82,18 +90,18 @@ fn process_packets() {
 
     while let Some(packet) = new_queue.get_first() {
         println!("Processing packet");
-        flow::process_packet_flow(*packet);
+        flow::process_packet_flow(packet);
     }
 }
 
-pub fn add_net_packet_to_queue(packet: Box<NetPacketListNode>) {
+pub fn add_net_packet_to_queue(packet: PacketInRouting) {
     if !unsafe { NET_INITIALIZED } {
         return;
     }
     lock_w_info!(NET_QUEUE).push(packet);
 }
 
-pub fn append_net_queue(other: NetQueueHead) {
+pub fn append_net_queue(other: DataQueueHead<PacketInRouting>) {
     if !unsafe { NET_INITIALIZED } {
         return;
     }
@@ -114,4 +122,3 @@ fn compute_internet_checksum(header: &[u8]) -> u16 {
     println!("Computed checksum: {:#x}", res);
     res
 }
-

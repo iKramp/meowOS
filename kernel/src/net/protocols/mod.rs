@@ -5,7 +5,7 @@ use crate::net::{
     flow::{IncomingFlowDirection, OutgoingFlowDirection},
     packet::NetPacket,
     protocols::{
-        arp::{ArpFlowId, ArpHeader}, ethernet::{EthernetFlowId, EthernetHeader, parse_ethernet_frame}, icmp::{IcmpFlowId, IcmpHeader}, ipv4::{Ipv4FlowId, Ipv4Header, Ipv4Network}, udp::{UdpFlowId, UdpHeader}
+        arp::{ArpFlowId, ArpHeader}, ethernet::{EthernetFlowId, EthernetHeader, parse_ethernet_frame}, icmp::{IcmpFlowId, IcmpHeader}, ipv4::{Ipv4Address, Ipv4FlowId, Ipv4Header, Ipv4Network}, udp::{UdpFlowId, UdpHeader, UdpPort}
     },
 };
 
@@ -133,10 +133,12 @@ pub(in crate::net) enum NetLayerFlowID {
     Udp(UdpFlowId),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(in crate::net) enum NetAddress {
-    Ipv4(Ipv4Network),
+    Ipv4Network(Ipv4Network),
+    Ipv4Address(Ipv4Address),
     Mac(MacAddress),
+    UdpPort(UdpPort),
 }
 
 impl NetAddress {
@@ -149,7 +151,8 @@ impl NetAddress {
 
     pub fn into_protocol(self) -> Option<arp::ProtocolAddr> {
         match self {
-            NetAddress::Ipv4(ipv4) => Some(arp::ProtocolAddr::Ipv4(ipv4.address)),
+            NetAddress::Ipv4Network(ipv4) => Some(arp::ProtocolAddr::Ipv4(ipv4.address)),
+            NetAddress::Ipv4Address(ipv4) => Some(arp::ProtocolAddr::Ipv4(ipv4)),
             _ => None,
         }
     }
@@ -157,6 +160,13 @@ impl NetAddress {
     pub fn from_hardware(hardware: &arp::HardwareAddr) -> Option<Self> {
         match hardware {
             arp::HardwareAddr::Ethernet(mac) => Some(NetAddress::Mac(*mac)),
+        }
+    }
+
+    pub fn from_protocol(protocol: &arp::ProtocolAddr) -> Option<Self> {
+        match protocol {
+            arp::ProtocolAddr::Ipv4(ipv4) => Some(NetAddress::Ipv4Address(*ipv4)),
+            _ => None,
         }
     }
 }

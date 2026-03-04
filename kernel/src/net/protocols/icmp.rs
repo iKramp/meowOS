@@ -1,6 +1,6 @@
 use std::{boxed::Box, cow::Acow, println, vec::Vec, w_lock_w_info};
 
-use crate::net::{self, NetLayerType, NetPacketListNode, RoutingStep, address_pair::AddressPair, flow::{IncomingFlowDirection, LayerDownType, OutgoingFlowDirection}, hook::{HookResult, NET_HOOK_STORAGE}, packet::NetPacket, protocols::{NetLayer, NetLayerFlowID, ipv4::{Ipv4Address, Ipv4Flags, Ipv4FlowId, Ipv4FragmentInfo, Ipv4Header}}, routing_tables};
+use crate::net::{self, NetLayerType, PacketInRouting, RoutingStep, address_pair::AddressPair, flow::{IncomingFlowDirection, LayerDownType, OutgoingFlowDirection}, hook::{HookResult, NET_HOOK_STORAGE}, packet::NetPacket, protocols::{NetLayer, NetLayerFlowID, ipv4::{Ipv4Address, Ipv4Flags, Ipv4FlowId, Ipv4FragmentInfo, Ipv4Header}}, routing_tables};
 
 const ICMP_ERROR_CODES: &[u8] = &[
     3,
@@ -182,9 +182,9 @@ pub(in crate::net) fn send_icmp_error(packet: &mut Acow<NetPacket>, type_: u8, c
         payload,
     }));
 
-    let mut new_packet = NetPacketListNode::new(Vec::new(), net::NetPacketSource::OtherPacket(original_packet), RoutingStep::Outgoing, NetLayerType::Icmp);
+    let mut new_packet = PacketInRouting::new(Vec::new(), net::NetPacketSource::OtherPacket(original_packet), RoutingStep::Outgoing, NetLayerType::Icmp);
     new_packet.data.layers_to_construct = layers;
-    net::add_net_packet_to_queue(Box::new(new_packet));
+    net::add_net_packet_to_queue(new_packet);
 }
 
 fn icmp_in_hook(packet: &mut Acow<NetPacket>) -> HookResult {
@@ -221,10 +221,10 @@ fn icmp_in_hook(packet: &mut Acow<NetPacket>) -> HookResult {
                 payload: icmp_layer.payload.clone(),
             }));
 
-            let mut new_packet = NetPacketListNode::new(Vec::new(), net::NetPacketSource::OtherPacket(original_packet), RoutingStep::Outgoing, NetLayerType::Icmp);
+            let mut new_packet = PacketInRouting::new(Vec::new(), net::NetPacketSource::OtherPacket(original_packet), RoutingStep::Outgoing, NetLayerType::Icmp);
             new_packet.data.layers_to_construct = layers;
 
-            net::add_net_packet_to_queue(Box::new(new_packet));
+            net::add_net_packet_to_queue(new_packet);
 
             HookResult::Drop
         }
