@@ -12,16 +12,16 @@ use super::{VfsAdapterTrait, DirEntry};
 #[derive(Debug)]
 pub struct TtyAdapter { //for now whole /dev
     device_id: DeviceId,
-    buffered_input: NoIntSpinlock<Vec<u8>>,
-    ready_input: NoIntSpinlock<Vec<u8>>,
+    input: NoIntSpinlock<Vec<u8>>,
+    write_lock: NoIntSpinlock<()>,
 }
 
 impl TtyAdapter {
     pub fn new(device_id: DeviceId) -> Self {
         TtyAdapter {
             device_id,
-            buffered_input: NoIntSpinlock::new(Vec::new()),
-            ready_input: NoIntSpinlock::new(Vec::new()),
+            input: NoIntSpinlock::new(Vec::new()),
+            write_lock: NoIntSpinlock::new(()),
         }
     }
 
@@ -33,7 +33,7 @@ impl TtyAdapter {
             link_cnt: 1,
             uid: 0,
             gid: 0,
-            size: lock_w_info!(self.ready_input).len() as u64,
+            size: lock_w_info!(self.input).len() as u64,
             access_time: 0,
             modification_time: 0,
             stat_change_time: 0,
@@ -46,7 +46,7 @@ impl TtyAdapter {
 #[async_trait::async_trait]
 impl VfsAdapterTrait for TtyAdapter {
     async fn read(&self, _inode: crate::vfs::InodeIndex, _offset_bytes: u64, mut size_bytes: u64, buffer: &[std::mem_utils::PhysAddr]) -> Result<u64, ErrorCode> {
-        let mut ready_input = lock_w_info!(self.ready_input);
+        let mut ready_input = lock_w_info!(self.input);
         let mut block = 0;
         let mut read_size = 0;
         loop {
@@ -73,6 +73,8 @@ impl VfsAdapterTrait for TtyAdapter {
     }
 
     async fn write(&self, _inode: crate::vfs::InodeIndex, _offset: u64, size: u64, buffer: &[std::mem_utils::PhysAddr]) -> Result<(Inode, u64), ErrorCode> {
+        let lock = lock_w_info!(self.write_lock);
+
         for i in 0..(size / 4096) {
             let Some(phys_ptr) = buffer.get(i as usize) else {
                 return Err(ErrorCode::InvalidArgument);
@@ -87,6 +89,8 @@ impl VfsAdapterTrait for TtyAdapter {
         let ptr = std::mem_utils::translate_phys_virt_addr(*phys_ptr).0 as *const u8;
         let str = unsafe { core::str::from_raw_parts(ptr, (size % 4096) as usize) };
         println!(level:info, "{}", str);
+
+        drop(lock);
 
         Ok((self.get_inode(), size))
     }

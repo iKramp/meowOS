@@ -76,15 +76,23 @@ will be split
 #### Args:
 1. uint64 path_len - length of the path in bytes
 1. char*  path - path to the executable
-1. uint64 argc - argument count
-1. String *argv - argument list
-1. uint64 envc - environment variable count
-1. String *envp - environment variables
+1. EnvData *env - pointer to struct describing the environment. Nullptr means default environment
 #### Return Value:
  - On success, returns the PID of the new process.
  - On failure, returns -1 and sets errno.
+### EnvData struct:
+```C
+struct EnvData {
+    Buffer<String> args; // list of arguments to pass to the new process
+    Buffer<String> env_vars; // list of environment variables in the form "KEY=VALUE"
+    bool copy_fd;
+    bool copy_stdio;
+    bool paused; //start the process paused. This allows the caller to modify its environment further
+};
+
+```
 #### Description:  
-Spawns a new process by loading and executing the binary at the given path with the provided arguments and environment variables.
+Spawns a new process by loading and executing the binary at the given path with the provided environment.
 Returns the PID of the new process on success. Unlike linux fork + execve combo, this does NOT create a copy of the calling process.
 
 ### Syscall 3: clone

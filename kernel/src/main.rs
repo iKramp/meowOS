@@ -115,15 +115,15 @@ extern "C" fn _start() -> ! {
     proc::init();
 
     let mut counter = 0;
-    // loop {
-    //     if counter % 10 == 0 {
-    //         println!(level:info, "loopng...");
-    //     }
-    //     std::thread::sleep(core::time::Duration::from_millis(100));
-    //     counter += 1;
-    //     task_runner::process_tasks();
-    //     task_runner::run_repeating_tasks();
-    // }
+    loop {
+        if counter % 10 == 0 {
+            println!(level:info, "loopng...");
+        }
+        std::thread::sleep(core::time::Duration::from_millis(100));
+        counter += 1;
+        task_runner::process_tasks();
+        task_runner::run_repeating_tasks();
+    }
 
     // //start first proc
     unsafe { core::arch::asm!("int 254") };

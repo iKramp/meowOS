@@ -1,3 +1,5 @@
+use std::sync::async_lock::AsyncSpinlock;
+
 use bitfield::bitfield;
 
 use super::{InodeIdentifier, InodeIdentifierChain};
@@ -29,12 +31,7 @@ impl FileFlags {
         FileFlags(0)
     }
 
-    pub fn new_with_flags(
-        read: bool,
-        write: bool,
-        append: bool,
-        dir: bool,
-    ) -> Self {
+    pub fn new_with_flags(read: bool, write: bool, append: bool, dir: bool) -> Self {
         let mut flags = FileFlags::new();
         if read {
             flags.set_read(true);
