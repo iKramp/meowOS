@@ -3,6 +3,7 @@ pub mod gpt;
 pub mod filesystem;
 pub mod pci;
 pub mod net_device;
+pub mod ps2;
 
 pub fn init_drivers() {
     block_device::init_drivers();

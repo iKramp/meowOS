@@ -99,14 +99,20 @@ pub extern "C" fn spurious_interrupt(_proc_data: &mut InterruptProcessorState) {
 }
 
 pub extern "C" fn legacy_keyboard_interrupt(_proc_data: &mut InterruptProcessorState) {
-    let code = byte_from_port(0x60);
-    crate::keyboard::handle_key(code);
+    let scancodes = crate::drivers::ps2::read_scancodes();
+    let keys = crate::keyboard::handle_keyboard_data(scancodes);
+    for key in keys {
+        println!(level:info, "key: {:#?}", key);
+    }
     legacy_eoi();
 }
 
 pub extern "C" fn apic_keyboard_interrupt(_proc_data: &mut InterruptProcessorState) {
-    let code = byte_from_port(0x60);
-    crate::keyboard::handle_key(code);
+    let scancodes = crate::drivers::ps2::read_scancodes();
+    let keys = crate::keyboard::handle_keyboard_data(scancodes);
+    for key in keys {
+        println!(level:info, "key: {:#?}", key);
+    }
     apic_eoi();
 }
 

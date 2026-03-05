@@ -10,7 +10,7 @@ use super::{VfsAdapterTrait, DirEntry};
 
 
 #[derive(Debug)]
-pub struct TtyAdapter { //for now whole /dev
+pub struct TtyAdapter {
     device_id: DeviceId,
     input: NoIntSpinlock<Vec<u8>>,
     write_lock: NoIntSpinlock<()>,
