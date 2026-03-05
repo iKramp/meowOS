@@ -128,7 +128,9 @@ impl LockInfo {
             return;
         }
         unsafe { core::arch::asm!("cli") };
-        panic!("Locks held: {:#?}", self.locations)
+        #[cfg(debug_assertions)]
+        panic!("Locks held: {:#?}", self.locations);
+        panic!("{} locks held", self.num_no_int_spinlocks);
     }
 }
 
