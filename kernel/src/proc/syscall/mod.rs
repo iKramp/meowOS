@@ -1,4 +1,6 @@
 
+use std::println;
+
 use super::{context_switch::no_ret_context_switch, process_data::StackCpuStateData, scheduler::{save_and_release_current, SleepCondition}};
 use crate::{acpi::cpu_locals::PageFaultHandleMode, interrupts::enable_interrupts, memory, msr, proc::syscall};
 
@@ -38,12 +40,30 @@ fn enable_syscall() {
 }
 
 ///performs an exclusive range check if the pointers are valid in userspace
-fn verify_memory(mem_start: u64, mem_end: u64) -> bool {
+fn verify_memory_range(mem_start: u64, mem_end: u64) -> bool {
     if mem_start > mem_end || mem_end > 0x0000_8000_0000_0000 {
+        println!(level:warn, "Invalid memory range: {:#X} - {:#X}", mem_start, mem_end);
         return false;
     }
 
-    memory::probe_pointer_range(mem_start, mem_end)
+    let valid = memory::probe_pointer_range(mem_start, mem_end);
+    if !valid {
+        println!(level:warn, "Invalid memory range: {:#X} - {:#X}", mem_start, mem_end);
+    }
+    valid
+}
+
+fn verify_memory_ptr (mut ptr: u64) -> bool {
+    ptr &= !0xFFF; //page align, ptr can't overlap pages because of alignment
+    if ptr > 0x0000_8000_0000_0000 {
+        println!(level:warn, "Invalid memory pointer: {:#X}", ptr);
+        return false;
+    }
+    let valid = memory::probe_ptr_u64(ptr).is_some();
+    if !valid {
+        println!(level:warn, "Invalid memory pointer: {:#X}", ptr);
+    }
+    valid
 }
 
 //sys V abi:
@@ -124,10 +144,12 @@ extern "C" fn handler(args_rsp: u64) -> ! {
     drop(locals);
     enable_interrupts();
 
+    println!("Syscall number: {}, args: {:#X?}, state: {:#X?}", args.syscall_number, args, state);
+
     #[allow(clippy::single_match)]
     let task_sleep = match args.syscall_number {
         0 => syscall::handlers::illegal(args, &curr_proc),
-        1 => todo!("implement exit"),
+        1 => syscall::handlers::exit(args, &curr_proc),
         2 => todo!("implement exec"),
         3 => todo!("implement clone"),
         4 => syscall::handlers::fopen(args, &curr_proc),
@@ -138,7 +160,7 @@ extern "C" fn handler(args_rsp: u64) -> ! {
         9 => todo!("implement mmap"),
         10 => todo!("implement munmap"),
         11 => todo!("implement sleep"),
-        12 => syscall::handlers::time(args),
+        12 => syscall::handlers::time(args, &curr_proc),
         _ => {false}
     };
 
@@ -167,6 +189,7 @@ pub struct SyscallCpuState {
     pub rbx: u64
 }
 
+#[derive(Debug, Clone)]
 #[repr(C)]
 struct SyscallArgs {
     arg1: u64,

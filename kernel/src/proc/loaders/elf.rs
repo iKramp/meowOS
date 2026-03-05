@@ -47,6 +47,8 @@ fn load_elf_process(data: &[u8], path: Box<str>) -> Result<ContextInfo, super::P
         if segment.p_type != elf::PType::PT_LOAD as u32 {
             continue; // Only loadable segments
         }
+
+        println!("Processing segment with vaddr {:x?}, memsz {:x?}, filesz {:x?}, p_flags {:x?}", segment.p_vaddr, segment.p_memsz, segment.p_filesz, segment.p_flags);
         let start = segment.p_vaddr & (!0xfff); // Align to page boundary
         let start_extended = segment.p_vaddr - start;
         let size = segment.p_memsz as usize + start_extended as usize;

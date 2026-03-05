@@ -1,5 +1,5 @@
 use core::{slice, str};
-use std::{boxed::Box, sync::arc::Arc, vec::Vec};
+use std::{boxed::Box, println, sync::arc::Arc, vec::Vec};
 
 use crate::{
     proc::{
@@ -18,13 +18,14 @@ pub fn fopen(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
     let ftags = args.arg4;
     let _create_mode = args.arg5;
 
-    let res = syscall::verify_memory(path_ptr, path_ptr + path_len);
+    let res = syscall::verify_memory_range(path_ptr, path_ptr + path_len);
     if !res {
         args.syscall_number = u64::MAX;
         return false;
     }
 
     let Ok(path) = (unsafe { str::from_utf8(slice::from_raw_parts(path_ptr as *const u8, path_len as usize)) }) else {
+        println!("fopen: invalid path string (not utf8)");
         args.syscall_number = u64::MAX;
         return false;
     };
@@ -34,6 +35,7 @@ pub fn fopen(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
     } else {
         let proc_mut = proc.get_mutable();
         let Some(f_handle) = proc_mut.get_file_handle(fd) else {
+            println!("fopen: invalid fd {fd}");
             args.syscall_number = u64::MAX;
             return false;
         };
@@ -56,10 +58,12 @@ pub fn fopen(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
                 proc_lock.set_syscall_return(f_descriptor, 0);
             }
             Err(_) => {
+                println!("fopen: failed to open file at path {path}");
                 let proc_lock = proc.get();
                 proc_lock.set_syscall_return(u64::MAX, 1);
             }
         }
+        println!("fopen: finished processing fopen for pid {pid:?}");
         proc::wake_process(pid)
     };
 

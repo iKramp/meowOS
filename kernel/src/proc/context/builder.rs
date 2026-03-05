@@ -22,6 +22,7 @@ use super::info::ContextInfo;
 const DEFAULT_PROC_STACK_SIZE: usize = 0x4000; // 8KB
 
 pub fn create_process(context_info: &ContextInfo) -> Result<Pid, ErrorCode> {
+    println!("creating process with context: {:#?}", context_info);
     let pid = Pid(PROCESS_ID_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed));
     let is_32_bit = context_info.is_32_bit();
     let cmdline = context_info.cmdline().to_string().into_boxed_str();

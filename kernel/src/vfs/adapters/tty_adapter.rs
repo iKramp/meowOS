@@ -1,5 +1,5 @@
 use std::error::ErrorCode;
-use std::{lock_w_info, print};
+use std::{lock_w_info, print, println};
 use std::{sync::no_int_spinlock::NoIntSpinlock, vec::Vec};
 use std::boxed::Box;
 
@@ -86,7 +86,7 @@ impl VfsAdapterTrait for TtyAdapter {
         };
         let ptr = std::mem_utils::translate_phys_virt_addr(*phys_ptr).0 as *const u8;
         let str = unsafe { core::str::from_raw_parts(ptr, (size % 4096) as usize) };
-        print!("{}", str);
+        println!(level:info, "{}", str);
 
         Ok((self.get_inode(), size))
     }

@@ -50,9 +50,7 @@ use limine::LIMINE_BOOTLOADER_REQUESTS;
 use task_runner::block_task;
 use vfs::ResolvedPath;
 
-const PRIME_FINDER: &[u8] = include_bytes!("../../assets/prime_finder");
 const TIME_PRINTER: &[u8] = include_bytes!("../../assets/time_printer");
-const FILE_READER: &[u8] = include_bytes!("../../assets/file_reader");
 
 #[unsafe(no_mangle)]
 extern "C" fn _start() -> ! {
@@ -117,18 +115,18 @@ extern "C" fn _start() -> ! {
     proc::init();
 
     let mut counter = 0;
-    loop {
-        if counter % 10 == 0 {
-            println!(level:info, "loopng...");
-        }
-        std::thread::sleep(core::time::Duration::from_millis(100));
-        counter += 1;
-        task_runner::process_tasks();
-        task_runner::run_repeating_tasks();
-    }
+    // loop {
+    //     if counter % 10 == 0 {
+    //         println!(level:info, "loopng...");
+    //     }
+    //     std::thread::sleep(core::time::Duration::from_millis(100));
+    //     counter += 1;
+    //     task_runner::process_tasks();
+    //     task_runner::run_repeating_tasks();
+    // }
 
     // //start first proc
-    // unsafe { core::arch::asm!("int 254") };
+    unsafe { core::arch::asm!("int 254") };
 
     panic!("Returned to _start after first context switch");
 }

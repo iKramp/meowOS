@@ -197,7 +197,6 @@ Repositions the file offset of the open file descriptor fd according to the offs
 1. bit 1: WRITE - pages may be written
 1. bit 2: EXECUTE - pages may be executed
 1. bit 3: CLEAR - pages are zeroed on mapping
-1. bit 3: STACK - mapping is intended to be used as a stack, meaning it can grow downwards
 #### Description:
 Maps a file or device into memory. If fd is -1, an anonymous mapping is created. The mapping starts at the specified offset in the file and spans size bytes.
 The addr parameter can be used to suggest a starting address for the mapping; if NULL, the kernel chooses the address.

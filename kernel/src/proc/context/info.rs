@@ -1,4 +1,5 @@
 use bitfield::bitfield;
+use core::fmt::Debug;
 use std::{boxed::Box, mem_utils::VirtAddr, vec::Vec};
 
 use crate::proc::MemoryContext;
@@ -65,7 +66,6 @@ pub enum MemoryRegionError {
 
 ///Describes a memory context of a process. For it to be valid, mem_init regions all have to be
 ///included in the mem_regions
-#[derive(Debug)]
 pub struct ContextInfo<'a> {
     is_32_bit: bool,
     ///Sorted by start address, no overlapping regions
@@ -74,6 +74,26 @@ pub struct ContextInfo<'a> {
     entry_point: VirtAddr,
     cmdline: Box<str>,
     path: Box<str>,
+}
+
+impl<'a> Debug for ContextInfo<'a> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ContextInfo")
+            .field("is_32_bit", &self.is_32_bit)
+            .field("mem_regions", &self.mem_regions)
+            .field(
+                "mem_init",
+                &self
+                    .mem_init
+                    .iter()
+                    .map(|(addr, data)| (addr, data.len()))
+                    .collect::<Vec<_>>(),
+            )
+            .field("entry_point", &self.entry_point)
+            .field("cmdline", &self.cmdline)
+            .field("path", &self.path)
+            .finish()
+    }
 }
 
 impl<'a> ContextInfo<'a> {

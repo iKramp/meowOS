@@ -12,3 +12,4 @@ pub use fread::fread;
 pub use fwrite::fwrite;
 pub use fclose::fclose;
 pub use illegal::illegal;
+pub use exit::exit;

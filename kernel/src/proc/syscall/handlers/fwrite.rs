@@ -1,4 +1,4 @@
-use std::{boxed::Box, mem_utils::PhysAddr, sync::arc::Arc, vec::Vec};
+use std::{boxed::Box, mem_utils::PhysAddr, println, sync::arc::Arc, vec::Vec};
 
 use crate::{proc::{ProcessData, syscall::{self, SyscallArgs}}, task_runner};
 
@@ -10,7 +10,8 @@ pub fn fwrite(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
     let proc = proc.clone();
     let pid = proc.pid();
     
-    if !syscall::verify_memory(buffer_ptr as u64, buffer_ptr as u64 + size) {
+    if !syscall::verify_memory_range(buffer_ptr as u64, buffer_ptr as u64 + size) {
+        println!("fwrite: invalid buffer pointer or size");
         args.syscall_number = u64::MAX;
         return false;
     }
@@ -26,6 +27,7 @@ pub fn fwrite(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
         if let Some(f_handle) = proc_mut.take_file_handle(fd) {
             f_handle
         } else {
+            println!("fwrite: invalid fd {fd}");
             args.syscall_number = u64::MAX;
             return false;
         }
@@ -48,6 +50,7 @@ pub fn fwrite(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
             return; //proc was killed
         };
         if write_result.is_err() {
+            println!("fwrite: write failed");
             let proc_lock = proc.get();
             proc_lock.set_syscall_return(u64::MAX, 1);
             return;
@@ -64,6 +67,7 @@ pub fn fwrite(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
 
         //return
         proc.set_syscall_return(bytes_written, 0);
+        println!("fwrite: finished processing fwrite for pid {pid:?}, bytes_written: {bytes_written}");
         crate::proc::wake_process(proc.pid())
     };
 

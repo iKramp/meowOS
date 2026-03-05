@@ -10,7 +10,7 @@ pub fn fread(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
     let proc = proc.clone();
     let pid = proc.pid();
     
-    if !syscall::verify_memory(buffer_ptr as u64, buffer_ptr as u64 + size) {
+    if !syscall::verify_memory_range(buffer_ptr as u64, buffer_ptr as u64 + size) {
         args.syscall_number = u64::MAX;
         return false;
     }

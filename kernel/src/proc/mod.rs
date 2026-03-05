@@ -75,24 +75,18 @@ pub fn init() {
     create_fallback_process();
     loaders::init_process_loaders();
 
-    // let prime_finder = loaders::load_process(crate::PRIME_FINDER, "[prime_finder]".to_string().into_boxed_str())
-    //     .expect("Failed to load test executable prime finders");
-    // for _i in 0..10 {
-    //     let pid = create_process(&prime_finder);
-    //     println!("Created process with pid: {:?}", pid);
-    // }
-    //
-    // let time_printer = loaders::load_process(crate::TIME_PRINTER, "[time_printer]".to_string().into_boxed_str())
-    //     .expect("Failed to load test executable time printer");
+    let time_printer = loaders::load_process(crate::TIME_PRINTER, "[time_printer]".to_string().into_boxed_str())
+        .expect("Failed to load test executable time printer");
+    let pid = create_process(&time_printer);
     // for _i in 0..10 {
     //     let pid = create_process(&time_printer);
     //     println!("Created process with pid: {:?}", pid);
     // }
 
-    let file_reader = loaders::load_process(crate::FILE_READER, "[file_reader]".to_string().into_boxed_str())
-        .expect("Failed to load test executable file reader");
-    let pid = create_process(&file_reader);
-    println!("Created file reader process with pid: {:?}", pid);
+    // let file_reader = loaders::load_process(crate::FILE_READER, "[file_reader]".to_string().into_boxed_str())
+    //     .expect("Failed to load test executable file reader");
+    // let pid = create_process(&file_reader);
+    // println!("Created file reader process with pid: {:?}", pid);
 
 
     syscall::init();

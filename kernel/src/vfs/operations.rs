@@ -265,6 +265,7 @@ pub async fn create_file(parent_dir: &mut FileHandle, name: &str, inode_type: In
 
 pub async fn write_file(file_handle: &mut FileHandle, content: &[PhysAddr], size: u64) -> Result<u64, ErrorCode> {
     if !file_handle.file_flags.write() {
+        println!("write_file: insufficient permissions");
         return Err(ErrorCode::InsufficientPermissions);
     }
 
@@ -276,6 +277,7 @@ pub async fn write_file(file_handle: &mut FileHandle, content: &[PhysAddr], size
     let fs = fs.clone();
     drop(vfs);
 
+    println!("operations::write_file: Inode {:X?}", inode);
     let offset = if file_handle.file_flags.append() {
         inode.size
     } else {

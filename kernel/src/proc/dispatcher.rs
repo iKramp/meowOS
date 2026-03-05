@@ -1,3 +1,5 @@
+use std::println;
+
 use crate::{acpi::cpu_locals::PageFaultHandleMode, interrupts::{InterruptProcessorState, disable_interrupts}, memory::paging};
 
 use super::{process_data::CpuStateType, syscall::SyscallCpuState, ProcessData};
@@ -25,6 +27,7 @@ pub(super) fn dispatch(new_proc: &ProcessData) -> ! {
     let mut locals = crate::acpi::cpu_locals::CpuLocals::get_mut();
     disable_interrupts();
     let cpu_state = new_proc.take_cpu_state();
+    println!("Dispatching process with state: {:x?}", cpu_state);
     unsafe {
         core::arch::asm!(
             //this is a bit tricky. We can do this because context switch is only called on

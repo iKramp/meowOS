@@ -6,6 +6,7 @@ fn main() {
     let uefi = false;
     let snapshot = true;
     let cores = 1;
+    let net = false;
 
     let mut cmd = std::process::Command::new("qemu-system-x86_64");
     //general config
@@ -28,9 +29,9 @@ fn main() {
         cmd.arg("-bios").arg(ovmf_prebuilt::ovmf_pure_efi());
     }
 
-
     //kernel image
-    cmd.arg("-drive").arg("id=boot_cd,format=raw,file=kernel_build_files/image.iso,media=cdrom");
+    cmd.arg("-drive")
+        .arg("id=boot_cd,format=raw,file=kernel_build_files/image.iso,media=cdrom");
     cmd.arg("-boot").arg("order=d");
 
     //ahci disk
@@ -44,11 +45,15 @@ fn main() {
     cmd.arg("-device").arg("ahci,id=ahci");
     cmd.arg("-device").arg("ide-hd,drive=test_disk,bus=ahci.0");
 
-    //networking
-    cmd.arg("-netdev")
-        .arg("tap,id=net0,ifname=tap0,script=no,downscript=no")
-        .arg("-device").arg("e1000e,netdev=net0")
-        .arg("-object").arg("filter-dump,id=f1,netdev=net0,file=packets.pcap");
+    if net {
+        //networking
+        cmd.arg("-netdev")
+            .arg("tap,id=net0,ifname=tap0,script=no,downscript=no")
+            .arg("-device")
+            .arg("e1000e,netdev=net0")
+            .arg("-object")
+            .arg("filter-dump,id=f1,netdev=net0,file=packets.pcap");
+    }
 
     //logging
     let log_file = File::create("qemu_serial.log").expect("Failed to create log file");

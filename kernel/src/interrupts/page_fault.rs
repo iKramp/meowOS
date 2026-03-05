@@ -29,9 +29,9 @@ pub extern "C" fn page_fault(proc_data: &mut InterruptProcessorState) {
     let page_fault_mode = locals.page_fault_handle_mode;
     drop(locals);
 
-    let _cr2: u64;
+    let page_fault_addr: u64;
     unsafe {
-        core::arch::asm!("mov {}, cr2", out(reg) _cr2);
+        core::arch::asm!("mov {}, cr2", out(reg) page_fault_addr);
     }
 
     if proc_data.interrupt_frame.rip >= core::ptr::addr_of!(crate::memory::probe_functions_start) as u64
@@ -42,24 +42,25 @@ pub extern "C" fn page_fault(proc_data: &mut InterruptProcessorState) {
     }
 
     match page_fault_mode {
-        PageFaultHandleMode::KernelPanic => fatal_page_fault(proc_data),
+        PageFaultHandleMode::KernelPanic => fatal_page_fault(proc_data, page_fault_addr),
         PageFaultHandleMode::User => {
             todo!()
         }
     }
 }
 
-fn fatal_page_fault(proc_data: &InterruptProcessorState) -> ! {
+fn fatal_page_fault(proc_data: &InterruptProcessorState, page_fault_addr: u64) -> ! {
     println!("{}", proc_data as *const InterruptProcessorState as usize);
     printlnc!(level:error,
         (0, 0, 255),
-        "EXCEPTION: PAGE FAULT. error code: {:#X?}\nproc state: {:#X?}",
+        "EXCEPTION: PAGE FAULT. error code: {:#X?}\nproc state: {:#X?}, rip: {:?}",
         PageFaultErrorCode::from(proc_data.err_code),
-        proc_data
+        proc_data,
+        proc_data.interrupt_frame.rip,
     );
     let mut page_tree = PageTree::new(PageTree::get_level4_addr());
     page_tree
-        .get_page_table_entry_mut(VirtAddr(proc_data.interrupt_frame.rip & 0xFFFF_FFFF_FFFF_F000))
+        .get_page_table_entry_mut(VirtAddr(page_fault_addr & 0xFFFF_FFFF_FFFF_F000))
         .map(|entry| {
             println!(level:error,
                 "Page fault at {:#X?} with entry: {:#X?}",
@@ -67,7 +68,7 @@ fn fatal_page_fault(proc_data: &InterruptProcessorState) -> ! {
             );
         })
         .unwrap_or_else(|| {
-            println!(level:error,"Page fault at {:#X?} with no entry", proc_data.interrupt_frame.rip);
+            println!(level:error,"Page fault at {:#X?} with no entry", page_fault_addr);
         });
     unsafe {
         loop {
