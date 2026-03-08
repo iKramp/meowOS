@@ -10,12 +10,11 @@ use std::{
 use uuid::Uuid;
 
 use crate::{
-    memory::{
+    drivers::filesystem::rfs::RfsFactory, memory::{
         PAGE_TREE_ALLOCATOR,
         paging::{LiminePat, PageTree},
         physical_allocator,
-    },
-    vfs::VFS,
+    }, vfs::VFS
 };
 
 use super::block_device::disk::{BlockDevice, Partition, PartitionSchemeDriver};
@@ -71,8 +70,18 @@ impl PartitionSchemeDriver for GPTDriver {
                 }
                 let mut name = String::from_utf16(&entry.partition_name).unwrap_or("invalid_partition_name".to_string());
                 name.remove_matches("\u{0}");
-                let partition_uuid = Uuid::from_bytes(entry.unique_partition_guid);
-                let fs_uuid = Uuid::from_bytes(entry.partition_type_guid);
+                let partition_uuid = Uuid::from_fields(
+                    u32::from_le_bytes(entry.unique_partition_guid[0..4].try_into().expect("slice with incorrect length")),
+                    u16::from_le_bytes(entry.unique_partition_guid[4..6].try_into().expect("slice with incorrect length")),
+                    u16::from_le_bytes(entry.unique_partition_guid[6..8].try_into().expect("slice with incorrect length")),
+                    &entry.unique_partition_guid[8..].try_into().expect("slice with incorrect length"),
+                );
+                let fs_uuid = Uuid::from_fields(
+                    u32::from_le_bytes(entry.partition_type_guid[0..4].try_into().expect("slice with incorrect length")),
+                    u16::from_le_bytes(entry.partition_type_guid[4..6].try_into().expect("slice with incorrect length")),
+                    u16::from_le_bytes(entry.partition_type_guid[6..8].try_into().expect("slice with incorrect length")),
+                    &entry.partition_type_guid[8..].try_into().expect("slice with incorrect length"),
+                );
                 partitions.push((
                     partition_uuid,
                     Partition {
@@ -93,9 +102,8 @@ impl PartitionSchemeDriver for GPTDriver {
             }
             PAGE_TREE_ALLOCATOR.deallocate(first_lba_binding);
         }
-        //
-        // println!("Partitions: {:#?}", partitions);
 
+        println!("Partitions: {:#?}", partitions);
         partitions
     }
 
@@ -112,7 +120,12 @@ impl PartitionSchemeDriver for GPTDriver {
         let header = unsafe { get_at_virtual_addr::<GptHeader>(first_lba_binding) };
         let guid = header.disk_guid;
         unsafe { PAGE_TREE_ALLOCATOR.deallocate(first_lba_binding) };
-        Uuid::from_bytes(guid)
+        Uuid::from_fields(
+            u32::from_le_bytes(guid[0..4].try_into().expect("slice with incorrect length")),
+            u16::from_le_bytes(guid[4..6].try_into().expect("slice with incorrect length")),
+            u16::from_le_bytes(guid[6..8].try_into().expect("slice with incorrect length")),
+            &guid[8..].try_into().expect("slice with incorrect length"),
+        )
     }
 }
 

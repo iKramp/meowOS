@@ -28,3 +28,5 @@ iso/
 *.pcap
 
 result
+
+ahci_disk.img.bak

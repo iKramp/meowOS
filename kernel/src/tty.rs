@@ -1,4 +1,4 @@
-use std::{boxed::Box, format, lock_w_info, string::{String}, sync::no_int_spinlock::NoIntSpinlock, vec::Vec};
+use std::{boxed::Box, format, lock_w_info, string::{String, ToString}, sync::no_int_spinlock::NoIntSpinlock, vec::Vec};
 
 use crate::{
     keyboard::{self, Key},
@@ -22,6 +22,28 @@ impl TtyState {
             input_buffer: String::new(),
             running_pid: None,
             started_proc: false,
+        }
+    }
+
+    pub fn data_len(&self) -> usize {
+        self.done_streams.iter().map(|(s, _)| s.len()).sum::<usize>()
+    }
+
+    pub fn get_input(&mut self, max_size: u64) -> Option<String> {
+        if let Some((stream, _)) = self.done_streams.pop() {
+            if stream.len() as u64 > max_size {
+                let mut split_point = max_size as usize;
+                while !stream.is_char_boundary(split_point) {
+                    split_point -= 1;
+                }
+                let remaining = stream[split_point..].to_string();
+                self.done_streams.insert(0, (remaining, false));
+                Some(stream[..split_point].to_string())
+            } else {
+                Some(stream)
+            }
+        } else {
+            None
         }
     }
 
@@ -207,7 +229,7 @@ impl TtyState {
         }
     }
 
-    fn print(&self, data: &str) {
+    pub fn print(&self, data: &str) {
         lock_w_info!(vga_text::VGA_TEXT).write_text(data);
     }
 

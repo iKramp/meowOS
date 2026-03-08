@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::{drivers::{
     block_device::disk::{BlockDevice, DirEntry, MountedPartition, PartitionSchemeDriver},
     gpt::GPTDriver,
-}, vfs::Inode};
+}, vfs::{Inode, InodeIdentifier}};
 
 use super::{
     DeviceDetails, InodeIdentifierChain, InodeType, ROOT_INODE_INDEX, ResolvedPath, ResolvedPathBorrowed, VFS,
@@ -143,15 +143,18 @@ async fn mount_filesystem(mountpoint: ResolvedPath, fs: Arc<dyn FileSystem + Sen
     let root = mountpoint.inner().is_empty();
     if root {
         //mounting root
+        println!("Mounting root filesystem");
         mount_new_root(&fs).await?;
         let fs: Arc<dyn FileSystem + Send> = fs;
         let mut vfs = lock_w_info!(VFS);
         vfs.mounted_filesystems.insert(part_id, fs);
         mount_vfs_adapters(vfs).await;
     } else {
+        println!("Mounting filesystem at {:?}", mountpoint.inner());
         let fs_root_inode = fs.stat(ROOT_INODE_INDEX).await?;
-        //we disallow the mounting of root failing so no checks :3
+        println!("Mounting filesystem with root inode: {:X?}", fs_root_inode);
         let (inode, _parent_inode_chain) = fs_tree::get_inode_chain((&mountpoint).into(), None).await?;
+        println!("mountpoint inode: {:X?}", inode);
         fs_tree::mount_inode(inode, fs_root_inode);
         let fs: Arc<dyn FileSystem + Send> = fs;
         let mut vfs = lock_w_info!(VFS);
@@ -163,6 +166,7 @@ async fn mount_filesystem(mountpoint: ResolvedPath, fs: Arc<dyn FileSystem + Sen
 
 async fn mount_new_root(fs: &Arc<dyn FileSystem + Send>) -> Result<(), ErrorCode> {
     let inode = fs.stat(ROOT_INODE_INDEX).await?;
+    println!("Mounted root filesystem with root inode: {:X?}", inode);
     let inode_index = inode.index;
     fs_tree::init(inode);
 
@@ -171,6 +175,7 @@ async fn mount_new_root(fs: &Arc<dyn FileSystem + Send>) -> Result<(), ErrorCode
     let required_dirs = ["tty", "proc", "net"];
     for required_dir in required_dirs.iter() {
         if !root_dirs.iter().any(|entry| entry.name.as_ref() == *required_dir) {
+            println!("Root filesystem is missing required directory {required_dir}, creating it");
             //create the required directory
             fs.create(required_dir, ROOT_INODE_INDEX, InodeType::new_dir(0o755), 0, 0)
                 .await?;
@@ -228,7 +233,7 @@ pub async fn open_file(
     })
 }
 
-pub async fn close_file(_file_handle: &FileHandle) {
+pub async fn close_file(_file_handle: FileHandle) {
     //does nothing for now
 }
 
@@ -266,7 +271,6 @@ pub async fn create_file(parent_dir: &mut FileHandle, name: &str, inode_type: In
     fs_tree::update_inode(parent_dir.inode, parent_inode)?;
     fs_tree::insert_inode(parent_dir.inode, name.to_string().into_boxed_str(), file_inode)?;
 
-
     Ok(())
 }
 
@@ -293,6 +297,8 @@ pub async fn write_file(file_handle: &mut FileHandle, content: &[PhysAddr], size
     };
 
     let res = fs.write(inode.index, offset, size, content).await?;
+    fs_tree::update_inode(file_handle.inode, res.0)?;
+    
 
     if !file_handle.file_flags.append() {
         file_handle.position += size;

@@ -108,15 +108,19 @@ pub async fn get_inode_chain(
         }
 
         let current_last = *current.last().expect("current can't be empty");
+        println!("get_inode_chain: current last inode: {:?}, component: {}", current_last, component);
+
         while let Some(mount_point) = cache_lock.as_ref().expect("is some").mount_points.get(&current_last) {
             if *mount_point == current_last {
                 printlnc!((0, 255, 255), "Detected mount loop at inode {:?}\n", current);
                 break;
             }
             *current.last_mut().expect("current can't be empty") = *mount_point;
+            println!("get_inode_chain: following mount point to inode: {:?}", *mount_point);
         }
 
         let child = find_child_no_mounts(*current.last().expect("current can't be empty"), component, &mut cache_lock).await?;
+        println!("get_inode_chain: found child inode: {:?} for component: {}", child, component);
         current.push(child);
     }
     if let Some(mount_point) = cache_lock
@@ -145,11 +149,16 @@ async fn find_child_no_mounts(
         .inodes
         .get(&current)
         .ok_or(ErrorCode::InodeNotPresent)?;
+
+    println!("find_child_no_mounts: current node: {:?}, looking for child: {}", current, f_name);
+
     let child = current_node.1.children.iter().find(|(name, _)| **name == *f_name);
     if let Some(child) = child {
+        println!("find_child_no_mounts: found child in cache: {:?} for name: {}", child.1, f_name);
         return Ok(child.1);
     }
     // If the child is not found, we need to load the directory
+    println!("find_child_no_mounts: child not found in cache for name: {}, loading directory for inode: {:?}", f_name, current);
     load_dir(current, cache).await?;
     // After loading, we check again
     let current_node = cache
@@ -160,8 +169,10 @@ async fn find_child_no_mounts(
         .ok_or(ErrorCode::InodeNotPresent)?;
     let child = current_node.1.children.iter().find(|(name, _)| **name == *f_name);
     if let Some(child) = child {
+        println!("find_child_no_mounts: found child after loading directory: {:?} for name: {}", child.1, f_name);
         return Ok(child.1);
     }
+    println!(level:error, "find_child_no_mounts: child still not found after loading directory for name: {}, inode: {:?}", f_name, current);
     Err(ErrorCode::NoEntry)
 }
 

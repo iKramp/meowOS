@@ -113,16 +113,9 @@ extern "C" fn _start() -> ! {
         println!("{}", e);
         panic!("Failed to mount root partition");
     }
+    panic!("stop here");
 
     proc::init();
-
-    let mut counter = 0;
-    loop {
-        std::thread::sleep(core::time::Duration::from_millis(1));
-        counter += 1;
-        task_runner::process_tasks();
-        task_runner::run_repeating_tasks();
-    }
 
     // //start first proc
     unsafe { core::arch::asm!("int 254") };

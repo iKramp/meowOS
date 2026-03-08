@@ -15,7 +15,7 @@ use std::{
     error::ErrorCode,
     lock_w_info,
     mem_utils::{PhysAddr, VirtAddr, get_at_virtual_addr, memset_virtual_addr, set_at_virtual_addr},
-    printlnc,
+    println, printlnc,
     sync::{arc::Arc, async_lock::AsyncSpinlock, async_rw_lock::AsyncRWlock, no_int_spinlock::NoIntSpinlock},
     vec::Vec,
 };
@@ -127,9 +127,7 @@ impl Rfs {
         let header = unsafe { get_at_virtual_addr::<SuperBlock>(working_block.virt) };
         let root_block = header.inode_tree;
 
-        // driver.format_partition();
-
-        Self {
+        let rfs_driver = Self {
             inode_lock: AsyncSpinlock::new(()),
             inode_tree_cache: UnsafeCell::new(BTreeMap::new()),
             root_block,
@@ -138,7 +136,11 @@ impl Rfs {
             blocks,
             file_locks: NoIntSpinlock::new(BTreeMap::new()),
             block_alloc_lock: AsyncSpinlock::new(()),
-        }
+        };
+
+        // rfs_driver.format_partition().await;
+        // panic!();
+        rfs_driver
     }
 
     fn get_file_lock(&self, inode_index: u32) -> Arc<AsyncRWlock<()>> {
@@ -323,7 +325,7 @@ impl Rfs {
             e.insert((false, data));
         }
 
-        cache.get_mut(&node_block).expect("if it wasn't in, it was inserted???")
+        unsafe { cache.get_mut(&node_block).unwrap_unchecked() }
     }
 
     /// Safety
@@ -370,14 +372,24 @@ impl Rfs {
         let whole_groups = whole_blocks / GROUP_BLOCK_SIZE;
         let last_group_blocks = whole_blocks % GROUP_BLOCK_SIZE;
         let group_memory = get_working_block();
+
+        //----------Clear disk----------
         unsafe {
             memset_virtual_addr(group_memory.virt, 0, 4096);
+        }
 
+        for i in 0..whole_blocks {
+            self.partition
+                .write(i as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[group_memory.phys])
+                .await;
+        }
+
+        //----------Initialize free block tables----------
+        unsafe {
             //first 5 groups are taken
             set_at_virtual_addr::<u8>(group_memory.virt, 0b11111);
         }
 
-        //----------Initialize free block tables----------
         for i in 0..whole_groups {
             self.partition
                 .write(i as usize * GROUP_BLOCK_SIZE as usize, 8, &[group_memory.phys])
@@ -1015,6 +1027,7 @@ impl FileSystem for Rfs {
         uid: u16,
         gid: u16,
     ) -> Result<(vfs::Inode, vfs::Inode), ErrorCode> {
+        println!("Creating file with name {name} in dir {parent_dir}");
         let new_inode_block_index = self.allocate_block().await;
         let inode_lock = self.inode_lock.lock().await;
         let inode_index = unsafe { self.allocate_inode().await };
@@ -1056,13 +1069,7 @@ impl FileSystem for Rfs {
         if let Err(e) = link_res {
             //rollback
             let inode_lock = self.inode_lock.lock().await;
-            BtreeNode::delete_key_root(
-                root,
-                self.root_block,
-                inode_index,
-                self,
-            )
-            .await;
+            BtreeNode::delete_key_root(root, self.root_block, inode_index, self).await;
             unsafe { self.remove_inode_from_bitmask(inode_index).await };
             self.free_block(new_inode_block_index).await;
 
@@ -1118,9 +1125,10 @@ impl FileSystem for Rfs {
         let dir_size = parent_inode_data.size.size();
         let dir_block_count = dir_size.div_ceil(4096);
 
-        let working_blocks = (0..dir_block_count).map(|_| get_working_block())
+        let working_blocks = (0..dir_block_count)
+            .map(|_| get_working_block())
             .collect::<Vec<AllocatedBlock>>();
-        
+
         let frames = working_blocks.iter().map(|b| b.phys).collect::<Vec<PhysAddr>>();
         let folder_binding = working_blocks[0].virt;
 

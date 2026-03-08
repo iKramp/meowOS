@@ -1,6 +1,6 @@
 use std::{
     boxed::Box,
-    mem_utils::{PhysAddr, VirtAddr},
+    mem_utils::{PhysAddr, VirtAddr}, println,
 };
 
 use super::{AllocatedBlock, BLOCK_SIZE_SECTORS, MountedPartition, Rfs};
@@ -109,8 +109,11 @@ impl BtreeNode {
 
     //returns a new root node if the root was split
     pub async fn insert_key_root(node: VirtAddr, block: u32, key: Key, fs_data: &Rfs) -> Option<u32> {
+        //print all params
+        println!("insert_key_root: node={:?}, block={}, key={:?}", node, block, key);
         let is_leaf = Self::get_child(node, 0) == 0;
         let is_full = Self::get_key(node, 340).index != 0;
+        println!("is_leaf={}, is_full={}", is_leaf, is_full);
 
         if is_leaf {
             if is_full {
@@ -679,6 +682,9 @@ impl BtreeNode {
         while ptr >= 0 && BtreeNode::get_key(node, ptr as usize).index == 0 {
             ptr -= 1;
         }
+
+        println!("inserting into ptr {}", ptr);
+
         if ptr < 0 {
             BtreeNode::set_key(node, 0, key);
             //is empty root
