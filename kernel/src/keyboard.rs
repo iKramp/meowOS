@@ -1,10 +1,50 @@
 use std::vec::Vec;
 
-pub fn handle_keyboard_data(bytes: Vec<u8>) -> Vec<(Key, KeyEvent)> {
+bitfield::bitfield! {
+    pub struct KeyboardState(u16);
+    impl Debug;
+    pub lshift, set_lshift: 0;
+    pub rshift, set_rshift: 1;
+    pub fakelshift, set_fakelshift: 2;
+    pub fakershift, set_fakershift: 3;
+    pub lctrl, set_lctrl: 4;
+    pub rctrl, set_rctrl: 5;
+    pub lalt, set_lalt: 6;
+    pub ralt, set_ralt: 7;
+    pub lsuper, set_lsuper: 8;
+    pub rsuper, set_rsuper: 9;
+
+    //add lock keys
+}
+
+impl KeyboardState {
+    pub fn new() -> Self {
+        Self(0)
+    }
+
+    pub fn shift(&self) -> bool {
+        (self.lshift() && self.fakelshift()) || (self.rshift() && self.fakershift())
+    }
+
+    pub fn ctrl(&self) -> bool {
+        self.lctrl() || self.rctrl()
+    }
+
+    pub fn alt(&self) -> bool {
+        self.lalt() || self.ralt()
+    }
+
+    pub fn super_key(&self) -> bool {
+        self.lsuper() || self.rsuper()
+    }
+}
+
+pub fn handle_keyboard_data(bytes: Vec<u8>, state: &mut KeyboardState) -> Vec<(Key, KeyEvent)> {
     let mut bytes_slice = bytes.as_slice();
     let mut events = Vec::new();
     while !bytes_slice.is_empty() {
         let byte = bytes_slice[0];
+        let new_event;
 
         if [0x00, 0xaa, 0xee, 0xf1, 0xfa, 0xfc, 0xfd, 0xfe, 0xff].contains(&byte) {
             bytes_slice = &bytes_slice[1..];
@@ -13,10 +53,12 @@ pub fn handle_keyboard_data(bytes: Vec<u8>) -> Vec<(Key, KeyEvent)> {
 
         if [0xe0, 0xe1, 0xe2].contains(&byte) {
             let (key_event_opt, seq_len) = Key::from_sequence(bytes_slice);
-            if let Some((key, key_event)) = key_event_opt {
-                events.push((key, key_event));
-            }
             bytes_slice = &bytes_slice[seq_len..];
+            if let Some((key, key_event)) = key_event_opt {
+                new_event = (key, key_event);
+            } else {
+                continue; //unknown sequence, ignore
+            }
         } else {
             let key_event = if byte & 0x80 == 0 {
                 KeyEvent::Pressed
@@ -26,24 +68,62 @@ pub fn handle_keyboard_data(bytes: Vec<u8>) -> Vec<(Key, KeyEvent)> {
 
             let key_code = byte & 0x7F;
             if let Some(key) = Key::from_single_byte(key_code) {
-                events.push((key, key_event));
+                new_event = (key, key_event);
                 bytes_slice = &bytes_slice[1..];
             } else {
                 continue; //unknown key, ignore
             }
         }
+
+        match new_event.0 {
+            Key::LShift => {
+                state.set_lshift(new_event.1 == KeyEvent::Pressed);
+                state.set_fakelshift(new_event.1 == KeyEvent::Pressed);
+            }
+            Key::RShift => {
+                state.set_rshift(new_event.1 == KeyEvent::Pressed);
+                state.set_fakershift(new_event.1 == KeyEvent::Pressed);
+            }
+            Key::FakeLShift => {
+                state.set_fakelshift(new_event.1 == KeyEvent::Pressed);
+            }
+            Key::FakeRshift => {
+                state.set_fakershift(new_event.1 == KeyEvent::Pressed);
+            }
+            Key::Lctrl => {
+                state.set_lctrl(new_event.1 == KeyEvent::Pressed);
+            }
+            Key::Rctrl => {
+                state.set_rctrl(new_event.1 == KeyEvent::Pressed);
+            }
+            Key::LAlt => {
+                state.set_lalt(new_event.1 == KeyEvent::Pressed);
+            }
+            Key::RAlt => {
+                state.set_ralt(new_event.1 == KeyEvent::Pressed);
+            }
+            Key::LSuper => {
+                state.set_lsuper(new_event.1 == KeyEvent::Pressed);
+            }
+            Key::RSuper => {
+                state.set_rsuper(new_event.1 == KeyEvent::Pressed);
+            }
+            _ => {}
+        }
+
+        events.push(new_event);
     }
 
     events
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum KeyEvent {
     Pressed,
     Released,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 #[rustfmt::skip]
 pub enum Key {
     Esc, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,

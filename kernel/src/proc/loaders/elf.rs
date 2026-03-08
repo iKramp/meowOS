@@ -1,4 +1,4 @@
-use std::{boxed::Box, mem_utils::VirtAddr, println, vec::Vec};
+use std::{mem_utils::VirtAddr, println, vec::Vec};
 
 use crate::{
     parsers::elf,
@@ -18,7 +18,7 @@ fn is_elf(data: &[u8]) -> bool {
     data.len() >= 4 && &data[0..4] == b"\x7fELF"
 }
 
-fn load_elf_process(data: &[u8], path: Box<str>) -> Result<ContextInfo, super::ProcessLoadError> {
+fn load_elf_process<'a>(data: &'a [u8], cmdline: &'a str) -> Result<ContextInfo<'a>, super::ProcessLoadError> {
     let parsed_elf = if data.as_ptr() as usize % 8 == 0 {
         elf::parse(data)
     } else {
@@ -48,7 +48,10 @@ fn load_elf_process(data: &[u8], path: Box<str>) -> Result<ContextInfo, super::P
             continue; // Only loadable segments
         }
 
-        println!("Processing segment with vaddr {:x?}, memsz {:x?}, filesz {:x?}, p_flags {:x?}", segment.p_vaddr, segment.p_memsz, segment.p_filesz, segment.p_flags);
+        println!(
+            "Processing segment with vaddr {:x?}, memsz {:x?}, filesz {:x?}, p_flags {:x?}",
+            segment.p_vaddr, segment.p_memsz, segment.p_filesz, segment.p_flags
+        );
         let start = segment.p_vaddr & (!0xfff); // Align to page boundary
         let start_extended = segment.p_vaddr - start;
         let size = segment.p_memsz as usize + start_extended as usize;
@@ -79,8 +82,7 @@ fn load_elf_process(data: &[u8], path: Box<str>) -> Result<ContextInfo, super::P
         &mut regions,
         regions_init.into_boxed_slice(),
         VirtAddr(parsed_elf.header.e_entry),
-        "".into(),
-        path,
+        cmdline,
     );
 
     context_info.map_err(|_| ProcessLoadError::InvalidFile)

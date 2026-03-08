@@ -19,6 +19,7 @@ pub enum ErrorCode {
     InvalidArgument,
     Timeout,
     IllegalValue,
+    InvalidProcessFile,
 }
 
 impl Error for ErrorCode {}
@@ -43,6 +44,7 @@ impl core::fmt::Display for ErrorCode {
             ErrorCode::InvalidArgument => write!(f, "Invalid argument"),
             ErrorCode::Timeout => write!(f, "Operation timed out"),
             ErrorCode::IllegalValue => write!(f, "Illegal value"),
+            ErrorCode::InvalidProcessFile => write!(f, "Invalid process file (not valid ELF)"),
         }
     }
 }

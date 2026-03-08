@@ -1,8 +1,13 @@
 use std::{lock_w_info, sync::no_int_spinlock::NoIntSpinlock, vec::Vec};
 
-use crate::utils::{byte_from_port, byte_to_port};
+use crate::{
+    keyboard::KeyboardState,
+    utils::{byte_from_port, byte_to_port},
+};
 
 static PS2_WRITE_LOCK: NoIntSpinlock<()> = NoIntSpinlock::new(());
+
+pub static mut PS2_KEYBOARD_STATE: KeyboardState = KeyboardState(0); //so rare we don't care about locking
 
 fn wait_for_empty_write_buffer() {
     while byte_from_port(0x64) & 0x2 != 0 {}
@@ -30,4 +35,14 @@ pub fn read_scancodes() -> Vec<u8> {
         bytes.push(byte);
     }
     bytes
+}
+
+pub fn handle_ps2_keyboard_interrupt() {
+    let scancodes = crate::drivers::ps2::read_scancodes();
+    let keeb_state = unsafe { &mut PS2_KEYBOARD_STATE };
+    let keys = crate::keyboard::handle_keyboard_data(scancodes, keeb_state);
+    let mut tty = lock_w_info!(crate::tty::TTY);
+    for key in keys {
+        tty.handle_input(key.0, key.1, keeb_state);
+    }
 }

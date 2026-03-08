@@ -6,15 +6,22 @@ use core::{mem::MaybeUninit, sync::atomic::AtomicU32};
 use scheduler::Scheduler;
 use std::{
     boxed::Box,
+    error::ErrorCode,
     lock_w_info,
     mem_utils::{PhysAddr, VirtAddr},
     println,
-    string::ToString,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
     vec::Vec,
 };
 
-use crate::memory::paging::{self, PageTree};
+use crate::{
+    memory::{
+        PAGE_TREE_ALLOCATOR,
+        paging::{self, PageTree},
+        physical_allocator,
+    },
+    vfs::{self, ResolvedPathBorrowed, file::FileFlags},
+};
 
 mod context;
 mod context_switch;
@@ -23,6 +30,7 @@ mod loaders;
 mod process_data;
 mod scheduler;
 mod syscall;
+pub use context::CommandSplitter;
 pub use context_switch::{context_switch, interrupt_context_switch};
 pub use process_data::{ProcessData, StackCpuStateData};
 pub use scheduler::save_and_release_current;
@@ -75,9 +83,9 @@ pub fn init() {
     create_fallback_process();
     loaders::init_process_loaders();
 
-    let time_printer = loaders::load_process(crate::TIME_PRINTER, "[time_printer]".to_string().into_boxed_str())
-        .expect("Failed to load test executable time printer");
-    let pid = create_process(&time_printer);
+    // let time_printer = loaders::load_process(crate::TIME_PRINTER, "time_printer")
+    //     .expect("Failed to load test executable time printer");
+    // let pid = create_process(&time_printer);
     // for _i in 0..10 {
     //     let pid = create_process(&time_printer);
     //     println!("Created process with pid: {:?}", pid);
@@ -88,13 +96,66 @@ pub fn init() {
     // let pid = create_process(&file_reader);
     // println!("Created file reader process with pid: {:?}", pid);
 
-
     syscall::init();
     set_proc_initialized();
 }
 
 pub fn init_ap() {
     syscall::init();
+}
+
+pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &str) -> Result<Pid, ErrorCode> {
+    let mut file_handle = vfs::open_file(path, None, FileFlags::new().with_read(true)).await?;
+    let res = vfs::stat_file(&file_handle);
+    let stat = match res.await {
+        Err(e) => {
+            vfs::close_file(&file_handle).await;
+            return Err(e);
+        }
+        Ok(stat) => stat,
+    };
+    let buf_pages = stat.size.div_ceil(4096);
+    let phys_buf = physical_allocator::allocate_contiguius_high(buf_pages);
+    let buf = unsafe { PAGE_TREE_ALLOCATOR.allocate_contigious(buf_pages, Some(phys_buf), false) };
+    let phys_buf_vec = (0..buf_pages).map(|i| phys_buf + i * 4096).collect::<Vec<_>>();
+    let read_res = vfs::read_file(&mut file_handle, &phys_buf_vec, stat.size).await?;
+    vfs::close_file(&file_handle).await;
+    if read_res != stat.size {
+        for i in 0..buf_pages {
+            unsafe { PAGE_TREE_ALLOCATOR.deallocate(buf + i * 4096) };
+        }
+        return Err(ErrorCode::InternalFSError);
+    }
+
+    let context = match loaders::load_process_context(
+        unsafe { core::slice::from_raw_parts(buf.0 as *const u8, stat.size as usize) },
+        cmdline,
+    ) {
+        Ok(context) => context,
+        Err(_) => {
+            println!(level:error, "Failed to load process from file: {}", path.to_string());
+            for i in 0..buf_pages {
+                unsafe { PAGE_TREE_ALLOCATOR.deallocate(buf + i * 4096) };
+            }
+            return Err(ErrorCode::InvalidProcessFile);
+        }
+    };
+
+    let new_pid = match create_process(&context) {
+        Ok(pid) => pid,
+        Err(e) => {
+            println!(level:error, "Failed to create process from file: {}, error: {:?}", path.to_string(), e);
+            for i in 0..buf_pages {
+                unsafe { PAGE_TREE_ALLOCATOR.deallocate(buf + i * 4096) };
+            }
+            return Err(e);
+        }
+    };
+    for i in 0..buf_pages {
+        unsafe { PAGE_TREE_ALLOCATOR.deallocate(buf + i * 4096) };
+    }
+
+    Ok(new_pid)
 }
 
 pub fn switch_to_generic_mem_tree() {
@@ -169,8 +230,7 @@ pub fn create_fallback_process() {
         &mut [code_region, data_region],
         Box::new([(VirtAddr(0x1000), &code_init), (VirtAddr(0x2000), data_init)]),
         VirtAddr(0x1000),
-        "fallback_process".to_string().into_boxed_str(),
-        "[fallback_process]".to_string().into_boxed_str(),
+        "fallback_process",
     )
     .expect("fallback can't error");
     let pid = create_process(&fake_context).expect("failed to create fallback process");

@@ -16,6 +16,7 @@
 #![feature(let_chains)]
 #![feature(downcast_unchecked)]
 #![feature(map_try_insert)]
+#![feature(string_into_chars)]
 #![allow(internal_features)]
 #![allow(clippy::fn_to_numeric_cast)]
 
@@ -46,6 +47,7 @@ mod vga;
 mod printer;
 mod rand;
 mod net;
+mod tty;
 use limine::LIMINE_BOOTLOADER_REQUESTS;
 use task_runner::block_task;
 use vfs::ResolvedPath;
@@ -116,10 +118,7 @@ extern "C" fn _start() -> ! {
 
     let mut counter = 0;
     loop {
-        if counter % 10 == 0 {
-            println!(level:info, "loopng...");
-        }
-        std::thread::sleep(core::time::Duration::from_millis(100));
+        std::thread::sleep(core::time::Duration::from_millis(1));
         counter += 1;
         task_runner::process_tasks();
         task_runner::run_repeating_tasks();

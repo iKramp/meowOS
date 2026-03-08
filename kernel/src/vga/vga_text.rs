@@ -28,7 +28,7 @@ impl VgaText {
         }
     }
 
-    fn do_newline(&mut self) {
+    pub fn do_newline(&mut self) {
         self.char = 0;
         self.line += 1;
         if self.line >= self.height_lines - 1 {
@@ -40,6 +40,17 @@ impl VgaText {
     fn up_line(&mut self) {
         if self.line > 0 {
             self.line -= 1;
+        }
+    }
+
+    pub fn backspace(&mut self) {
+        if self.char > 0 {
+            self.char -= 1;
+        }
+        for i in 0..CHAR_WIDTH {
+            for j in 0..CHAR_HEIGHT {
+                crate::vga::vga_driver::draw_pixel(self.char * CHAR_WIDTH + i, self.line * CHAR_HEIGHT + j, self.background);
+            }
         }
     }
 

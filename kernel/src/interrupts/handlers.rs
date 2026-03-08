@@ -1,15 +1,11 @@
 use crate::{
-    acpi::{LAPIC_REGISTERS, cpu_locals::CpuLocals},
-    interrupts::gdt::GlobalDescriptorTable,
-    memory::paging::PageTree,
-    proc::context_switch,
-    utils::{byte_from_port, byte_to_port},
+    acpi::{LAPIC_REGISTERS, cpu_locals::CpuLocals}, drivers::ps2, interrupts::gdt::GlobalDescriptorTable, proc::context_switch, utils::byte_to_port
 };
 #[allow(unused_imports)] //they are used in macros
 use core::arch::asm;
+use core::ops::DerefMut;
 use std::{
-    mem_utils::{VirtAddr, get_at_virtual_addr},
-    println, printlnc,
+    lock_w_info, mem_utils::{VirtAddr, get_at_virtual_addr}, println, printlnc
 };
 
 use super::macros::InterruptProcessorState;
@@ -99,20 +95,12 @@ pub extern "C" fn spurious_interrupt(_proc_data: &mut InterruptProcessorState) {
 }
 
 pub extern "C" fn legacy_keyboard_interrupt(_proc_data: &mut InterruptProcessorState) {
-    let scancodes = crate::drivers::ps2::read_scancodes();
-    let keys = crate::keyboard::handle_keyboard_data(scancodes);
-    for key in keys {
-        println!(level:info, "key: {:#?}", key);
-    }
+    ps2::handle_ps2_keyboard_interrupt();
     legacy_eoi();
 }
 
 pub extern "C" fn apic_keyboard_interrupt(_proc_data: &mut InterruptProcessorState) {
-    let scancodes = crate::drivers::ps2::read_scancodes();
-    let keys = crate::keyboard::handle_keyboard_data(scancodes);
-    for key in keys {
-        println!(level:info, "key: {:#?}", key);
-    }
+    ps2::handle_ps2_keyboard_interrupt();
     apic_eoi();
 }
 

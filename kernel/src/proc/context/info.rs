@@ -1,6 +1,11 @@
 use bitfield::bitfield;
-use core::fmt::Debug;
-use std::{boxed::Box, mem_utils::VirtAddr, vec::Vec};
+use core::{fmt::Debug, str::Chars};
+use std::{
+    boxed::Box,
+    mem_utils::VirtAddr,
+    string::{self, String},
+    vec::Vec,
+};
 
 use crate::proc::MemoryContext;
 
@@ -73,6 +78,7 @@ pub struct ContextInfo<'a> {
     mem_init: Box<[(VirtAddr, &'a [u8])]>,
     entry_point: VirtAddr,
     cmdline: Box<str>,
+    args: Box<[Box<str>]>,
     path: Box<str>,
 }
 
@@ -102,8 +108,7 @@ impl<'a> ContextInfo<'a> {
         mem_regions: &mut [MemoryRegionDescriptor],
         mut mem_init: Box<[(VirtAddr, &'a [u8])]>,
         entry_point: VirtAddr,
-        cmdline: Box<str>,
-        path: Box<str>,
+        cmdline: &'a str,
     ) -> Result<Self, ContextInfoError> {
         //Note: This prevents cases where 2 non overlapping regions are in fixed_regions, and a new
         //region that ovrelaps both is added. When sorted, any region added may only extend an
@@ -165,13 +170,23 @@ impl<'a> ContextInfo<'a> {
             }
         }
 
+        let mut chunks = CommandSplitter::new(&cmdline);
+
+        let Some(program_path) = chunks.next() else {
+            //empty input
+            return Err(ContextInfoError::InvalidCmdLine);
+        };
+
+        let args = chunks.map(|string| string.into_boxed_str()).collect::<Vec<_>>().into_boxed_slice();
+
         Ok(Self {
             is_32_bit,
             mem_regions: fixed_regions.into_boxed_slice(),
             mem_init,
             entry_point,
-            cmdline,
-            path,
+            cmdline: cmdline.into(),
+            args,
+            path: program_path.into_boxed_str(),
         })
     }
 
@@ -212,6 +227,7 @@ pub enum ContextInfoError {
     StackSizeTooBig,
     EntryPointNotMapped,
     InitRegionNotMapped,
+    InvalidCmdLine,
 }
 
 impl Drop for MemoryContext {
@@ -221,5 +237,54 @@ impl Drop for MemoryContext {
         }
         //unmap higher half and any shared regions
         todo!("All processes running with this context have been dropped. Clean up")
+    }
+}
+
+pub struct CommandSplitter<'a> {
+    inner: Chars<'a>,
+}
+
+impl CommandSplitter<'_> {
+    pub fn new(cmdline: &str) -> CommandSplitter<'_> {
+        CommandSplitter { inner: cmdline.chars() }
+    }
+}
+
+impl Iterator for CommandSplitter<'_> {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut build_str = String::new();
+        let mut pulled_some = false;
+        loop {
+            let Some(next) = self.inner.next() else {
+                if pulled_some {
+                    return Some(build_str);
+                } else {
+                    return None;
+                }
+            };
+            pulled_some = true;
+
+            if next == '\\' {
+                let Some(next) = self.inner.next() else {
+                    return Some(build_str);
+                };
+                match next {
+                    'n' => build_str.push('\n'),
+                    't' => build_str.push('\t'),
+                    'r' => build_str.push('\r'),
+                    '0' => build_str.push('\0'),
+                    a => build_str.push(a), //this includes space and backslash, so escaping them is possible
+                }
+                continue;
+            }
+
+            if next == ' ' {
+                return Some(build_str);
+            }
+
+            build_str.push(next);
+        }
     }
 }

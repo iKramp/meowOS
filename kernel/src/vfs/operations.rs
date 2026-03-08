@@ -5,16 +5,16 @@ use std::{
     mem_utils::{PhysAddr, translate_phys_virt_addr},
     println, printlnc,
     string::ToString,
-    sync::{arc::Arc, async_lock::AsyncSpinlock, no_int_spinlock::NoIntSpinlockGuard},
+    sync::{arc::Arc, no_int_spinlock::NoIntSpinlockGuard},
     vec::Vec,
 };
 
 use uuid::Uuid;
 
-use crate::drivers::{
+use crate::{drivers::{
     block_device::disk::{BlockDevice, DirEntry, MountedPartition, PartitionSchemeDriver},
     gpt::GPTDriver,
-};
+}, vfs::Inode};
 
 use super::{
     DeviceDetails, InodeIdentifierChain, InodeType, ROOT_INODE_INDEX, ResolvedPath, ResolvedPathBorrowed, VFS,
@@ -228,6 +228,10 @@ pub async fn open_file(
     })
 }
 
+pub async fn close_file(_file_handle: &FileHandle) {
+    //does nothing for now
+}
+
 pub async fn get_dir_entries(file_handle: &FileHandle) -> Result<Box<[DirEntry]>, ErrorCode> {
     let inode = fs_tree::get_inode(file_handle.inode).ok_or(ErrorCode::InodeNotPresent)?;
     let mut vfs = lock_w_info!(VFS);
@@ -296,6 +300,10 @@ pub async fn write_file(file_handle: &mut FileHandle, content: &[PhysAddr], size
 
 
     Ok(res.1)
+}
+
+pub async fn stat_file(file_handle: &FileHandle) -> Result<Inode, ErrorCode> {
+    fs_tree::get_inode(file_handle.inode).ok_or(ErrorCode::InodeNotPresent)
 }
 
 pub async fn read_file(file_handle: &mut FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, ErrorCode> {

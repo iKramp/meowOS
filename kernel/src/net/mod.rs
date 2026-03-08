@@ -98,32 +98,8 @@ pub fn init() {
     protocols::init();
     task_runner::add_repeating_task(process_packets);
 
-    let test_socket = NetSocket::new(Box::new([AddressPair::new(
-        NetAddress::Ipv4Address(Ipv4Address([10, 0, 0, 2])),
-        NetAddress::Ipv4Address(Ipv4Address([10, 0, 0, 1])),
-    )]));
-
-    let test_socket = Arc::new(test_socket);
-
-    unsafe {
-        TEST_SOCKET = MaybeUninit::new(test_socket.clone());
-    }
-    hook::add_socket(test_socket);
-    task_runner::add_repeating_task(test_socket_fn);
-
     unsafe {
         NET_INITIALIZED = true;
-    }
-}
-
-static mut TEST_SOCKET: MaybeUninit<Arc<NetSocket>> = MaybeUninit::uninit();
-
-fn test_socket_fn() {
-    println!("Checking test socket for packets...");
-    let socket = unsafe { TEST_SOCKET.assume_init_ref() };
-    let packet = socket.get_packet();
-    if let Some(packet) = packet {
-        println!("Got packet in test socket: {:?}", packet);
     }
 }
 
@@ -134,12 +110,10 @@ fn process_packets() {
 
     let mut new_queue = DataQueueHead::new(MAX_PACKETS);
     let mut process_queue = lock_w_info!(NET_QUEUE);
-    println!("{}", process_queue.len());
     std::mem::swap(&mut new_queue, &mut process_queue);
     drop(process_queue);
 
     while let Some(packet) = new_queue.get_first() {
-        println!("Processing packet");
         flow::process_packet_flow(packet);
     }
 }

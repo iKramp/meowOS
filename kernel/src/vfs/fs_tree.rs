@@ -162,7 +162,7 @@ async fn find_child_no_mounts(
     if let Some(child) = child {
         return Ok(child.1);
     }
-    Err(ErrorCode::InodeNotPresent)
+    Err(ErrorCode::NoEntry)
 }
 
 async fn load_dir(current: InodeIdentifier, cache: &mut Option<NoIntSpinlockGuard<'_, InodeCache>>) -> Result<(), ErrorCode> {

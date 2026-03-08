@@ -281,6 +281,9 @@ impl PageTable {
     ///number of pages requested cannot be more than 512
     unsafe fn get_available_entry_pages(&self, level: u64, pages: u64, low: bool) -> Option<u64> {
         debug_assert!(pages <= 512);
+        if pages == 0 {
+            return Some(0); //can't be used, nullptr go brrr
+        }
 
         if low {
             for iterator in self.entries.iter().enumerate() {
@@ -381,7 +384,7 @@ impl PageTable {
         VirtAddr(address)
     }
 
-    ///# Seafety
+    ///# Safety
     ///Physical addresses from physical_address to physical_address + num must already be marked as
     ///used, and not yet mapped
     pub unsafe fn mmap_contigious_any(&mut self, num: u64, physical_address: PhysAddr, low: bool) -> VirtAddr {
@@ -823,11 +826,11 @@ impl PageTree {
             let level_4_table = get_at_physical_addr::<PageTable>(self.level_4_table);
             let address = match physical_address {
                 None => {
-                    let addr = level_4_table.get_available_entry_pages(4, num, low).ok_or(ErrorCode::InsufficientResources).expect("no pages?? impossible!");
+                    let addr = self.find_contigious_pages(num, low).expect("no contigious pages?? impossible!");
                     for i in 0..num {
-                        level_4_table.allocate(VirtAddr(addr + i * 4096)).expect("inconsistency between searching free contigious pages and allocating them in mmap_contigious_any");
+                        level_4_table.allocate(addr + i * 4096).expect("inconsistency between searching free contigious pages and allocating them in mmap_contigious_any");
                     }
-                    VirtAddr(addr)
+                    addr
                 }
                 Some(physical_address) => level_4_table.mmap_contigious_any(num, physical_address, low),
             };
@@ -841,22 +844,22 @@ impl PageTree {
 
     pub fn mmap_contigious(&mut self, physical_addresses: &[PhysAddr], low: bool) -> VirtAddr {
         unsafe {
+            let addr = self.find_contigious_pages(physical_addresses.len() as u64, low).expect("no contigious pages?? impossible!");
             let level_4_table = get_at_physical_addr::<PageTable>(self.level_4_table);
-            let addr = level_4_table.get_available_entry_pages(4, physical_addresses.len() as u64, low).expect("no pages?? impossible!");
             for i in 0..physical_addresses.len() {
-                level_4_table.mmap(VirtAddr(addr + i as u64 * 4096), physical_addresses[i]).expect("inconsistency between searching free contigious pages and allocating them in mmap_contigious_any");
+                level_4_table.mmap(addr + i as u64 * 4096, physical_addresses[i]).expect("inconsistency between searching free contigious pages and allocating them in mmap_contigious_any");
             }
             if low {
-                return VirtAddr(addr);
+                return addr;
             }
             //force sign extension
-            VirtAddr(addr | 0xFFFF_0000_0000_0000)
+            VirtAddr(addr.0 | 0xFFFF_0000_0000_0000)
         }
     }
 
-    pub fn find_contigious_pages(&mut self, n_pages: usize, low: bool) -> Option<std::mem_utils::VirtAddr> {
+    pub fn find_contigious_pages(&mut self, n_pages: u64, low: bool) -> Option<std::mem_utils::VirtAddr> {
         let level_4_table = unsafe { get_at_physical_addr::<PageTable>(self.level_4_table) };
-        let addr = unsafe { VirtAddr(level_4_table.get_available_entry_pages(4, n_pages as u64, low)?) };
+        let addr = unsafe { VirtAddr(level_4_table.get_available_entry_pages(4, n_pages, low)?) };
         if low {
             return Some(addr);
         }
