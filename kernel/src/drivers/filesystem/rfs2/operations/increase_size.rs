@@ -35,7 +35,8 @@ impl Rfs2 {
             needed_levles
         };
 
-        self.increase_file_depth(file_root, needed_levels as i8 - current_levels as i8).await;
+        self.increase_file_depth(file_root, needed_levels as i8 - current_levels as i8)
+            .await;
         let current_levels = current_levels.max(needed_levels);
 
         let mut working_block = WorkingBlock::new();
@@ -75,6 +76,7 @@ impl Rfs2 {
         file_info.size = new_size as u64;
         file_info.levels = current_levels;
         self.set_file_info(file_root, file_info).await;
+        working_block.forget_mem_binding();
     }
 
     async fn increase_file_size_recursively(
