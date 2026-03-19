@@ -7,7 +7,6 @@ use core::{
 
 use super::lock_info::LockLocationInfo;
 
-
 pub struct NoIntSpinlock<T: ?Sized> {
     state: AtomicU8,
     data: UnsafeCell<T>,
@@ -39,7 +38,6 @@ macro_rules! lock_w_info {
     };
 }
 
-
 impl<T: ?Sized> NoIntSpinlock<T> {
     pub fn lock(&self, location: LockLocationInfo) -> NoIntSpinlockGuard<'_, T> {
         let info = unsafe { super::lock_info::GET_LOCK_INFO() };
@@ -59,10 +57,7 @@ impl<T: ?Sized> NoIntSpinlock<T> {
         // Safety:
         // interrupts are disabled, and it is from CPU local
         info.inc_spinlocks(prev_int_state, location.clone());
-        NoIntSpinlockGuard {
-            location,
-            lock: self,
-        }
+        NoIntSpinlockGuard { location, lock: self }
     }
 
     /// only use this in a panic handler
@@ -83,10 +78,7 @@ impl<T: ?Sized> NoIntSpinlock<T> {
         // Safety:
         // interrupts are disabled, and it is from CPU local
         info.inc_spinlocks((prev_rflags & (1 << 9)) != 0, location.clone());
-        NoIntSpinlockGuard {
-            location,
-            lock: self,
-        }
+        NoIntSpinlockGuard { location, lock: self }
     }
 }
 

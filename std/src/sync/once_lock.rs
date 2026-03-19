@@ -1,7 +1,5 @@
 use core::cell::Cell;
 
-
-
 #[derive(Debug, Default)]
 pub struct OnceLock<T> {
     value: core::cell::UnsafeCell<Option<T>>,
@@ -9,8 +7,8 @@ pub struct OnceLock<T> {
     initializing: core::sync::atomic::AtomicBool,
 }
 
-unsafe impl <T: Send> Send for OnceLock<T> {}
-unsafe impl <T: Send + Sync> Sync for OnceLock<T> {}
+unsafe impl<T: Send> Send for OnceLock<T> {}
+unsafe impl<T: Send + Sync> Sync for OnceLock<T> {}
 
 impl<T> OnceLock<T> {
     pub const fn new() -> Self {
@@ -38,7 +36,12 @@ impl<T> OnceLock<T> {
             // Try to acquire the initialization lock
             while self
                 .initializing
-                .compare_exchange(false, true, core::sync::atomic::Ordering::Acquire, core::sync::atomic::Ordering::Relaxed)
+                .compare_exchange(
+                    false,
+                    true,
+                    core::sync::atomic::Ordering::Acquire,
+                    core::sync::atomic::Ordering::Relaxed,
+                )
                 .is_err()
             {
                 // Spin-wait

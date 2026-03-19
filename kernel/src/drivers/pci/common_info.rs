@@ -1,7 +1,8 @@
 use std::vec::Vec;
 
-use crate::drivers::pci::{Capability, InterruptType, PciClass, PciDeviceLocation, PciDeviceNumericId, device_codes::DeviceIdentification};
-
+use crate::drivers::pci::{
+    Capability, InterruptType, PciClass, PciDeviceLocation, PciDeviceNumericId, device_codes::DeviceIdentification,
+};
 
 #[derive(Debug)]
 pub(super) struct CommonInfo {

@@ -1,0 +1,386 @@
+use core::cell::{Cell, UnsafeCell};
+use std::{
+    collections::btree_map::BTreeMap,
+    mem_utils::{self, PhysAddr, VirtAddr},
+    println, r_lock_w_info,
+    sync::{arc::Arc, async_lock::AsyncSpinlock, rw_lock::RWSpinlock},
+    vec::Vec,
+    w_lock_w_info,
+};
+
+use crate::{
+    drivers::{
+        block_device::disk::MountedPartition,
+        filesystem::rfs2::{bitmask::INODES_PER_BITMASK, superblock::SuperBlock},
+    },
+    memory::{PAGE_TREE_ALLOCATOR, physical_allocator},
+};
+
+mod bitmask;
+mod btree;
+mod operations;
+mod superblock;
+
+const BLOCK_SIZE_SECTORS: usize = 8;
+const GROUP_SIZE_BLOCKS: usize = 4096 * 8;
+
+type InodeIndex = u32;
+type BlockPtr = u64;
+
+#[derive(Clone)]
+struct WorkingBlock {
+    pub virt: VirtAddr,
+    pub phys: PhysAddr,
+    pub disk_block: Option<u64>,
+    pub changed: bool,
+}
+
+impl WorkingBlock {
+    fn new() -> Self {
+        let phys = physical_allocator::allocate_frame();
+        let virt = unsafe { PAGE_TREE_ALLOCATOR.allocate(Some(phys), false) };
+        //no need for UC because of x86 cache coherency
+        Self {
+            virt,
+            phys,
+            disk_block: None,
+            changed: false,
+        }
+    }
+
+    pub fn get_as<T: 'static>(&self) -> &T {
+        assert!(size_of::<T>() <= 4096);
+
+        unsafe { mem_utils::get_at_virtual_addr(self.virt) }
+    }
+
+    pub fn get_as_mut<T: 'static>(&mut self) -> &mut T {
+        assert!(size_of::<T>() <= 4096);
+        self.changed = true;
+        unsafe { mem_utils::get_at_virtual_addr(self.virt) }
+    }
+
+    fn assign_to_disk_block(&mut self, block: u64, changed: bool) {
+        self.disk_block = Some(block);
+        self.changed = changed;
+    }
+
+    async fn write_and_dealloc(self, rfs: &Rfs2) {
+        if let Some(block) = self.disk_block
+            && self.changed
+        {
+            rfs.partition
+                .write(block as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[self.phys])
+                .await;
+        }
+        self.dealloc();
+    }
+
+    async fn get_disk_block(rfs: &Rfs2) -> Self {
+        let block = rfs.allocate_block().await;
+        let mut working_block = Self::new();
+        working_block.assign_to_disk_block(block, false);
+        working_block
+    }
+
+    fn forget_mem_binding(self) {
+        if self.disk_block.is_some() && self.changed {
+            panic!("cannot forget mem binding of a block that is bound to disk");
+        }
+        self.dealloc();
+    }
+
+    fn dealloc(self) {
+        unsafe { PAGE_TREE_ALLOCATOR.deallocate(self.virt) };
+        core::mem::forget(self);
+    }
+}
+
+impl Drop for WorkingBlock {
+    fn drop(&mut self) {
+        panic!("working block was not saved and forgotten");
+    }
+}
+
+#[derive(Debug)]
+struct Rfs2 {
+    superblock: Cell<SuperBlock>,
+    update_superblock_lock: AsyncSpinlock<()>,
+
+    inode_lock: AsyncSpinlock<()>,
+    inode_tree_cache: UnsafeCell<BTreeMap<BlockPtr, UnsafeCell<WorkingBlock>>>, //maps from block to data
+
+    file_locks: RWSpinlock<Vec<(InodeIndex, Arc<AsyncSpinlock<()>>)>>,
+
+    block_alloc_lock: AsyncSpinlock<()>,
+
+    //write once
+    groups: u32,
+    //write once
+    blocks: u32,
+
+    //write once
+    partition: MountedPartition,
+}
+
+unsafe impl Sync for Rfs2 {}
+
+impl Rfs2 {
+    async fn update_superblock(&self, mut superblock: SuperBlock) {
+        superblock.calculate_checksum();
+
+        let lock = self.update_superblock_lock.lock().await;
+        self.superblock.set(superblock);
+        let mut block = WorkingBlock::new();
+        *block.get_as_mut::<SuperBlock>() = superblock;
+
+        for i in (0..(self.groups - 1)).step_by(64) {
+            let block_index = 1 + i as usize * GROUP_SIZE_BLOCKS;
+            self.partition
+                .write(block_index * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys])
+                .await;
+        }
+        if self.groups % 64 == 1 && //last group is 64 after previous group
+            (self.groups as usize - 1) * GROUP_SIZE_BLOCKS < self.blocks as usize
+        {
+            let block_index = 1 + (self.groups - 1) as usize * GROUP_SIZE_BLOCKS;
+            self.partition
+                .write(block_index * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys])
+                .await;
+        }
+        drop(lock);
+        block.forget_mem_binding();
+    }
+
+    async fn get_superblock(&self) -> SuperBlock {
+        let lock = self.update_superblock_lock.lock().await;
+        let res = self.superblock.get();
+        drop(lock);
+        res
+    }
+
+    async fn allocate_block(&self) -> BlockPtr {
+        let lock = self.block_alloc_lock.lock().await;
+        let res = self.allocate_block_locked().await;
+        drop(lock);
+        res
+    }
+
+    async fn allocate_block_locked(&self) -> BlockPtr {
+        let mut block = WorkingBlock::new();
+        for i in 0..self.groups {
+            let block_index = i as usize * GROUP_SIZE_BLOCKS;
+            self.partition
+                .read(block_index * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys])
+                .await;
+            let bitmask = block.get_as_mut::<bitmask::BlockBitmask>();
+            if let Some(empty) = bitmask.find_empty() {
+                bitmask.set(empty);
+                block.assign_to_disk_block(block_index as u64, true);
+                block.write_and_dealloc(self).await;
+                return (i as u64 * GROUP_SIZE_BLOCKS as u64 + empty as u64) as BlockPtr;
+            }
+        }
+        panic!("disk is full");
+    }
+
+    async fn release_block(&self, block: BlockPtr) {
+        let lock = self.block_alloc_lock.lock().await;
+        self.release_block_locked(block).await;
+        drop(lock);
+    }
+
+    async fn release_block_locked(&self, block: BlockPtr) {
+        if block % GROUP_SIZE_BLOCKS as u64 == 0 {
+            println!(level:error, "refusing to free inode bitmask");
+        }
+        let group = block / GROUP_SIZE_BLOCKS as u64;
+        let block_index = block % GROUP_SIZE_BLOCKS as u64;
+        if group & 64 == 0 && block_index == 1 {
+            println!(level:error, "refusing to free superblock");
+            return;
+        }
+
+        let mut block = WorkingBlock::new();
+        let bitmask_block_index = group as usize * GROUP_SIZE_BLOCKS;
+        self.partition
+            .read(bitmask_block_index * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys])
+            .await;
+        let bitmask = block.get_as_mut::<bitmask::BlockBitmask>();
+        bitmask.clear(block_index as usize);
+        block.assign_to_disk_block(bitmask_block_index as u64, true);
+        block.write_and_dealloc(self).await;
+    }
+
+    pub async fn allocate_inode(&self) -> InodeIndex {
+        let mut block = WorkingBlock::new();
+        let mut iteration_index = 0;
+        let mut superblock = self.get_superblock().await;
+        if superblock.inode_mask_ptr == 0 {
+            let inode_bitmask_block = self.allocate_block().await;
+            let inode_bitmask_block_data = block.get_as_mut::<bitmask::InodeBtmask>();
+            *inode_bitmask_block_data = bitmask::InodeBtmask::new();
+            block.assign_to_disk_block(inode_bitmask_block, true);
+            superblock.inode_mask_ptr = inode_bitmask_block;
+            self.update_superblock(superblock).await;
+        } else {
+            self.partition
+                .read(
+                    superblock.inode_mask_ptr as usize * BLOCK_SIZE_SECTORS,
+                    BLOCK_SIZE_SECTORS,
+                    &[block.phys],
+                )
+                .await;
+            block.assign_to_disk_block(superblock.inode_mask_ptr, false);
+        }
+
+        loop {
+            let bitmask = block.get_as::<bitmask::InodeBtmask>();
+            let empty = bitmask.find_empty();
+            let Some(empty) = empty else {
+                let next_ptr = bitmask.get_ptr();
+                if next_ptr == 0 {
+                    let inode_bitmask_block = self.allocate_block().await;
+
+                    block.get_as_mut::<bitmask::InodeBtmask>().set_ptr(inode_bitmask_block);
+                    self.partition
+                        .write(
+                            block.disk_block.expect("is assigned") as usize * BLOCK_SIZE_SECTORS,
+                            BLOCK_SIZE_SECTORS,
+                            &[block.phys],
+                        )
+                        .await;
+
+                    let inode_bitmask_block_data = block.get_as_mut::<bitmask::InodeBtmask>();
+                    *inode_bitmask_block_data = bitmask::InodeBtmask::new();
+                    block.assign_to_disk_block(inode_bitmask_block, true);
+                    superblock.inode_mask_ptr = inode_bitmask_block;
+                    self.update_superblock(superblock).await;
+                } else {
+                    if block.changed {
+                        self.partition
+                            .write(
+                                block.disk_block.expect("is assigned") as usize * BLOCK_SIZE_SECTORS,
+                                BLOCK_SIZE_SECTORS,
+                                &[block.phys],
+                            )
+                            .await;
+                    }
+
+                    self.partition
+                        .read(next_ptr as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys])
+                        .await;
+                    block.assign_to_disk_block(next_ptr, false);
+                }
+                iteration_index += 1;
+                continue;
+            };
+
+            block.get_as_mut::<bitmask::InodeBtmask>().set(empty);
+            block.changed = true;
+            block.write_and_dealloc(self).await;
+
+            return (iteration_index * INODES_PER_BITMASK + empty) as InodeIndex;
+        }
+    }
+
+    pub async fn release_inode(&self, index: InodeIndex) {
+        let bitmask_index = index as usize / INODES_PER_BITMASK;
+        let in_bitmask_index = index as usize % INODES_PER_BITMASK;
+
+        let mut block = WorkingBlock::new();
+        let superblock = self.get_superblock().await;
+
+        let mut current_ptr = superblock.inode_mask_ptr;
+        for _ in 0..bitmask_index {
+            if current_ptr == 0 {
+                println!(level:error, "inode index {} is out of bounds", index);
+                return;
+            }
+            self.partition
+                .read(current_ptr as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys])
+                .await;
+            let bitmask = block.get_as::<bitmask::InodeBtmask>();
+            current_ptr = bitmask.get_ptr();
+        }
+        if current_ptr == 0 {
+            println!(level:error, "inode index {} is out of bounds", index);
+            return;
+        }
+
+        self.partition
+            .read(current_ptr as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys])
+            .await;
+        let bitmask = block.get_as_mut::<bitmask::InodeBtmask>();
+        bitmask.clear(in_bitmask_index);
+        block.assign_to_disk_block(current_ptr, true);
+        block.write_and_dealloc(self).await;
+    }
+
+    pub fn get_file_lock(&self, inode: InodeIndex) -> Arc<AsyncSpinlock<()>> {
+        let vec = r_lock_w_info!(self.file_locks);
+        if let Some(item) = vec.iter().find(|i| i.0 == inode) {
+            return item.1.clone();
+        }
+        let new_lock = Arc::new(AsyncSpinlock::new(()));
+        let mut vec = w_lock_w_info!(self.file_locks);
+        vec.push((inode, new_lock.clone()));
+        new_lock
+    }
+
+    pub async fn get_disk_block(&self, disk_block: BlockPtr) -> WorkingBlock {
+        let mut block = WorkingBlock::new();
+        self.partition
+            .read(disk_block as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys])
+            .await;
+        block.disk_block = Some(disk_block);
+        block
+    }
+
+    pub async fn get_inode_tree_block(&self, disk_block: BlockPtr) -> WorkingBlock {
+        let lock = self.inode_lock.lock().await;
+        if let Some(block) = unsafe { &mut *self.inode_tree_cache.get() }.get(&disk_block) {
+            return unsafe { block.get().read() };
+        }
+        let block = self.get_disk_block(disk_block).await;
+        let block_clone = block.clone();
+        unsafe { &mut *self.inode_tree_cache.get() }.insert(disk_block, UnsafeCell::new(block));
+        drop(lock);
+        block_clone
+    }
+
+    pub fn update_inode_tree_block(&self, block: WorkingBlock) {
+        let Some(disk_block) = block.disk_block else {
+            core::mem::forget(block);
+            return;
+        };
+        let lock = self.inode_lock.lock();
+        let old = unsafe { &mut *self.inode_tree_cache.get() }.insert(disk_block, UnsafeCell::new(block));
+        core::mem::forget(old);
+        drop(lock);
+    }
+
+    pub async fn delete_inode_tree_block(&self, block: WorkingBlock) {
+        let Some(disk_block) = block.disk_block else {
+            core::mem::forget(block);
+            return;
+        };
+        let lock = self.inode_lock.lock().await;
+        self.release_block(disk_block).await;
+        let old = unsafe { &mut *self.inode_tree_cache.get() }.remove(&disk_block);
+        core::mem::forget(old);
+        drop(lock);
+    }
+
+    pub async fn flush_inode_cache(&self) {
+        let lock = self.inode_lock.lock();
+
+        let cache = unsafe { &mut *self.inode_tree_cache.get() };
+        let cache = core::mem::take(cache);
+        for block in cache.into_values() {
+            let block = unsafe { block.get().read() };
+            block.write_and_dealloc(self).await;
+        }
+        drop(lock);
+    }
+}

@@ -92,9 +92,7 @@ impl VfsAdapterTrait for NetAdapter {
                 unsafe { core::ptr::copy_nonoverlapping(addr_of!(mtu) as *const u8, ptr, read_size as usize) };
                 Ok(read_size)
             }
-            _ => {
-                return Err(ErrorCode::UnsupportedOperation)
-            }
+            _ => return Err(ErrorCode::UnsupportedOperation),
         }
     }
 
@@ -157,8 +155,9 @@ impl VfsAdapterTrait for NetAdapter {
                 if size as usize > mtu {
                     return Err(ErrorCode::InvalidArgument);
                 }
-                
-                if size > 4096 { //for now
+
+                if size > 4096 {
+                    //for now
                     return Err(ErrorCode::InvalidArgument);
                 }
 

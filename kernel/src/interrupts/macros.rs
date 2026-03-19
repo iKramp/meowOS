@@ -1,4 +1,7 @@
-use crate::{acpi::cpu_locals::{CpuLocals, PageFaultHandleMode}, proc::{StackCpuStateData, interrupt_context_switch, save_and_release_current}};
+use crate::{
+    acpi::cpu_locals::{CpuLocals, PageFaultHandleMode},
+    proc::{StackCpuStateData, interrupt_context_switch, save_and_release_current},
+};
 
 use super::{disable_interrupts, enable_interrupts};
 

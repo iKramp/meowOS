@@ -125,7 +125,12 @@ pub(in crate::net) fn add_net_packet_to_queue(packet: PacketInRouting) {
     lock_w_info!(NET_QUEUE).push(packet);
 }
 
-pub fn append_raw_net_queue(mut other: DataQueueHead<Vec<RawNetDataChunk>>, nic_id: NicIdentifier, routing_step: RoutingStep, layer: NetLayerType) {
+pub fn append_raw_net_queue(
+    mut other: DataQueueHead<Vec<RawNetDataChunk>>,
+    nic_id: NicIdentifier,
+    routing_step: RoutingStep,
+    layer: NetLayerType,
+) {
     if !unsafe { NET_INITIALIZED } {
         return;
     }

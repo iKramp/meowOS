@@ -26,7 +26,7 @@ impl McfgTable {
         for i in 0..self.num_allocations() {
             let ptr = unsafe {
                 (self as *const McfgTable as *mut McfgTable)
-                    .byte_add(core::mem::size_of::<McfgTable>() + i * core::mem::size_of::<BaseAddressAllocation>()) 
+                    .byte_add(core::mem::size_of::<McfgTable>() + i * core::mem::size_of::<BaseAddressAllocation>())
                     as *mut BaseAddressAllocation
             };
             println!("McfgTable::allocations: found allocation at {:p}", ptr);

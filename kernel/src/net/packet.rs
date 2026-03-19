@@ -69,7 +69,11 @@ impl PacketInRouting {
         }
     }
 
-    pub(in crate::net) fn from_net_packet(packet: Acow<NetPacket>, initial_routing_step: RoutingStep, initial_layer: NetLayerType) -> Self {
+    pub(in crate::net) fn from_net_packet(
+        packet: Acow<NetPacket>,
+        initial_routing_step: RoutingStep,
+        initial_layer: NetLayerType,
+    ) -> Self {
         PacketInRouting {
             data: packet,
             routing_step: initial_routing_step,

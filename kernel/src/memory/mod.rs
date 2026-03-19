@@ -24,7 +24,7 @@ unsafe extern "C" {
     fn probe_check_u64(ptr: u64) -> ProbeResult;
     fn probe_check_u32(ptr: u64) -> ProbeResult;
     fn probe_check_u16(ptr: u64) -> ProbeResult;
-    fn probe_check_u8 (ptr: u64) -> ProbeResult;
+    fn probe_check_u8(ptr: u64) -> ProbeResult;
     pub fn probe_fail() -> ProbeResult;
     pub static probe_functions_end: u8;
 }
@@ -113,36 +113,20 @@ pub fn probe_pointer_range(ptr_start: u64, mut ptr_end: u64) -> bool {
 
 pub fn probe_ptr_u64(ptr: u64) -> Option<u64> {
     let res = unsafe { probe_check_u64(ptr) };
-    if res.valid {
-        Some(res.value)
-    } else {
-        None
-    }
+    if res.valid { Some(res.value) } else { None }
 }
 
 pub fn probe_ptr_u32(ptr: u64) -> Option<u32> {
     let res = unsafe { probe_check_u32(ptr) };
-    if res.valid {
-        Some(res.value as u32)
-    } else {
-        None
-    }
+    if res.valid { Some(res.value as u32) } else { None }
 }
 
 pub fn probe_ptr_u16(ptr: u64) -> Option<u16> {
     let res = unsafe { probe_check_u16(ptr) };
-    if res.valid {
-        Some(res.value as u16)
-    } else {
-        None
-    }
+    if res.valid { Some(res.value as u16) } else { None }
 }
 
 pub fn probe_ptr_u8(ptr: u64) -> Option<u8> {
     let res = unsafe { probe_check_u8(ptr) };
-    if res.valid {
-        Some(res.value as u8)
-    } else {
-        None
-    }
+    if res.valid { Some(res.value as u8) } else { None }
 }

@@ -1,7 +1,12 @@
 use std::{boxed::Box, mem_utils::PhysAddr, println, sync::arc::Arc, vec::Vec};
 
-use crate::{proc::{ProcessData, syscall::{self, SyscallArgs}}, task_runner};
-
+use crate::{
+    proc::{
+        ProcessData,
+        syscall::{self, SyscallArgs},
+    },
+    task_runner,
+};
 
 pub fn fwrite(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
     let fd = args.arg1;
@@ -9,7 +14,7 @@ pub fn fwrite(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
     let buffer_ptr = args.arg3 as *const u8;
     let proc = proc.clone();
     let pid = proc.pid();
-    
+
     if !syscall::verify_memory_range(buffer_ptr as u64, buffer_ptr as u64 + size) {
         println!("fwrite: invalid buffer pointer or size");
         args.syscall_number = u64::MAX;
@@ -41,7 +46,6 @@ pub fn fwrite(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
         let src = buffer_ptr;
         //copy to user buffer
         unsafe { core::ptr::copy_nonoverlapping(src, dst, size as usize) };
-        
 
         let buffers = (0..pages).map(|i| buffer_alloc + (i * 4096)).collect::<Vec<PhysAddr>>();
 

@@ -1,8 +1,8 @@
 pub mod block_device;
-pub mod gpt;
 pub mod filesystem;
-pub mod pci;
+pub mod gpt;
 pub mod net_device;
+pub mod pci;
 pub mod ps2;
 
 pub fn init_drivers() {

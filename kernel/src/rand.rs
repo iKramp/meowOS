@@ -1,7 +1,4 @@
-
-static mut RND_STATE: Xoshiro128PlusPlus = Xoshiro128PlusPlus {
-    state: [0; 4],
-};
+static mut RND_STATE: Xoshiro128PlusPlus = Xoshiro128PlusPlus { state: [0; 4] };
 
 pub fn init_rand() {
     let mut rnd_low: u64;
@@ -45,8 +42,7 @@ impl Xoshiro128PlusPlus {
 
     /// Generate next random u32
     pub fn next_u32(&mut self) -> u32 {
-        let result = Self::rotl(self.state[0].wrapping_add(self.state[3]), 7)
-            .wrapping_add(self.state[0]);
+        let result = Self::rotl(self.state[0].wrapping_add(self.state[3]), 7).wrapping_add(self.state[0]);
 
         let t = self.state[1] << 9;
 

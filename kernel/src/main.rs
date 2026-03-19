@@ -36,18 +36,18 @@ mod keyboard;
 mod limine;
 mod memory;
 mod msr;
+mod net;
 mod parsers;
+mod printer;
 mod proc;
+mod rand;
 mod task_runner;
 #[allow(unused_imports)]
 mod tests;
+mod tty;
 mod utils;
 mod vfs;
 mod vga;
-mod printer;
-mod rand;
-mod net;
-mod tty;
 use limine::LIMINE_BOOTLOADER_REQUESTS;
 use task_runner::block_task;
 use vfs::ResolvedPath;
@@ -82,13 +82,9 @@ extern "C" fn _start() -> ! {
     let cmd_args = cmd_args::CmdArgs::new(str.to_str().expect("Invalid UTF-8 in cmdline"));
     println!(level:info, "cmd_args: {:?}", cmd_args);
 
-    
     let test_ptr = acpi::read_tables as u64;
     let probe_res = memory::probe_ptr_u64(test_ptr);
     println!(level:info, "probe read_tables pointer: {:#x} - result: {:?}", test_ptr, probe_res);
-    
-
-
 
     acpi::read_tables();
 

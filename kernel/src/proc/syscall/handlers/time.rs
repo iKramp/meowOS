@@ -1,7 +1,13 @@
-use std::{println, sync::arc::Arc, time::{GET_TIME, UNIX_EPOCH}};
+use std::{
+    println,
+    sync::arc::Arc,
+    time::{GET_TIME, UNIX_EPOCH},
+};
 
-use crate::proc::{ProcessData, syscall::{self, SyscallArgs}};
-
+use crate::proc::{
+    ProcessData,
+    syscall::{self, SyscallArgs},
+};
 
 pub fn time(args: &mut SyscallArgs, _proc: &Arc<ProcessData>) -> bool {
     let time = unsafe { GET_TIME() };

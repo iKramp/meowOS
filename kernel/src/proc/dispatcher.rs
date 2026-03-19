@@ -1,8 +1,12 @@
 use std::println;
 
-use crate::{acpi::cpu_locals::PageFaultHandleMode, interrupts::{InterruptProcessorState, disable_interrupts}, memory::paging};
+use crate::{
+    acpi::cpu_locals::PageFaultHandleMode,
+    interrupts::{InterruptProcessorState, disable_interrupts},
+    memory::paging,
+};
 
-use super::{process_data::CpuStateType, syscall::SyscallCpuState, ProcessData};
+use super::{ProcessData, process_data::CpuStateType, syscall::SyscallCpuState};
 
 /*
  * Things that need to be done: (Intel SDM, Vol 3, chapter 8.1.2
@@ -87,19 +91,21 @@ fn return_interrupted(interrupt_frame: &InterruptProcessorState) -> ! {
 #[naked]
 extern "C" fn return_syscalled(cpu_state: &SyscallCpuState, userspace_stack: u64) -> ! {
     //INFO: any kind of change here should be matched with the one in syscall.rs
-    unsafe { core::arch::naked_asm!(
-        //cpu_state in rdi
-        "mov rdx, [rdi + 8 * 0]",
-        "mov rax, [rdi + 8 * 1]",
-        "mov rcx, [rdi + 8 * 2]",
-        "mov r11, [rdi + 8 * 3]",
-        "mov r15, [rdi + 8 * 4]",
-        "mov r14, [rdi + 8 * 5]",
-        "mov r13, [rdi + 8 * 6]",
-        "mov r12, [rdi + 8 * 7]",
-        "mov rbp, [rdi + 8 * 8]",
-        "mov rbx, [rdi + 8 * 9]",
-        "mov rsp, rsi",
-        "sysretq",
-    )}
+    unsafe {
+        core::arch::naked_asm!(
+            //cpu_state in rdi
+            "mov rdx, [rdi + 8 * 0]",
+            "mov rax, [rdi + 8 * 1]",
+            "mov rcx, [rdi + 8 * 2]",
+            "mov r11, [rdi + 8 * 3]",
+            "mov r15, [rdi + 8 * 4]",
+            "mov r14, [rdi + 8 * 5]",
+            "mov r13, [rdi + 8 * 6]",
+            "mov r12, [rdi + 8 * 7]",
+            "mov rbp, [rdi + 8 * 8]",
+            "mov rbx, [rdi + 8 * 9]",
+            "mov rsp, rsi",
+            "sysretq",
+        )
+    }
 }

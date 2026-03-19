@@ -166,10 +166,7 @@ pub(super) fn send_packet(dev: &E1000eDevice, raw_chunks: Vec<RawNetDataChunk>) 
     let new_tail = (tail + desc_len) % TX_DESC_COUNT;
     println!("New transmit queue tail: {}", new_tail);
 
-    registers
-        .tx_descriptor_queue_info()
-        .tdt()
-        .write(new_tail as u32);
+    registers.tx_descriptor_queue_info().tdt().write(new_tail as u32);
     drop(lock);
 }
 

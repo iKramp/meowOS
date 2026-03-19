@@ -25,10 +25,7 @@ impl<T> DataQueueHead<T> {
     }
 
     pub fn push(&mut self, data: T) {
-        let mut data = Box::new(DataQueueNode {
-            next_node: None,
-            data,
-        });
+        let mut data = Box::new(DataQueueNode { next_node: None, data });
 
         while self.curr_nodes >= self.max_nodes {
             //drop oldest

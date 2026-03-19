@@ -121,7 +121,8 @@ pub fn register_nic(mac_addr: MacAddress, nic: Arc<dyn NIC>) {
 
         nic_address_vec.push(protocols::NetAddress::Ipv4Network(interface_network.clone()));
 
-        let default_network = ipv4::Ipv4Network { //all goes here
+        let default_network = ipv4::Ipv4Network {
+            //all goes here
             address: ipv4::Ipv4Address([0, 0, 0, 0]),
             mask: ipv4::Ipv4Address([0, 0, 0, 0]),
         };

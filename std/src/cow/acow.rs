@@ -1,11 +1,15 @@
-use core::{cell::UnsafeCell, fmt::Debug, ops::{Deref, DerefMut}};
+use core::{
+    cell::UnsafeCell,
+    fmt::Debug,
+    ops::{Deref, DerefMut},
+};
 
 use crate::sync::arc::Arc;
 
 /// Async Cow version
 #[derive(Clone)]
 pub struct Acow<T: Clone> {
-    data: Arc<UnsafeCell<T>>
+    data: Arc<UnsafeCell<T>>,
 }
 
 unsafe impl<T: Send + Sync + Clone> Send for Acow<T> {}
@@ -14,7 +18,7 @@ unsafe impl<T: Send + Sync + Clone> Sync for Acow<T> {}
 impl<T: Clone> Acow<T> {
     pub fn new(data: T) -> Self {
         Self {
-            data: Arc::new(UnsafeCell::new(data))
+            data: Arc::new(UnsafeCell::new(data)),
         }
     }
 

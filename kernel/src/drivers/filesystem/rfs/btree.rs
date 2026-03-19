@@ -1,14 +1,11 @@
 use std::{
     boxed::Box,
-    mem_utils::{PhysAddr, VirtAddr}, println,
+    mem_utils::{PhysAddr, VirtAddr},
+    println,
 };
 
 use super::{AllocatedBlock, BLOCK_SIZE_SECTORS, MountedPartition, Rfs};
-use crate::memory::{
-    PAGE_TREE_ALLOCATOR,
-    paging,
-    physical_allocator,
-};
+use crate::memory::{PAGE_TREE_ALLOCATOR, paging, physical_allocator};
 
 ///Takes up exactly 1 block or physical frame
 #[repr(C)]

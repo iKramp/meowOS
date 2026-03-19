@@ -6,7 +6,6 @@ use core::{
 
 use super::lock_info::LockLocationInfo;
 
-
 #[derive(Debug)]
 pub struct RWSpinlock<T: ?Sized> {
     //highest bit is write lock, lower 15 bits are read lock count
@@ -76,7 +75,7 @@ impl<T: ?Sized> RWSpinlock<T> {
                 return RWSpinlockGuard {
                     lock: self,
                     marker: core::marker::PhantomData,
-                    location
+                    location,
                 };
             }
         }
@@ -106,7 +105,7 @@ impl<T: ?Sized> RWSpinlock<T> {
                 return RWSpinlockGuard {
                     lock: self,
                     marker: core::marker::PhantomData,
-                    location
+                    location,
                 };
             }
         }
@@ -127,7 +126,7 @@ impl<'a, T: ?Sized> RWSpinlockGuard<'a, T, RWLockModeRead> {
         debug_assert!(state >= 1); //at least one read lock held
 
         self.lock.lock.fetch_or(0x8000, Acquire); //set write lock bit
-    
+
         self.lock.lock.fetch_sub(1, Relaxed); //release read lock
 
         //wait for other readers to release
@@ -159,7 +158,7 @@ impl<'a, T: ?Sized> RWSpinlockGuard<'a, T, RWLockModeWrite> {
         let new_lock = RWSpinlockGuard {
             lock: self.lock,
             marker: core::marker::PhantomData,
-            location
+            location,
         };
         core::mem::forget(self); //don't run drop
         new_lock

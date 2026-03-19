@@ -1,4 +1,3 @@
-
 struct DoubleMap<T, U> {
     map_t_to_u: crate::collections::BTreeMap<T, U>,
     map_u_to_t: crate::collections::BTreeMap<U, T>,

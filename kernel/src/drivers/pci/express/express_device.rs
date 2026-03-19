@@ -2,7 +2,10 @@ use core::fmt::Debug;
 use std::{mem_utils::VirtAddr, println, vec::Vec};
 
 use crate::drivers::pci::{
-    InterruptType, MemoryBar, PciClass, PciDeviceLocation, PciDeviceNumericId, capabilities::ExtendedCapability, common_info::CommonInfo, express::{LegacyConfigSpaceT0, LegacyConfigSpaceT0Ptr, configuration_space}
+    InterruptType, MemoryBar, PciClass, PciDeviceLocation, PciDeviceNumericId,
+    capabilities::ExtendedCapability,
+    common_info::CommonInfo,
+    express::{LegacyConfigSpaceT0, LegacyConfigSpaceT0Ptr, configuration_space},
 };
 
 pub struct PcieDevice {

@@ -1,7 +1,10 @@
 use std::{cow::Acow, println, sync::arc::Arc, vec::Vec};
 
 use crate::net::{
-    NIC, PacketInRouting, hook::{HookFilter, HookStage, call_hooks}, packet::{NetPacket, NetPacketSource}, protocols::{self, NetLayerType}
+    NIC, PacketInRouting,
+    hook::{HookFilter, HookStage, call_hooks},
+    packet::{NetPacket, NetPacketSource},
+    protocols::{self, NetLayerType},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -96,11 +99,7 @@ pub fn process_packet_flow(packet: PacketInRouting) {
     }
 }
 
-fn process_inbound_packet(
-    packet: &mut Acow<NetPacket>,
-    layer_type: NetLayerType,
-    layer_offset: usize,
-) -> IncomingFlowDirection {
+fn process_inbound_packet(packet: &mut Acow<NetPacket>, layer_type: NetLayerType, layer_offset: usize) -> IncomingFlowDirection {
     println!(
         "processing inbound packet at layer {:?} with offset {}",
         layer_type, layer_offset

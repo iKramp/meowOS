@@ -1,27 +1,18 @@
 use std::{error::ErrorCode, println, w_lock_w_info};
 
-use crate::{drivers::net_device::e1000e::{E1000eDevice, registers::E1000eRegistersPtr}, net::MacAddress};
-
-
+use crate::{
+    drivers::net_device::e1000e::{E1000eDevice, registers::E1000eRegistersPtr},
+    net::MacAddress,
+};
 
 pub(super) fn write_nvm(dev: &E1000eRegistersPtr, addr: u16, data: u16) {
-    dev.eewr().write(
-        *dev.eewr()
-            .read()
-            .set_addr(addr as u32)
-            .set_data(data as u32)
-            .set_start(true)
-    );
+    dev.eewr()
+        .write(*dev.eewr().read().set_addr(addr as u32).set_data(data as u32).set_start(true));
     while !dev.eewr().read().done() {}
 }
 
-pub (super) fn read_nvm(dev: &E1000eRegistersPtr, addr: u16) -> u16 {
-    dev.eerd().write(
-        *dev.eerd()
-            .read()
-            .set_addr(addr as u32)
-            .set_start(true)
-    );
+pub(super) fn read_nvm(dev: &E1000eRegistersPtr, addr: u16) -> u16 {
+    dev.eerd().write(*dev.eerd().read().set_addr(addr as u32).set_start(true));
     while !dev.eewr().read().done() {}
     dev.eewr().read().data() as u16
 }
@@ -50,18 +41,12 @@ fn config_nvm(dev: &mut E1000eDevice) -> Result<NvmState, ErrorCode> {
                 println!(level:error, "e1000e config_nvm error: Invalid NVM size: {}", size);
                 return Err(ErrorCode::IllegalValue);
             }
-            let addr_size = if size > 1 << 8 {
-                2
-            } else {
-                1
-            };
+            let addr_size = if size > 1 << 8 { 2 } else { 1 };
             println!("NVM size: {} bytes", size);
             registers.eec().write(*ecc.set_nvadds(addr_size));
             state = NvmState::Changed;
         }
     }
-
-
 
     //read mac
     let bytes_1 = read_nvm(&registers, 0);
@@ -79,12 +64,7 @@ fn config_nvm(dev: &mut E1000eDevice) -> Result<NvmState, ErrorCode> {
     let mac_address = dev.mac_address.0;
     println!(
         "E1000e NVM MAC Address: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-        mac_address[0],
-        mac_address[1],
-        mac_address[2],
-        mac_address[3],
-        mac_address[4],
-        mac_address[5],
+        mac_address[0], mac_address[1], mac_address[2], mac_address[3], mac_address[4], mac_address[5],
     );
 
     Ok(state)

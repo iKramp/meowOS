@@ -70,7 +70,7 @@ impl Timer for TscWrapper {
             println!("TSC ticks counted: {}", ticks_counted);
             self.ticks_per_second = ticks_counted * 1000 / 5; // 5 milliseconds
         }
-            self.ticks_on_start = tsc_start;
+        self.ticks_on_start = tsc_start;
 
         true
     }

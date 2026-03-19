@@ -5,12 +5,12 @@ mod hpet;
 mod ioapic;
 mod lapic_timer;
 mod madt;
+mod mcfg;
 mod platform_info;
 mod rsdp;
 mod rsdt;
 mod sdt;
 mod smp;
-mod mcfg;
 
 use std::{
     collections::btree_map::BTreeMap,
@@ -21,16 +21,14 @@ pub use apic::LAPIC_REGISTERS;
 use fadt::Fadt;
 pub use hpet::HpetTable;
 use madt::Madt;
+pub use mcfg::{BaseAddressAllocation, McfgTable};
 use platform_info::PlatformInfo;
 pub use smp::cpu_locals;
-pub use mcfg::{McfgTable, BaseAddressAllocation};
 
 use crate::{limine::LIMINE_BOOTLOADER_REQUESTS, memory::PAGE_TREE_ALLOCATOR, println, printlnc};
 
 static mut PLATFORM_INFO: Option<PlatformInfo> = None;
 pub static mut ACPI_TABLE_MAP: BTreeMap<&str, VirtAddr> = BTreeMap::new();
-
-
 
 //this is safe because it's set when only 1 core is active, after that it's read only
 pub fn get_table<T: 'static>(name: &str) -> Option<&T> {
@@ -60,11 +58,7 @@ pub fn read_tables() {
             let table_virt = std::mem_utils::translate_phys_virt_addr(*table);
             let table_ptr = table_virt.0 as *const sdt::AcpiSdtHeader;
             let table_len = (table_ptr.byte_add(4) as *const u32).read_unaligned();
-            let table_virt = std::mem_utils::ensure_aligned_manual(
-                table_virt,
-                table_len as u64,
-                8,
-            );
+            let table_virt = std::mem_utils::ensure_aligned_manual(table_virt, table_len as u64, 8);
             let header = std::mem_utils::get_at_virtual_addr::<sdt::AcpiSdtHeader>(table_virt);
             let signature = std::str::from_utf8(&header.signature).expect("signatures are ascii, error in mem read");
             println!(level:info, "Found ACPI table: {} at physical address {:X}", signature, table.0);

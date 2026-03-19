@@ -1,7 +1,10 @@
-
 use std::println;
 
-use super::{context_switch::no_ret_context_switch, process_data::StackCpuStateData, scheduler::{save_and_release_current, SleepCondition}};
+use super::{
+    context_switch::no_ret_context_switch,
+    process_data::StackCpuStateData,
+    scheduler::{SleepCondition, save_and_release_current},
+};
 use crate::{acpi::cpu_locals::PageFaultHandleMode, interrupts::enable_interrupts, memory, msr, proc::syscall};
 
 mod handlers;
@@ -53,7 +56,7 @@ fn verify_memory_range(mem_start: u64, mem_end: u64) -> bool {
     valid
 }
 
-fn verify_memory_ptr (mut ptr: u64) -> bool {
+fn verify_memory_ptr(mut ptr: u64) -> bool {
     ptr &= !0xFFF; //page align, ptr can't overlap pages because of alignment
     if ptr > 0x0000_8000_0000_0000 {
         println!(level:warn, "Invalid memory pointer: {:#X}", ptr);
@@ -84,46 +87,48 @@ fn verify_memory_ptr (mut ptr: u64) -> bool {
 #[naked]
 extern "C" fn handler_wrapper() -> ! {
     //INFO: any kind of change here should be matched with the one in dispatcher.rs
-    unsafe { core::arch::naked_asm!(
-        //push preserved regs, get kernel stack from gsbase
-        //stack is aligned to 16 here
-        "swapgs",
+    unsafe {
+        core::arch::naked_asm!(
+            //push preserved regs, get kernel stack from gsbase
+            //stack is aligned to 16 here
+            "swapgs",
 
-        "mov gs:[16], rcx", //save user rip to gsbase area
-        "mov cx, 0",
-        "mov ss, cx",
-        "mov rcx, gs:[16]", //get user rip from gsbase area
+            "mov gs:[16], rcx", //save user rip to gsbase area
+            "mov cx, 0",
+            "mov ss, cx",
+            "mov rcx, gs:[16]", //get user rip from gsbase area
 
-        "mov gs:[16], rsp", //save user rsp to gsbase area
-        "mov rsp, gs:[8]", //get kernel rsp from gsbase area
+            "mov gs:[16], rsp", //save user rsp to gsbase area
+            "mov rsp, gs:[8]", //get kernel rsp from gsbase area
 
-        "sub rsp, 8*8",
-        "mov [rsp + 8*7], rbx",
-        "mov [rsp + 8*6], rbp",
-        "mov [rsp + 8*5], r12",
-        "mov [rsp + 8*4], r13",
-        "mov [rsp + 8*3], r14",
-        "mov [rsp + 8*2], r15",
-        "mov [rsp + 8*1], r11", //rflags is in r11
-        "mov [rsp + 8*0], rcx", //return rip
+            "sub rsp, 8*8",
+            "mov [rsp + 8*7], rbx",
+            "mov [rsp + 8*6], rbp",
+            "mov [rsp + 8*5], r12",
+            "mov [rsp + 8*4], r13",
+            "mov [rsp + 8*3], r14",
+            "mov [rsp + 8*2], r15",
+            "mov [rsp + 8*1], r11", //rflags is in r11
+            "mov [rsp + 8*0], rcx", //return rip
 
-        //push args too
-        "sub rsp, 8*7",
-        "mov [rsp + 8*6], rax", //syscall number
-        "mov [rsp + 8*5], r9",
-        "mov [rsp + 8*4], r8",
-        "mov [rsp + 8*3], r10",
-        "mov [rsp + 8*2], rdx",
-        "mov [rsp + 8*1], rsi",
-        "mov [rsp + 8*0], rdi",
+            //push args too
+            "sub rsp, 8*7",
+            "mov [rsp + 8*6], rax", //syscall number
+            "mov [rsp + 8*5], r9",
+            "mov [rsp + 8*4], r8",
+            "mov [rsp + 8*3], r10",
+            "mov [rsp + 8*2], rdx",
+            "mov [rsp + 8*1], rsi",
+            "mov [rsp + 8*0], rdi",
 
-        "mov rdi, rsp", //args rsp
+            "mov rdi, rsp", //args rsp
 
 
 
-        "call {}",
-        sym handler
-    )}
+            "call {}",
+            sym handler
+        )
+    }
 }
 
 #[allow(unused_variables)]
@@ -140,11 +145,18 @@ extern "C" fn handler(args_rsp: u64) -> ! {
     let mut locals = crate::acpi::cpu_locals::CpuLocals::get_mut();
     unsafe { core::ptr::addr_of_mut!(locals.int_depth).write_volatile(1) };
     locals.page_fault_handle_mode = PageFaultHandleMode::KernelPanic;
-    let curr_proc = locals.current_process.as_mut().expect("syscalled while no current process in locals").clone();
+    let curr_proc = locals
+        .current_process
+        .as_mut()
+        .expect("syscalled while no current process in locals")
+        .clone();
     drop(locals);
     enable_interrupts();
 
-    println!("Syscall number: {}, args: {:#X?}, state: {:#X?}", args.syscall_number, args, state);
+    println!(
+        "Syscall number: {}, args: {:#X?}, state: {:#X?}",
+        args.syscall_number, args, state
+    );
 
     #[allow(clippy::single_match)]
     let task_sleep = match args.syscall_number {
@@ -161,14 +173,10 @@ extern "C" fn handler(args_rsp: u64) -> ! {
         10 => todo!("implement munmap"),
         11 => todo!("implement sleep"),
         12 => syscall::handlers::time(args, &curr_proc),
-        _ => {false}
+        _ => false,
     };
 
-    let sleep_cond = if task_sleep {
-        Some(SleepCondition::Event)
-    } else {
-        None
-    };
+    let sleep_cond = if task_sleep { Some(SleepCondition::Event) } else { None };
 
     save_and_release_current(&curr_proc, &StackCpuStateData::Syscall(state), sleep_cond);
     no_ret_context_switch();
@@ -186,7 +194,7 @@ pub struct SyscallCpuState {
     pub r13: u64,
     pub r12: u64,
     pub rbp: u64,
-    pub rbx: u64
+    pub rbx: u64,
 }
 
 #[derive(Debug, Clone)]

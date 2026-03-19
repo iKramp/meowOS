@@ -37,7 +37,7 @@
 
       shellHook = ''
         export RUST_STORE_PATH=${rust}
-        exec zsh -c "nvim"
+        exec zsh
       '';
     };
   };

@@ -1,8 +1,14 @@
 use core::{
-    pin::Pin, sync::atomic::AtomicU64, task::{Context, Poll, RawWaker, RawWakerVTable, Waker}
+    pin::Pin,
+    sync::atomic::AtomicU64,
+    task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
 };
 use std::{
-    boxed::Box, lock_w_info, println, sync::{arc::Arc, no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock}, vec::Vec, w_lock_w_info
+    boxed::Box,
+    lock_w_info, println,
+    sync::{arc::Arc, no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
+    vec::Vec,
+    w_lock_w_info,
 };
 
 use crate::{
@@ -121,7 +127,10 @@ pub fn add_task(task: AsyncTask, pid: Option<Pid>) {
     let locals = CpuLocals::get();
     let mut task_list = lock_w_info!(locals.async_task_data.task_list);
 
-    let id = locals.async_task_data.task_id_counter.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
+    let id = locals
+        .async_task_data
+        .task_id_counter
+        .fetch_add(1, core::sync::atomic::Ordering::AcqRel);
 
     let task = AsyncTaskHolder {
         task: AsyncTaskInternal { task, id, proc_id: pid },

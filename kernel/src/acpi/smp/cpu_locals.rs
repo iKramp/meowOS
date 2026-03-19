@@ -1,6 +1,16 @@
-use core::{mem::MaybeUninit, sync::atomic::{AtomicBool, AtomicU16, Ordering}};
+use core::{
+    mem::MaybeUninit,
+    sync::atomic::{AtomicBool, AtomicU16, Ordering},
+};
 use std::{
-    boxed::Box, mem_utils::{VirtAddr, get_at_virtual_addr}, println, sync::{arc::Arc, lock_info::{LockInfo, set_lock_info_func}}, vec::Vec
+    boxed::Box,
+    mem_utils::{VirtAddr, get_at_virtual_addr},
+    println,
+    sync::{
+        arc::Arc,
+        lock_info::{LockInfo, set_lock_info_func},
+    },
+    vec::Vec,
 };
 
 use crate::{
@@ -208,7 +218,7 @@ impl CpuLocals {
     ///# Safety
     /// Ensure only 1 mutable reference at a time
     pub unsafe fn get_lock_info() -> &'static mut LockInfo {
-        unsafe { 
+        unsafe {
             let cpu_locals: *mut Self;
             core::arch::asm!(
                 "mov {cpu_locals}, gs:0",

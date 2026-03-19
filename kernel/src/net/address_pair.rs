@@ -1,6 +1,5 @@
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub (in crate::net) struct AddressPair<T> {
+pub(in crate::net) struct AddressPair<T> {
     pub source: T,
     pub target: T,
 }
@@ -21,6 +20,9 @@ impl<T> AddressPair<T> {
 
 impl<T: Clone> AddressPair<T> {
     pub fn reverse(&self) -> Self {
-        Self { source: self.target.clone(), target: self.source.clone() }
+        Self {
+            source: self.target.clone(),
+            target: self.source.clone(),
+        }
     }
 }

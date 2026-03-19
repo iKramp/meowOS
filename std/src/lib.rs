@@ -23,9 +23,9 @@ pub mod print;
 pub use print::Print;
 pub use print::set_print;
 
-pub mod mem_utils;
-pub mod error;
 pub mod double_map;
+pub mod error;
+pub mod mem_utils;
 pub mod queue;
 
 pub mod cow;

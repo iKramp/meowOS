@@ -1,7 +1,6 @@
 use std::sync::arc::Arc;
 
-use crate::proc::{syscall::SyscallArgs, ProcessData};
-
+use crate::proc::{ProcessData, syscall::SyscallArgs};
 
 pub fn fclose(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
     let fd = args.arg1;

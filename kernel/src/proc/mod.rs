@@ -19,7 +19,9 @@ use crate::{
         PAGE_TREE_ALLOCATOR,
         paging::{self, PageTree},
         physical_allocator,
-    }, task_runner, vfs::{self, InodeType, ResolvedPathBorrowed, close_file, file::FileFlags}
+    },
+    task_runner,
+    vfs::{self, InodeType, ResolvedPathBorrowed, close_file, file::FileFlags},
 };
 
 mod context;
@@ -94,7 +96,7 @@ pub fn init() {
     //     .expect("Failed to load test executable file reader");
     // let pid = create_process(&file_reader);
     // println!("Created file reader process with pid: {:?}", pid);
-    
+
     // let proc_task = async move {
     //     let path = vfs::resolve_path("/time_printer");
     //     let root_path = vfs::resolve_path("/");

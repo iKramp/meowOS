@@ -6,9 +6,9 @@ use core::{
     task::{Context, Poll},
 };
 
-use alloc::boxed::Box;
-use crate::lock_w_info;
 use super::no_int_spinlock::NoIntSpinlock;
+use crate::lock_w_info;
+use alloc::boxed::Box;
 
 #[derive(Debug)]
 pub struct AsyncRWlock<T: ?Sized> {

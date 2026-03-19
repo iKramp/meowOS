@@ -1,9 +1,16 @@
-use std::{boxed::Box, format, lock_w_info, string::{String, ToString}, sync::no_int_spinlock::NoIntSpinlock, vec::Vec};
+use std::{
+    boxed::Box,
+    format, lock_w_info,
+    string::{String, ToString},
+    sync::no_int_spinlock::NoIntSpinlock,
+    vec::Vec,
+};
 
 use crate::{
     keyboard::{self, Key},
     proc::{self, Pid},
-    vfs, vga::vga_text,
+    vfs,
+    vga::vga_text,
 };
 
 pub static TTY: NoIntSpinlock<TtyState> = NoIntSpinlock::new(TtyState::new());

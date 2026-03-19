@@ -1,7 +1,7 @@
 use std::{
     boxed::Box,
     lock_w_info,
-    mem_utils::{get_at_virtual_addr, translate_virt_phys_addr, PhysAddr},
+    mem_utils::{PhysAddr, get_at_virtual_addr, translate_virt_phys_addr},
     println,
     string::{String, ToString},
     vec::Vec,
@@ -10,11 +10,13 @@ use std::{
 use uuid::Uuid;
 
 use crate::{
-    drivers::filesystem::rfs::RfsFactory, memory::{
+    drivers::filesystem::rfs::RfsFactory,
+    memory::{
         PAGE_TREE_ALLOCATOR,
         paging::{LiminePat, PageTree},
         physical_allocator,
-    }, vfs::VFS
+    },
+    vfs::VFS,
 };
 
 use super::block_device::disk::{BlockDevice, Partition, PartitionSchemeDriver};
@@ -52,7 +54,10 @@ impl PartitionSchemeDriver for GPTDriver {
                     .expect("page entry must exist after allocation")
                     .set_pat(LiminePat::UC)
             })
-            .map(|i| translate_virt_phys_addr(buffer + (i * 4096), page_tree_root).expect("must translate to physical addr after allocation"))
+            .map(|i| {
+                translate_virt_phys_addr(buffer + (i * 4096), page_tree_root)
+                    .expect("must translate to physical addr after allocation")
+            })
             .collect();
         disk.read(start_entries, entry_num_lbas, &physical_addresses).await;
 
@@ -71,16 +76,44 @@ impl PartitionSchemeDriver for GPTDriver {
                 let mut name = String::from_utf16(&entry.partition_name).unwrap_or("invalid_partition_name".to_string());
                 name.remove_matches("\u{0}");
                 let partition_uuid = Uuid::from_fields(
-                    u32::from_le_bytes(entry.unique_partition_guid[0..4].try_into().expect("slice with incorrect length")),
-                    u16::from_le_bytes(entry.unique_partition_guid[4..6].try_into().expect("slice with incorrect length")),
-                    u16::from_le_bytes(entry.unique_partition_guid[6..8].try_into().expect("slice with incorrect length")),
-                    &entry.unique_partition_guid[8..].try_into().expect("slice with incorrect length"),
+                    u32::from_le_bytes(
+                        entry.unique_partition_guid[0..4]
+                            .try_into()
+                            .expect("slice with incorrect length"),
+                    ),
+                    u16::from_le_bytes(
+                        entry.unique_partition_guid[4..6]
+                            .try_into()
+                            .expect("slice with incorrect length"),
+                    ),
+                    u16::from_le_bytes(
+                        entry.unique_partition_guid[6..8]
+                            .try_into()
+                            .expect("slice with incorrect length"),
+                    ),
+                    &entry.unique_partition_guid[8..]
+                        .try_into()
+                        .expect("slice with incorrect length"),
                 );
                 let fs_uuid = Uuid::from_fields(
-                    u32::from_le_bytes(entry.partition_type_guid[0..4].try_into().expect("slice with incorrect length")),
-                    u16::from_le_bytes(entry.partition_type_guid[4..6].try_into().expect("slice with incorrect length")),
-                    u16::from_le_bytes(entry.partition_type_guid[6..8].try_into().expect("slice with incorrect length")),
-                    &entry.partition_type_guid[8..].try_into().expect("slice with incorrect length"),
+                    u32::from_le_bytes(
+                        entry.partition_type_guid[0..4]
+                            .try_into()
+                            .expect("slice with incorrect length"),
+                    ),
+                    u16::from_le_bytes(
+                        entry.partition_type_guid[4..6]
+                            .try_into()
+                            .expect("slice with incorrect length"),
+                    ),
+                    u16::from_le_bytes(
+                        entry.partition_type_guid[6..8]
+                            .try_into()
+                            .expect("slice with incorrect length"),
+                    ),
+                    &entry.partition_type_guid[8..]
+                        .try_into()
+                        .expect("slice with incorrect length"),
                 );
                 partitions.push((
                     partition_uuid,

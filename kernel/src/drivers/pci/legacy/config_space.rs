@@ -1,7 +1,9 @@
-use crate::{
-    drivers::pci::{
-        LegacyPciDevice, PciDeviceLocation, bar::{Bar, IOBar, MemoryBar}, capabilities::Capability, device_class::PciClass, port_access::{get_dword, set_dword}
-    },
+use crate::drivers::pci::{
+    LegacyPciDevice, PciDeviceLocation,
+    bar::{Bar, IOBar, MemoryBar},
+    capabilities::Capability,
+    device_class::PciClass,
+    port_access::{get_dword, set_dword},
 };
 use std::{mem_utils::PhysAddr, println, vec::Vec};
 
@@ -103,9 +105,19 @@ pub fn get_bar(index: u8, dev: &PciDeviceLocation) -> Option<(Bar, u8)> {
 
         let num = size.div_ceil(4096);
         if num > 256 {
-            return None
+            return None;
         }
-        Some((Bar::Memory(MemoryBar::new(index, 0x10 + index * 4, physical_bar_addr, size, prefetchable, is_64_bit)), bars))
+        Some((
+            Bar::Memory(MemoryBar::new(
+                index,
+                0x10 + index * 4,
+                physical_bar_addr,
+                size,
+                prefetchable,
+                is_64_bit,
+            )),
+            bars,
+        ))
     } else {
         //io space bar
         let address = first_bar as u16 & 0xFFFC;
@@ -125,7 +137,7 @@ fn get_bar_size(index: u8, mask: u32, dev: &PciDeviceLocation) -> u32 {
 fn get_64b_mem_bar_size(index: u8, dev: &PciDeviceLocation) -> u64 {
     let bar0 = get_dword(0x10 + index * 4, dev);
     let bar1 = get_dword(0x10 + (index + 1) * 4, dev);
-    
+
     set_dword(0x10 + index * 4, 0xFFFF_FFFF, dev);
     set_dword(0x10 + (index + 1) * 4, 0xFFFF_FFFF, dev);
 

@@ -11,10 +11,13 @@ use std::{
 
 use uuid::Uuid;
 
-use crate::{drivers::{
-    block_device::disk::{BlockDevice, DirEntry, MountedPartition, PartitionSchemeDriver},
-    gpt::GPTDriver,
-}, vfs::{Inode, InodeIdentifier}};
+use crate::{
+    drivers::{
+        block_device::disk::{BlockDevice, DirEntry, MountedPartition, PartitionSchemeDriver},
+        gpt::GPTDriver,
+    },
+    vfs::{Inode, InodeIdentifier},
+};
 
 use super::{
     DeviceDetails, InodeIdentifierChain, InodeType, ROOT_INODE_INDEX, ResolvedPath, ResolvedPathBorrowed, VFS,
@@ -256,7 +259,6 @@ pub async fn create_file(parent_dir: &mut FileHandle, name: &str, inode_type: In
         return Err(ErrorCode::UnsupportedOperation);
     }
 
-
     let parent_inode = fs_tree::get_inode(parent_dir.inode).ok_or(ErrorCode::InodeNotPresent)?;
     let mut vfs = lock_w_info!(VFS);
     let device_details = vfs.devices.get(&parent_inode.device).ok_or(ErrorCode::InodeNotPresent)?;
@@ -280,7 +282,6 @@ pub async fn write_file(file_handle: &mut FileHandle, content: &[PhysAddr], size
         return Err(ErrorCode::InsufficientPermissions);
     }
 
-
     let inode = fs_tree::get_inode(file_handle.inode).ok_or(ErrorCode::InodeNotPresent)?;
     let mut vfs = lock_w_info!(VFS);
     let device_details = vfs.devices.get(&inode.device).ok_or(ErrorCode::NoEntry)?;
@@ -298,12 +299,10 @@ pub async fn write_file(file_handle: &mut FileHandle, content: &[PhysAddr], size
 
     let res = fs.write(inode.index, offset, size, content).await?;
     fs_tree::update_inode(file_handle.inode, res.0)?;
-    
 
     if !file_handle.file_flags.append() {
         file_handle.position += size;
     }
-
 
     Ok(res.1)
 }
@@ -313,7 +312,6 @@ pub async fn stat_file(file_handle: &FileHandle) -> Result<Inode, ErrorCode> {
 }
 
 pub async fn read_file(file_handle: &mut FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, ErrorCode> {
-
     if file_handle.position % 4096 == 0 {
         let res = unsafe { read_file_aligned(file_handle, buffer, file_handle.position, size).await }?;
         file_handle.position += res.min(size);

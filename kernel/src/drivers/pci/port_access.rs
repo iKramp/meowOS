@@ -1,5 +1,7 @@
-use crate::{drivers::pci::PciDeviceLocation, utils::{dword_from_port, dword_to_port}};
-
+use crate::{
+    drivers::pci::PciDeviceLocation,
+    utils::{dword_from_port, dword_to_port},
+};
 
 const CONFIG_ADDRESS: u16 = 0x0CF8;
 const CONFIG_DATA: u16 = 0x0CFC;

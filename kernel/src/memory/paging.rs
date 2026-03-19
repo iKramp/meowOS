@@ -249,8 +249,13 @@ impl PageTable {
 
         //remove highest page from pool
         let highest_virt_page = VirtAddr(0xFFFF_FFFF_FFFF_F000);
-        unsafe { self.mmap(highest_virt_page, PhysAddr(0)).expect("mapping highest page must succeed") };
-        let entry = self.get_page_table_entry(highest_virt_page, 4).expect("page entry must exist after allocation");
+        unsafe {
+            self.mmap(highest_virt_page, PhysAddr(0))
+                .expect("mapping highest page must succeed")
+        };
+        let entry = self
+            .get_page_table_entry(highest_virt_page, 4)
+            .expect("page entry must exist after allocation");
         entry.set_writeable(false);
         entry.set_no_execute(true);
     }
@@ -388,7 +393,11 @@ impl PageTable {
     ///Physical addresses from physical_address to physical_address + num must already be marked as
     ///used, and not yet mapped
     pub unsafe fn mmap_contigious_any(&mut self, num: u64, physical_address: PhysAddr, low: bool) -> VirtAddr {
-        let address = unsafe { self.get_available_entry_pages(4, num, low).ok_or(ErrorCode::InsufficientResources).expect("no pages?? impossible!") };
+        let address = unsafe {
+            self.get_available_entry_pages(4, num, low)
+                .ok_or(ErrorCode::InsufficientResources)
+                .expect("no pages?? impossible!")
+        };
         for i in 0..num {
             assert!(
                 !is_on_ram(physical_address + PhysAddr(i * 4096))
@@ -396,7 +405,8 @@ impl PageTable {
                 "memory space must already be allocated"
             );
             unsafe {
-                self.mmap(VirtAddr(address + i * 4096), physical_address + PhysAddr(i * 4096)).expect("inconsistency between searching free contigious pages and allocating them in mmap_contigious_any");
+                self.mmap(VirtAddr(address + i * 4096), physical_address + PhysAddr(i * 4096))
+                    .expect("inconsistency between searching free contigious pages and allocating them in mmap_contigious_any");
             }
         }
         VirtAddr(address)
@@ -406,12 +416,10 @@ impl PageTable {
     ///marked as used
     ///Returns an error if the virtual address is already mapped
     ///# Safety
-    ///physical address must be marked as used by an external actor. 
+    ///physical address must be marked as used by an external actor.
     pub unsafe fn mmap(&mut self, virtual_address: VirtAddr, physical_address: PhysAddr) -> Result<(), ErrorCode> {
         debug_assert!(!is_on_ram(physical_address) || physical_allocator::is_frame_allocated(physical_address));
-        unsafe {
-            self.allocate_4_to_2_virtual(4, virtual_address, physical_address).map(|_| ())
-        }
+        unsafe { self.allocate_4_to_2_virtual(4, virtual_address, physical_address).map(|_| ()) }
     }
 
     ///returns if that page table has less available spaces
@@ -445,7 +453,12 @@ impl PageTable {
     ///Returns an error if the virtual address is already mapped
     ///# Safety
     ///Physical address must be marked as used
-    unsafe fn allocate_4_to_2_virtual(&mut self, level: u64, address: VirtAddr, physical_address: PhysAddr) -> Result<bool, ErrorCode> {
+    unsafe fn allocate_4_to_2_virtual(
+        &mut self,
+        level: u64,
+        address: VirtAddr,
+        physical_address: PhysAddr,
+    ) -> Result<bool, ErrorCode> {
         let entry = self.get_page_table_entry_on_level(address, level);
         if !entry.present() {
             let frame_addr = physical_allocator::allocate_frame();
@@ -481,7 +494,11 @@ impl PageTable {
         *entry = PageTableEntry::new(physical_address, is_user_mode(*address));
     }
 
-    unsafe fn allocate_level_1_virtual(&mut self, virtual_address: VirtAddr, physical_address: PhysAddr) -> Result<(), ErrorCode> {
+    unsafe fn allocate_level_1_virtual(
+        &mut self,
+        virtual_address: VirtAddr,
+        physical_address: PhysAddr,
+    ) -> Result<(), ErrorCode> {
         let entry = self.get_page_table_entry_on_level(virtual_address, 1);
         if entry.present() {
             return Err(ErrorCode::AlreadyMapped);
@@ -495,7 +512,7 @@ impl PageTable {
     pub unsafe fn deallocate(&mut self, address: VirtAddr, level: u64) -> Result<bool, ErrorCode> {
         let entry = &mut self.entries[(address.0 >> (3 + level * 9) & 0b111_111_111) as usize];
         if !entry.present() {
-            return Err(ErrorCode::NotMapped)
+            return Err(ErrorCode::NotMapped);
         }
         if level == 1 {
             entry.set_present(false);
@@ -526,7 +543,7 @@ impl PageTable {
     pub unsafe fn unmap(&mut self, address: VirtAddr, level: u64) -> Result<bool, ErrorCode> {
         let entry = &mut self.entries[(address.0 >> (3 + level * 9) & 0b111_111_111) as usize];
         if !entry.present() {
-            return Err(ErrorCode::NotMapped)
+            return Err(ErrorCode::NotMapped);
         }
         if level == 1 {
             entry.set_present(false);
@@ -650,7 +667,9 @@ impl PageTree {
     }
 
     pub fn current() -> Self {
-        Self { level_4_table: Self::get_level4_addr() }
+        Self {
+            level_4_table: Self::get_level4_addr(),
+        }
     }
 
     pub fn root(&self) -> PhysAddr {
@@ -794,7 +813,9 @@ impl PageTree {
     }
 
     pub fn deallocate(&mut self, addr: std::mem_utils::VirtAddr) {
-        if addr >= PhysAddr(0) + mem_utils::get_hhdm_addr() && addr < PhysAddr(mem_utils::get_hhdm_len()) + mem_utils::get_hhdm_addr() {
+        if addr >= PhysAddr(0) + mem_utils::get_hhdm_addr()
+            && addr < PhysAddr(mem_utils::get_hhdm_len()) + mem_utils::get_hhdm_addr()
+        {
             //presumably mapping to owned physical addr?
             println!(level:warn, "Attempted to deallocate address {:#x?} in HHDM. Removing physical entry only", addr.0);
             debug_assert!(false); //panic in debug
@@ -826,9 +847,13 @@ impl PageTree {
             let level_4_table = get_at_physical_addr::<PageTable>(self.level_4_table);
             let address = match physical_address {
                 None => {
-                    let addr = self.find_contigious_pages(num, low).expect("no contigious pages?? impossible!");
+                    let addr = self
+                        .find_contigious_pages(num, low)
+                        .expect("no contigious pages?? impossible!");
                     for i in 0..num {
-                        level_4_table.allocate(addr + i * 4096).expect("inconsistency between searching free contigious pages and allocating them in mmap_contigious_any");
+                        level_4_table.allocate(addr + i * 4096).expect(
+                            "inconsistency between searching free contigious pages and allocating them in mmap_contigious_any",
+                        );
                     }
                     addr
                 }
@@ -844,10 +869,14 @@ impl PageTree {
 
     pub fn mmap_contigious(&mut self, physical_addresses: &[PhysAddr], low: bool) -> VirtAddr {
         unsafe {
-            let addr = self.find_contigious_pages(physical_addresses.len() as u64, low).expect("no contigious pages?? impossible!");
+            let addr = self
+                .find_contigious_pages(physical_addresses.len() as u64, low)
+                .expect("no contigious pages?? impossible!");
             let level_4_table = get_at_physical_addr::<PageTable>(self.level_4_table);
             for i in 0..physical_addresses.len() {
-                level_4_table.mmap(addr + i as u64 * 4096, physical_addresses[i]).expect("inconsistency between searching free contigious pages and allocating them in mmap_contigious_any");
+                level_4_table
+                    .mmap(addr + i as u64 * 4096, physical_addresses[i])
+                    .expect("inconsistency between searching free contigious pages and allocating them in mmap_contigious_any");
             }
             if low {
                 return addr;

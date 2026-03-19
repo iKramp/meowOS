@@ -1,0 +1,110 @@
+use std::{
+    error::ErrorCode,
+    mem_utils::{self, PhysAddr},
+    vec::Vec,
+};
+
+use crate::{
+    drivers::filesystem::rfs2::{BLOCK_SIZE_SECTORS, BlockPtr, Rfs2, operations::PTRS_PER_BLOCK},
+    memory::physical_allocator,
+};
+
+impl Rfs2 {
+    pub(super) async fn read_locked_pointers(&self, pointers: &[BlockPtr], buffer: &[PhysAddr]) {
+        let mut curr_ptr = pointers[0];
+        let mut curr_index = 0;
+        let mut curr_size = 1;
+        for ptr in pointers.iter().skip(1) {
+            if *ptr == curr_ptr + 1 {
+                curr_size += 1;
+                continue;
+            }
+            self.partition
+                .read(
+                    curr_ptr as usize * BLOCK_SIZE_SECTORS,
+                    curr_size * BLOCK_SIZE_SECTORS,
+                    &buffer[curr_index..(curr_index + curr_size)],
+                )
+                .await;
+            curr_ptr = *ptr;
+            curr_index += curr_size;
+            curr_size = 1;
+        }
+    }
+
+    pub(super) async fn read_locked(
+        &self,
+        file_root: BlockPtr,
+        offset_blocks: u64,
+        size_bytes: u64,
+        buffer: &[PhysAddr],
+    ) -> Result<u64, ErrorCode> {
+        if size_bytes == 0 {
+            return Ok(0);
+        }
+        if size_bytes.div_ceil(4096) > buffer.len() as u64 {
+            return Err(ErrorCode::InvalidArgument);
+        }
+
+        let file_info = self.get_file_info(file_root).await;
+
+        if offset_blocks * 4096 > file_info.size {
+            return Ok(0);
+        }
+
+        let working_block = physical_allocator::allocate_frame();
+        self.partition
+            .read(file_root as usize * BLOCK_SIZE_SECTORS + 1, 7, &[working_block])
+            .await;
+
+        let small_file = file_info.levels == 0;
+        if small_file {
+            return Ok(file_info.size.min(size_bytes) as u64);
+        }
+
+        //they must be contiguous both physically and virtually
+        let mut current_working_blocks = Vec::new();
+        current_working_blocks.push(working_block);
+
+        let first_block_to_read = offset_blocks;
+        let last_block_to_read = (offset_blocks + size_bytes / 4096).min(file_info.size / 4096);
+
+        let mut current_ptr_level = 1;
+        let levels = file_info.levels;
+        loop {
+            let level_diff = levels - current_ptr_level;
+            let first_relevant_ptr = first_block_to_read / (PTRS_PER_BLOCK.pow(level_diff as u32) as u64);
+            let last_relevant_ptr = last_block_to_read / (PTRS_PER_BLOCK.pow(level_diff as u32) as u64);
+
+            let ptr_virt =
+                mem_utils::translate_phys_virt_addr(*current_working_blocks.first().expect("must have at least 1 block"))
+                    + first_relevant_ptr * core::mem::size_of::<BlockPtr>() as u64;
+            let ptrs_to_read = (last_relevant_ptr - first_relevant_ptr + 1) as usize;
+            let ptrs_slice = unsafe { core::slice::from_raw_parts(ptr_virt.0 as *const BlockPtr, ptrs_to_read) };
+
+            if current_ptr_level == levels {
+                self.read_locked_pointers(ptrs_slice, buffer).await;
+
+                for block in current_working_blocks {
+                    unsafe { physical_allocator::deallocate_frame(block) };
+                }
+                break;
+            } else {
+                let new_working_physical = physical_allocator::allocate_contiguius_high(ptrs_to_read as u64);
+                let new_working_blocks = (0..ptrs_to_read)
+                    .map(|i| PhysAddr(new_working_physical.0 + i as u64 * 4096))
+                    .collect::<Vec<_>>();
+
+                self.read_locked_pointers(ptrs_slice, &new_working_blocks).await;
+
+                for block in current_working_blocks {
+                    unsafe { physical_allocator::deallocate_frame(block) };
+                }
+                current_working_blocks = new_working_blocks;
+                current_ptr_level += 1;
+            }
+        }
+
+        Ok((last_block_to_read - first_block_to_read) * 4096)
+    }
+}

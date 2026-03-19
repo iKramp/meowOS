@@ -68,13 +68,8 @@ impl LockInfo {
                 self.locations.remove(location);
             }
         }
-        
-        if old_val == 1 {
-            self.prev_int_state
-        } else {
-            false
-        }
 
+        if old_val == 1 { self.prev_int_state } else { false }
     }
 
     pub fn num_locks(&self) -> u16 {

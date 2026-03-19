@@ -177,7 +177,10 @@ impl<'a> ContextInfo<'a> {
             return Err(ContextInfoError::InvalidCmdLine);
         };
 
-        let args = chunks.map(|string| string.into_boxed_str()).collect::<Vec<_>>().into_boxed_slice();
+        let args = chunks
+            .map(|string| string.into_boxed_str())
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
 
         Ok(Self {
             is_32_bit,

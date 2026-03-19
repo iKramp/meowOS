@@ -73,7 +73,6 @@ impl VgaText {
             }
         }
 
-
         let character = &DEFAULT_FONT[character as usize * 8..(character as usize + 1) * 8];
         let mut curr_row = self.line * CHAR_HEIGHT;
         for char_line in character {
@@ -140,9 +139,7 @@ impl std::Print for VgaText {
         self.background = (0, 0, 0);
     }
 
-    fn set_log_level(&mut self, _log_level: print::LogLevel) {
-        
-    }
+    fn set_log_level(&mut self, _log_level: print::LogLevel) {}
 }
 
 #[used]

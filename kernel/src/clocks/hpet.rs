@@ -149,10 +149,7 @@ impl Timer for HpetWrapper {
 
         let timer_0_cnt = (main_cnt.wrapping_sub(last_main_count)) % self.cmp_value;
         let nanos = (timer_0_cnt * 1_000_000_000) / self.cmp_value;
-        std::time::Instant::from_duration_since_epoch(core::time::Duration::new(
-            new_seconds,
-            nanos as u32,
-        ))
+        std::time::Instant::from_duration_since_epoch(core::time::Duration::new(new_seconds, nanos as u32))
     }
 
     fn calibrate(&mut self, now: std::time::Instant) {
@@ -161,7 +158,8 @@ impl Timer for HpetWrapper {
 
     fn service_interrupt(&self) {
         self.seconds_since.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
-        self.last_main_count.fetch_add(self.cmp_value, core::sync::atomic::Ordering::SeqCst);
+        self.last_main_count
+            .fetch_add(self.cmp_value, core::sync::atomic::Ordering::SeqCst);
     }
 }
 

@@ -5,7 +5,6 @@ use crate::drivers::block_device::disk::{DirEntry, MountedPartition};
 
 use super::{Inode, InodeIndex, InodeType};
 
-
 #[async_trait::async_trait]
 pub trait FileSystemFactory: Send + Sync {
     async fn mount(&self, partition: MountedPartition) -> Arc<dyn FileSystem + Send>;
@@ -22,7 +21,14 @@ pub trait FileSystem: Debug + Send + Sync {
     async fn stat(&self, inode: InodeIndex) -> Result<Inode, ErrorCode>;
     async fn set_stat(&self, inode_index: InodeIndex, inode_data: Inode) -> Result<(), ErrorCode>;
     ///returns the new parent inode in the first field and the new inode in the second
-    async fn create(&self, name: &str, parent_dir: InodeIndex, type_mode: InodeType, uid: u16, gid: u16) -> Result<(Inode, Inode), ErrorCode>;
+    async fn create(
+        &self,
+        name: &str,
+        parent_dir: InodeIndex,
+        type_mode: InodeType,
+        uid: u16,
+        gid: u16,
+    ) -> Result<(Inode, Inode), ErrorCode>;
     async fn unlink(&self, parent_inode: InodeIndex, name: &str) -> Result<(), ErrorCode>;
     ///returns the new parent inode
     async fn link(&self, inode: InodeIndex, parent_dir: InodeIndex, name: &str) -> Result<Inode, ErrorCode>;

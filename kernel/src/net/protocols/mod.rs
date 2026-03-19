@@ -5,14 +5,18 @@ use crate::net::{
     flow::{IncomingFlowDirection, OutgoingFlowDirection},
     packet::NetPacket,
     protocols::{
-        arp::{ArpFlowId, ArpHeader}, ethernet::{EthernetFlowId, EthernetHeader, parse_ethernet_frame}, icmp::{IcmpFlowId, IcmpHeader}, ipv4::{Ipv4Address, Ipv4FlowId, Ipv4Header, Ipv4Network}, udp::{UdpFlowId, UdpHeader, UdpPort}
+        arp::{ArpFlowId, ArpHeader},
+        ethernet::{EthernetFlowId, EthernetHeader, parse_ethernet_frame},
+        icmp::{IcmpFlowId, IcmpHeader},
+        ipv4::{Ipv4Address, Ipv4FlowId, Ipv4Header, Ipv4Network},
+        udp::{UdpFlowId, UdpHeader, UdpPort},
     },
 };
 
 pub(in crate::net) mod arp;
 pub(in crate::net) mod ethernet;
-pub(in crate::net) mod ipv4;
 pub(in crate::net) mod icmp;
+pub(in crate::net) mod ipv4;
 pub(in crate::net) mod udp;
 
 pub(in crate::net) fn init() {

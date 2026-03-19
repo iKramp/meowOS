@@ -1,15 +1,15 @@
 mod gdt;
-pub use gdt::{STATIC_GDT_PTR, create_new_gdt, load_gdt};
 use core::sync::atomic::Ordering;
+pub use gdt::{STATIC_GDT_PTR, create_new_gdt, load_gdt};
 use std::{println, printlnc};
 #[macro_use]
 pub mod handlers;
 pub mod idt;
-mod page_fault;
 mod macros;
-pub use macros::general_interrupt_handler;
+mod page_fault;
 use crate::utils::byte_to_port;
 pub use macros::InterruptProcessorState;
+pub use macros::general_interrupt_handler;
 
 const PIC1: u16 = 0x20;
 const PIC2: u16 = 0xA0; /* IO base address for slave PIC */

@@ -205,7 +205,8 @@ pub(super) fn parse_ipv4_packet(packet: &mut Acow<NetPacket>, offset: usize) -> 
         return None;
     }
 
-    let checksum = net::compute_internet_checksum(&packet.get_chunks()[0].data()[offset as usize..(offset + header_len) as usize]);
+    let checksum =
+        net::compute_internet_checksum(&packet.get_chunks()[0].data()[offset as usize..(offset + header_len) as usize]);
     if checksum != 0 {
         println!(level:warn, "IPv4 header checksum mismatch, expected 0 got {:04x}, dropping packet", checksum);
         return None;
@@ -228,7 +229,10 @@ pub(super) fn parse_ipv4_packet(packet: &mut Acow<NetPacket>, offset: usize) -> 
     let upper_layer_size = total_length as u32 - header_len;
     packet.upper_layer_size = Some(upper_layer_size as usize);
 
-    packet.append_address(AddressPair::new(NetAddress::Ipv4Address(source), NetAddress::Ipv4Address(destination)));
+    packet.append_address(AddressPair::new(
+        NetAddress::Ipv4Address(source),
+        NetAddress::Ipv4Address(destination),
+    ));
 
     let mut interface_addresses = match packet.source {
         NetPacketSource::Nic(nic_id) => {

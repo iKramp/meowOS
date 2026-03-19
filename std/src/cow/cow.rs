@@ -1,17 +1,20 @@
-use core::{cell::UnsafeCell, fmt::Debug, ops::{Deref, DerefMut}};
+use core::{
+    cell::UnsafeCell,
+    fmt::Debug,
+    ops::{Deref, DerefMut},
+};
 
 use crate::rc::Rc;
 
-
 #[derive(Clone)]
 pub struct Cow<T: Clone> {
-    data: Rc<UnsafeCell<T>>
+    data: Rc<UnsafeCell<T>>,
 }
 
 impl<T: Clone> Cow<T> {
     pub fn new(data: T) -> Self {
         Self {
-            data: Rc::new(UnsafeCell::new(data))
+            data: Rc::new(UnsafeCell::new(data)),
         }
     }
 

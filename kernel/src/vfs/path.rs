@@ -90,7 +90,6 @@ impl ResolvedPathBorrowed<'_> {
     }
 }
 
-
 pub fn resolve_path(path: &str) -> ResolvedPath {
     let chunks = path.split('/');
     let mut path = Vec::new();

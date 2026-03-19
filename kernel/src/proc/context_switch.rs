@@ -27,7 +27,6 @@ pub fn context_switch() {
 }
 
 pub fn no_ret_context_switch() -> ! {
-
     // Switch to the next process
     loop {
         task_runner::process_tasks();
@@ -36,7 +35,6 @@ pub fn no_ret_context_switch() -> ! {
         let mut scheduler_lock = lock_w_info!(SCHEDULER);
         let scheduler = unsafe { scheduler_lock.assume_init_mut() };
         if let Some(process_data_arc) = scheduler.schedule() {
-            
             let mut cpu_locals = CpuLocals::get_mut();
             cpu_locals.current_process = Some(process_data_arc.clone());
             drop(cpu_locals);

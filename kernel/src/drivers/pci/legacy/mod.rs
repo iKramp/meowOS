@@ -21,25 +21,28 @@ pub trait LegacyPciDriver: Send + Sync {
 pub fn get_devices() -> Vec<LegacyPciDevice> {
     let devices = scan_pci_bus();
 
-    devices.iter().filter_map(|dev_location| {
-        println!(
-            "pci::enumerate_devices: Found device at {:02x}:{:02x}.{:x}",
-            dev_location.bus, dev_location.device, dev_location.function
-        );
-
-        let device = LegacyPciDevice::new(*dev_location);
-        if device.common.capabilities.iter().any(|cap| cap.id == PCI_CAP_PCIE_ID) {
+    devices
+        .iter()
+        .filter_map(|dev_location| {
             println!(
-                "Found PCIe device at {:02x}:{:02x}.{:x}",
-                device.common.device.bus, device.common.device.device, device.common.device.function
+                "pci::enumerate_devices: Found device at {:02x}:{:02x}.{:x}",
+                dev_location.bus, dev_location.device, dev_location.function
             );
-            println!("It will be initialized later from the MCFG table");
-            None
-        } else {
-            // init_pci_device(&device);
-            Some(device)
-        }
-    }).collect()
+
+            let device = LegacyPciDevice::new(*dev_location);
+            if device.common.capabilities.iter().any(|cap| cap.id == PCI_CAP_PCIE_ID) {
+                println!(
+                    "Found PCIe device at {:02x}:{:02x}.{:x}",
+                    device.common.device.bus, device.common.device.device, device.common.device.function
+                );
+                println!("It will be initialized later from the MCFG table");
+                None
+            } else {
+                // init_pci_device(&device);
+                Some(device)
+            }
+        })
+        .collect()
 }
 
 fn scan_pci_bus() -> Vec<PciDeviceLocation> {

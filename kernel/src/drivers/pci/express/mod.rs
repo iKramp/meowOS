@@ -1,14 +1,20 @@
 use std::{
-    error::ErrorCode, mem_utils::{PhysAddr, VirtAddr, translate_phys_virt_addr}, println, vec::Vec
+    error::ErrorCode,
+    mem_utils::{PhysAddr, VirtAddr, translate_phys_virt_addr},
+    println,
+    vec::Vec,
 };
 
 use crate::{
     acpi::{BaseAddressAllocation, McfgTable},
     drivers::pci::{
-        PCI_CAP_PCIE_ID, PCI_CAP_POWER_MANAGEMENT_ID, PciDeviceLocation, device_class::PciClass, device_codes::PciDeviceNumericId, express::{
+        PCI_CAP_PCIE_ID, PCI_CAP_POWER_MANAGEMENT_ID, PciDeviceLocation,
+        device_class::PciClass,
+        device_codes::PciDeviceNumericId,
+        express::{
             configuration_space::{LegacyConfigSpaceT0, LegacyConfigSpaceT0Ptr},
             express_device::PcieDevice,
-        }
+        },
     },
     memory::{PAGE_TREE_ALLOCATOR, paging::LiminePat},
 };

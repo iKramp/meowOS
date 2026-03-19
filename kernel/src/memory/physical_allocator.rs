@@ -235,7 +235,8 @@ impl BuddyAllocator {
             return self.binary_tree_size / 2;
         }
         let order = log2_rounded_up(n_pages);
-        self.find_contigious_empty_recursively_low(1, order).expect("OOM in physical memory allocator")
+        self.find_contigious_empty_recursively_low(1, order)
+            .expect("OOM in physical memory allocator")
     }
 
     fn find_contigious_empty_high(&self, n_pages: u64) -> u64 {
@@ -243,7 +244,8 @@ impl BuddyAllocator {
             return self.binary_tree_size / 2;
         }
         let order = log2_rounded_up(n_pages);
-        self.find_contigious_empty_recursively_high(1, order).expect("OOM in physical memory allocator")
+        self.find_contigious_empty_recursively_high(1, order)
+            .expect("OOM in physical memory allocator")
     }
 
     /// This function finds a contigious block of empty pages of the given order

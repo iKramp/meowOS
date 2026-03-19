@@ -98,7 +98,12 @@ pub fn _print_colored(fg: (u8, u8, u8), args: core::fmt::Arguments, log_level: L
 }
 
 #[doc(hidden)]
-pub fn _print_colored_locked(fg: (u8, u8, u8), lock: &mut NoIntSpinlockGuard<dyn Print>, args: core::fmt::Arguments, log_level: LogLevel) {
+pub fn _print_colored_locked(
+    fg: (u8, u8, u8),
+    lock: &mut NoIntSpinlockGuard<dyn Print>,
+    args: core::fmt::Arguments,
+    log_level: LogLevel,
+) {
     lock.set_fg_color(fg);
     _print_locked(lock, args, log_level);
     lock.reset_color();

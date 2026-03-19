@@ -78,7 +78,13 @@ impl<T: ?Sized> core::ops::Deref for Arc<T> {
 impl<T: ?Sized> Drop for Arc<T> {
     fn drop(&mut self) {
         unsafe {
-            if self.inner.as_ref().ref_count.fetch_sub(1, core::sync::atomic::Ordering::Relaxed) == 1 {
+            if self
+                .inner
+                .as_ref()
+                .ref_count
+                .fetch_sub(1, core::sync::atomic::Ordering::Relaxed)
+                == 1
+            {
                 let address = self.inner.as_ptr();
                 let _ = Box::from_raw(address);
             }

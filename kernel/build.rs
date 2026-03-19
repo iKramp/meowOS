@@ -3,7 +3,8 @@ use std::process::Command;
 
 fn main() {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR variable not set");
-    let link_script_file = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR variable not set")).join("linker_script.ld");
+    let link_script_file =
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR variable not set")).join("linker_script.ld");
 
     if !(Command::new("nasm")
         .args([
@@ -28,13 +29,7 @@ fn main() {
     }
 
     if !(Command::new("nasm")
-        .args([
-            "-f",
-            "elf64",
-            "src/memory/probe.asm",
-            "-o",
-            &(out_dir.clone() + "/probe.o"),
-        ])
+        .args(["-f", "elf64", "src/memory/probe.asm", "-o", &(out_dir.clone() + "/probe.o")])
         .status()
         .expect("Failed to run nasm on probe.asm")
         .success()

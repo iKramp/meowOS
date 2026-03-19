@@ -1,8 +1,8 @@
 use crate::interrupts::InterruptProcessorState;
-use crate::proc::process_data::CpuStateType;
 use crate::proc::PROCESS_ID_COUNTER;
 use crate::proc::ProcessData;
 use crate::proc::SCHEDULER;
+use crate::proc::process_data::CpuStateType;
 use std::error::ErrorCode;
 use std::lock_w_info;
 use std::string::ToString;
@@ -60,7 +60,9 @@ pub fn build_generic_memory_context(context: &ContextInfo) -> MemoryContext {
         let end = start + region.size_pages() as u64 * 0x1000;
         for page_addr in (start..end).step_by(0x1000) {
             let _phys_addr_map = memory_tree.allocate_set_virtual(None, VirtAddr(page_addr));
-            let page = memory_tree.get_page_table_entry_mut(VirtAddr(page_addr)).expect("page must exist after allocation");
+            let page = memory_tree
+                .get_page_table_entry_mut(VirtAddr(page_addr))
+                .expect("page must exist after allocation");
             page.set_writeable(region.flags().is_writeable());
             page.set_user_accessible(true);
 
@@ -74,7 +76,9 @@ pub fn build_generic_memory_context(context: &ContextInfo) -> MemoryContext {
         let first_page = mem_init.0.0 & (!0xfff);
         let last_page = (mem_init.0.0 + mem_init.1.len() as u64) & (!0xfff); //inclusive
         for page_addr in (first_page..=last_page).step_by(0x1000) {
-            let page = memory_tree.get_page_table_entry_mut(VirtAddr(page_addr)).expect("page must exist after allocation");
+            let page = memory_tree
+                .get_page_table_entry_mut(VirtAddr(page_addr))
+                .expect("page must exist after allocation");
             let start_mem_addr = page_addr.max(mem_init.0.0);
             let start_data_index = (start_mem_addr - mem_init.0.0) as usize;
             let mem_offset = start_mem_addr & 0xFFF;
@@ -92,11 +96,15 @@ pub fn build_generic_memory_context(context: &ContextInfo) -> MemoryContext {
         initialized: true,
         is_32_bit: context.is_32_bit(),
         page_tree: memory_tree,
-        owned_memory_regions: context.mem_regions().iter().map(|region| MappedMemoryRegion {
-            name: context.path().to_string().into_boxed_str(),
-            base: VirtAddr(region.start().0),
-            size_pages: region.size_pages() as u64,
-        }).collect(),
+        owned_memory_regions: context
+            .mem_regions()
+            .iter()
+            .map(|region| MappedMemoryRegion {
+                name: context.path().to_string().into_boxed_str(),
+                base: VirtAddr(region.start().0),
+                size_pages: region.size_pages() as u64,
+            })
+            .collect(),
     }
 }
 
@@ -150,7 +158,9 @@ pub fn add_stack(context: &mut MemoryContext, stack_size_pages: u8) -> Result<()
                 return Err(e);
             }
         }
-        let entry = mem_tree.get_page_table_entry_mut(VirtAddr(page << 12)).expect("page must exist after allocation");
+        let entry = mem_tree
+            .get_page_table_entry_mut(VirtAddr(page << 12))
+            .expect("page must exist after allocation");
         entry.set_writeable(true);
         entry.set_no_execute(true);
         entry.set_user_accessible(true);
@@ -167,7 +177,9 @@ pub fn add_stack(context: &mut MemoryContext, stack_size_pages: u8) -> Result<()
             return Err(e);
         }
     }
-    let entry = mem_tree.get_page_table_entry_mut(VirtAddr(overflow_page << 12)).expect("page must exist after allocation");
+    let entry = mem_tree
+        .get_page_table_entry_mut(VirtAddr(overflow_page << 12))
+        .expect("page must exist after allocation");
     entry.set_writeable(true);
     entry.set_no_execute(true);
     entry.set_user_accessible(false);

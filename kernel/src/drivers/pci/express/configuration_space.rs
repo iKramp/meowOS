@@ -3,12 +3,10 @@ use std::{mem_utils::PhysAddr, println, vec::Vec};
 use bitfield::bitfield;
 use reg_map::RegMap;
 
-use crate::{
-    drivers::pci::{
-        MemoryBar,
-        capabilities::{Capability, CapabilityPtr, ExtendedCapability, ExtendedCapabilityPtr},
-        express::express_device::PcieDevice,
-    },
+use crate::drivers::pci::{
+    MemoryBar,
+    capabilities::{Capability, CapabilityPtr, ExtendedCapability, ExtendedCapabilityPtr},
+    express::express_device::PcieDevice,
 };
 
 #[derive(Debug, RegMap)]
@@ -81,7 +79,8 @@ pub fn get_extended_capabilities_list(dev: &PcieDevice) -> Vec<ExtendedCapabilit
         } else {
             cap = unsafe {
                 ExtendedCapabilityPtr::from_ptr(
-                    (dev.config_space_addr.as_ptr() as u64 + cap_read.version_and_pointer.next_offset() as u64) as *mut ExtendedCapability,
+                    (dev.config_space_addr.as_ptr() as u64 + cap_read.version_and_pointer.next_offset() as u64)
+                        as *mut ExtendedCapability,
                 )
             }
         }
@@ -89,7 +88,6 @@ pub fn get_extended_capabilities_list(dev: &PcieDevice) -> Vec<ExtendedCapabilit
 }
 
 pub fn get_bar(dev: &PcieDevice, index: u8) -> Option<MemoryBar> {
-
     #[cfg(debug_assertions)]
     {
         let header_type = dev.config_space_addr.header_type().read().header_type();
@@ -107,7 +105,7 @@ pub fn get_bar(dev: &PcieDevice, index: u8) -> Option<MemoryBar> {
     }
 
     let curr_bar = unsafe { dev.config_space_addr.bars().idx_unchecked(index as usize).read() };
-    let curr_bar_2 = if index < 5 { 
+    let curr_bar_2 = if index < 5 {
         unsafe { dev.config_space_addr.bars().idx_unchecked(index as usize + 1).read() }
     } else {
         0
@@ -129,7 +127,12 @@ pub fn get_bar(dev: &PcieDevice, index: u8) -> Option<MemoryBar> {
         let top_bits = unsafe { dev.config_space_addr.bars().idx_unchecked(index as usize + 1).read() };
 
         unsafe { dev.config_space_addr.bars().idx_unchecked(index as usize).write(curr_bar) };
-        unsafe { dev.config_space_addr.bars().idx_unchecked(index as usize + 1).write(curr_bar_2) };
+        unsafe {
+            dev.config_space_addr
+                .bars()
+                .idx_unchecked(index as usize + 1)
+                .write(curr_bar_2)
+        };
 
         let size = ((top_bits as u64) << 32) | (bottom_bits as u64);
         let addr = ((curr_bar_2 as u64) << 32) | (curr_bar as u64 & !0b1111);
@@ -153,7 +156,14 @@ pub fn get_bar(dev: &PcieDevice, index: u8) -> Option<MemoryBar> {
     println!("Size of bar: {:X}, address of bar: {:X}", size, addr);
     println!("first bar reg: {:X}", curr_bar);
 
-    Some(MemoryBar::new(index, index + 0x10, PhysAddr(addr), size, prefetchable, is_64_bit))
+    Some(MemoryBar::new(
+        index,
+        index + 0x10,
+        PhysAddr(addr),
+        size,
+        prefetchable,
+        is_64_bit,
+    ))
 }
 
 bitfield! {

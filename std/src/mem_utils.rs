@@ -158,15 +158,9 @@ pub unsafe fn ensure_aligned_manual(addr: VirtAddr, size: u64, align: u64) -> Vi
     if addr.0 % align == 0 {
         addr
     } else {
-        let heap_data = unsafe { alloc::alloc::alloc(
-            Layout::from_size_align(size as usize, align as usize).unwrap()
-        )};
+        let heap_data = unsafe { alloc::alloc::alloc(Layout::from_size_align(size as usize, align as usize).unwrap()) };
         unsafe {
-            core::ptr::copy_nonoverlapping(
-                addr.0 as *const u8,
-                heap_data,
-                size as usize
-            );
+            core::ptr::copy_nonoverlapping(addr.0 as *const u8, heap_data, size as usize);
         }
         VirtAddr(heap_data as u64)
     }

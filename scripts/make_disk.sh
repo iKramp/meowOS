@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
 
-#mkdir -p iso/EFI/BOOT
-#cp kernel_build_files/kernel.bin iso/boot/
-#cp grub.cfg iso/boot/grub/
-#setup filesystem
-
 LIMINE_DATA_DIR=$(limine --print-datadir)
 
 if [ -z "$LIMINE_DATA_DIR" ]; then

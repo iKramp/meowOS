@@ -106,13 +106,12 @@ pub fn disable_msi(dev: &FullPciDevType) -> Result<(), ErrorCode> {
             cap_addr = CapAddr::Memory(VirtAddr(ptr));
         }
     }
-    
+
     let mut first_dword = cap_addr.get_dword(0);
     first_dword &= !(1 << 16);
     cap_addr.set_dword(0, first_dword); //disable
 
     todo!()
-    
 }
 
 fn set_msi_address(is_64_bit: bool, cap_addr: &CapAddr) {

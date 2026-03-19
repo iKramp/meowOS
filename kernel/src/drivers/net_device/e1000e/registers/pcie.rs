@@ -1,7 +1,6 @@
 use bitfield::bitfield;
 use reg_map::RegMap;
 
-
 bitfield! {
     #[derive(RegMap)]
     pub struct GCR2(u32);

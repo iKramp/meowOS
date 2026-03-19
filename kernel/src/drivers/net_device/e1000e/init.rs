@@ -1,7 +1,10 @@
 use std::{println, w_lock_w_info};
 
 use crate::drivers::net_device::e1000e::{
-    E1000eDevice, phy, receive::{disable_receive, enable_receive, init_receive}, registers::{FCAH, FCAL, FCT, InterruptMask}, transmit::{disable_transmit, enable_transmit, init_transmit}
+    E1000eDevice, phy,
+    receive::{disable_receive, enable_receive, init_receive},
+    registers::{FCAH, FCAL, FCT, InterruptMask},
+    transmit::{disable_transmit, enable_transmit, init_transmit},
 };
 
 pub(super) fn init(dev: &mut E1000eDevice) {
@@ -25,7 +28,7 @@ pub(super) fn init(dev: &mut E1000eDevice) {
             .set_asde(false)
             .set_frcdplx(false)
             .set_frcspd(false)
-            .set_slu(true)
+            .set_slu(true),
     );
 
     //no flow control for now
@@ -63,12 +66,7 @@ pub(super) fn init(dev: &mut E1000eDevice) {
     let mac_address = dev.mac_address.0;
     println!(
         "MAC Address: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-        mac_address[0],
-        mac_address[1],
-        mac_address[2],
-        mac_address[3],
-        mac_address[4],
-        mac_address[5]
+        mac_address[0], mac_address[1], mac_address[2], mac_address[3], mac_address[4], mac_address[5]
     );
     //print link up
     println!("Link up: {}", phy::get_link_up(dev));
@@ -91,5 +89,10 @@ fn all_interrupts_mask() -> InterruptMask {
 }
 
 fn interesting_interrupts_mask() -> InterruptMask {
-    *InterruptMask(0).set_RXT0(true).set_RXO(true).set_LSC(true).set_RXDMT0(true).set_RxQ0(true)
+    *InterruptMask(0)
+        .set_RXT0(true)
+        .set_RXO(true)
+        .set_LSC(true)
+        .set_RXDMT0(true)
+        .set_RxQ0(true)
 }

@@ -1,7 +1,7 @@
 #![allow(clippy::module_inception)]
 
-mod cow;
 mod acow;
+mod cow;
 
-pub use cow::Cow;
 pub use acow::Acow;
+pub use cow::Cow;
