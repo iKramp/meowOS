@@ -24,6 +24,7 @@ mod increase_size;
 mod read;
 mod truncate;
 mod write;
+mod format;
 
 const PTRS_PER_BLOCK: usize = 4096 / core::mem::size_of::<BlockPtr>();
 const PTRS_IN_ROOT: usize = (BLOCK_SIZE_SECTORS - 1) * 512 / core::mem::size_of::<BlockPtr>();
