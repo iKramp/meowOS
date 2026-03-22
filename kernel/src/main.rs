@@ -106,9 +106,12 @@ extern "C" fn _start() -> ! {
         ResolvedPath::root(),
     )));
     if let Err(e) = res {
-        println!("{}", e);
+        println!(level:error, "{}", e);
         panic!("Failed to mount root partition");
     }
+
+    file_operations::do_file_operations();
+
     panic!("stop here");
 
     proc::init();

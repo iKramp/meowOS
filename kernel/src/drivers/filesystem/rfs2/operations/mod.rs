@@ -3,6 +3,7 @@ use std::{
     boxed::Box,
     error::ErrorCode,
     mem_utils::{PhysAddr, translate_phys_virt_addr},
+    println,
     string::ToString,
     vec::Vec,
 };
@@ -20,11 +21,11 @@ use crate::{
 };
 
 mod dir_ops;
+mod format;
 mod increase_size;
 mod read;
 mod truncate;
 mod write;
-mod format;
 
 const PTRS_PER_BLOCK: usize = 4096 / core::mem::size_of::<BlockPtr>();
 const PTRS_IN_ROOT: usize = (BLOCK_SIZE_SECTORS - 1) * 512 / core::mem::size_of::<BlockPtr>();
@@ -33,13 +34,30 @@ const PTRS_IN_ROOT: usize = (BLOCK_SIZE_SECTORS - 1) * 512 / core::mem::size_of:
 #[derive(Debug, Clone)]
 struct DirEntry {
     inode: InodeIndex,
-    name: [u8; 256],
+    len: u8,
+    name: [u8; 256 - core::mem::size_of::<InodeIndex>() - 1],
+}
+
+impl DirEntry {
+    pub fn is_name(&self, name: &str) -> bool {
+        let name_bytes = name.as_bytes();
+        if name_bytes.len() != self.len as usize {
+            return false;
+        }
+        &self.name[0..name_bytes.len()] == name_bytes
+    }
+
+    pub fn set_name(&mut self, name: &str) {
+        let name_bytes = name.as_bytes();
+        self.len = name_bytes.len() as u8;
+        self.name[..name_bytes.len()].copy_from_slice(name_bytes);
+    }
 }
 
 #[allow(clippy::from_over_into)]
 impl Into<VfsDirEntry> for &DirEntry {
     fn into(self) -> VfsDirEntry {
-        let name = &self.name;
+        let name = &self.name[0..self.len as usize];
         let name_str = str::from_utf8(name).unwrap_or("non-utf8 name");
         VfsDirEntry {
             inode: self.inode as VfsInodeIndex,
@@ -61,6 +79,10 @@ struct InodeInfo {
     modification_seconds_since_epoch: u64,
     stat_change_seconds_since_epoch: u64,
 }
+
+const _: () = {
+    assert!(core::mem::size_of::<InodeInfo>() <= 512);
+};
 
 impl InodeInfo {
     #[allow(clippy::wrong_self_convention)]
@@ -104,9 +126,10 @@ const _: () = {
 impl Rfs2 {
     async fn get_file_root_block(&self, inode_index: InodeIndex) -> Result<BlockPtr, ErrorCode> {
         let lock = self.inode_lock.lock().await;
-        let block_index = BTreeNode::find_inode_root(inode_index, self)
-            .await
-            .ok_or(ErrorCode::InodeNotPresent)?;
+        let Some(block_index) = BTreeNode::find_inode_root(inode_index, self).await else {
+            println!("inode {} not found in tree", inode_index);
+            return Err(ErrorCode::InodeNotPresent);
+        };
         drop(lock);
         Ok(block_index)
     }
@@ -135,7 +158,7 @@ impl Rfs2 {
 #[async_trait::async_trait]
 impl FileSystem for Rfs2 {
     async fn unmount(&self) -> Result<(), ErrorCode> {
-        self.flush_inode_cache().await;
+        //nothing to do rn
         Ok(())
     }
     ///Offset must be page aligned
@@ -164,6 +187,7 @@ impl FileSystem for Rfs2 {
         drop(locked);
         res
     }
+
     async fn read_dir(&self, inode: VfsInodeIndex) -> Result<Box<[VfsDirEntry]>, ErrorCode> {
         let lock = self.get_file_lock(inode as InodeIndex);
         let locked = lock.lock();
@@ -236,11 +260,16 @@ impl FileSystem for Rfs2 {
 
         let file_root = self.get_file_root_block(inode_index as InodeIndex).await?;
         let existing_info = self.get_file_info(file_root).await;
-        let new_info = InodeInfo::from_vfs(existing_info, &inode_data);
+        let mut new_info = InodeInfo::from_vfs(existing_info, &inode_data);
+
+        let since_epoch = std::time::Instant::now().duration_since(std::time::UNIX_EPOCH).as_secs();
+        new_info.stat_change_seconds_since_epoch = since_epoch;
+
         self.set_file_info(file_root, new_info).await;
         drop(locked);
         Ok(())
     }
+
     ///returns the new parent inode in the first field and the new inode in the second
     async fn create(
         &self,
@@ -250,61 +279,41 @@ impl FileSystem for Rfs2 {
         uid: u16,
         gid: u16,
     ) -> Result<(VfsInode, VfsInode), ErrorCode> {
-        if name.len() > 256 {
-            return Err(ErrorCode::InvalidArgument);
-        }
-        if name.is_empty() {
-            return Err(ErrorCode::InvalidArgument);
-        }
-
-        let name_bytes = name.as_bytes();
-        let name_bytes_padded = {
-            let mut arr = [0; 256];
-            arr[..name_bytes.len()].copy_from_slice(name_bytes);
-            arr
-        };
-
-        let lock = self.get_file_lock(parent_dir as InodeIndex);
-        let locked = lock.lock();
-
-        let (binding, entries) = self.read_direntries(parent_dir).await;
-
-        let block_lock = self.block_alloc_lock.lock().await;
-        let inode_lock = self.inode_lock.lock().await;
-
         let new_block = self.allocate_block().await;
         let new_inode = self.allocate_inode().await;
 
-        drop(block_lock);
+        let inode_lock = self.inode_lock.lock().await;
         BTreeNode::insert_inode_root(new_inode, new_block, self).await;
         drop(inode_lock);
 
-        let last = entries.last_mut().expect("exists");
-        last.inode = new_inode;
-        last.name = name_bytes_padded;
-
-        self.write_direntries(parent_dir, binding, entries.len()).await;
-        drop(locked);
-
+        let since_epoch = std::time::Instant::now().duration_since(std::time::UNIX_EPOCH).as_secs();
         let new_inode_info = InodeInfo {
             size: 0,
             levels: 0,
             type_flags: type_mode,
             owner_uid: uid,
             owner_gid: gid,
-            link_count: 1,
-            creation_seconds_since_epoch: 0,
-            modification_seconds_since_epoch: 0,
-            stat_change_seconds_since_epoch: 0,
+            link_count: 0,
+            creation_seconds_since_epoch: since_epoch,
+            modification_seconds_since_epoch: since_epoch,
+            stat_change_seconds_since_epoch: since_epoch,
         };
         self.set_file_info(new_block, new_inode_info.clone()).await;
 
-        let parent_root = self.get_file_root_block(parent_dir as InodeIndex).await?;
-        let parent_info = self.get_file_info(parent_root).await;
-
-        let new_parent_inode = parent_info.into_vfs(parent_dir as InodeIndex, self);
-        let new_inode = new_inode_info.into_vfs(new_inode, self);
-        Ok((new_parent_inode, new_inode))
+        println!("created new file, linking");
+        let res = self.link(new_inode as VfsInodeIndex, parent_dir, name).await;
+        match res {
+            Err(e) => {
+                self.release_block(new_block).await;
+                self.release_inode(new_inode).await;
+                return Err(e);
+            }
+            Ok(parent_inode) => {
+                println!("linking done successfully");
+                let child_inode = new_inode_info.into_vfs(new_inode, self);
+                Ok((parent_inode, child_inode))
+            }
+        }
     }
 
     async fn unlink(&self, parent_inode: VfsInodeIndex, name: &str) -> Result<(), ErrorCode> {
@@ -315,18 +324,11 @@ impl FileSystem for Rfs2 {
             return Err(ErrorCode::InvalidArgument);
         }
 
-        let name_bytes = name.as_bytes();
-        let name_bytes_padded = {
-            let mut arr = [0; 256];
-            arr[..name_bytes.len()].copy_from_slice(name_bytes);
-            arr
-        };
-
         let lock = self.get_file_lock(parent_inode as InodeIndex);
         let locked = lock.lock();
 
         let (binding, entries) = self.read_direntries(parent_inode).await;
-        let Some(pos) = entries.iter_mut().position(|ent| ent.name == name_bytes_padded) else {
+        let Some(pos) = entries.iter_mut().position(|ent| ent.is_name(name)) else {
             drop(locked);
             Self::dealloc_dirent_binding(binding, entries.len());
             return Err(ErrorCode::InodeNotPresent);
@@ -366,33 +368,30 @@ impl FileSystem for Rfs2 {
     }
 
     ///returns the new parent inode
-    async fn link(&self, inode: VfsInodeIndex, parent_inode: VfsInodeIndex, name: &str) -> Result<VfsInode, ErrorCode> {
+    async fn link(&self, child_inode: VfsInodeIndex, parent_inode: VfsInodeIndex, name: &str) -> Result<VfsInode, ErrorCode> {
         if name.len() > 256 {
             return Err(ErrorCode::InvalidArgument);
         }
-
-        let name_bytes = name.as_bytes();
-        let name_bytes_padded = {
-            let mut arr = [0; 256];
-            arr[..name_bytes.len()].copy_from_slice(name_bytes);
-            arr
-        };
+        if name.is_empty() {
+            return Err(ErrorCode::InvalidArgument);
+        }
 
         let lock = self.get_file_lock(parent_inode as InodeIndex);
         let locked = lock.lock();
-
-        let child_lock = self.get_file_lock(inode as InodeIndex);
+        let child_lock = self.get_file_lock(child_inode as InodeIndex);
         let child_locked = child_lock.lock();
-        let child_root = self.get_file_root_block(inode as InodeIndex).await?;
-        let parent_root = self.get_file_root_block(parent_inode as InodeIndex).await?;
 
-        let (binding, entries) = self.read_direntries(parent_inode).await;
+        let parent_root = self.get_file_root_block(parent_inode as InodeIndex).await?;
+        let child_root = self.get_file_root_block(child_inode as InodeIndex).await?;
+
+        let (binding, entries) = self.read_direntries(parent_root).await;
 
         for entry in entries.iter() {
             if entry.inode == 0 {
                 continue;
             }
-            if entry.name == name_bytes_padded {
+
+            if entry.is_name(name) {
                 drop(locked);
                 Self::dealloc_dirent_binding(binding, entries.len());
                 return Err(ErrorCode::InvalidArgument);
@@ -401,10 +400,10 @@ impl FileSystem for Rfs2 {
 
         let last = entries.last_mut().expect("exists");
 
-        last.inode = inode as InodeIndex;
-        last.name = name_bytes_padded;
+        last.inode = child_inode as InodeIndex;
+        last.set_name(name);
 
-        self.write_direntries(parent_inode, binding, entries.len()).await;
+        self.write_direntries(parent_root, binding, entries.len()).await;
 
         drop(locked);
 
@@ -418,6 +417,7 @@ impl FileSystem for Rfs2 {
 
         Ok(new_inode)
     }
+
     async fn truncate(&self, inode: VfsInodeIndex, size: u64) -> Result<(), ErrorCode> {
         let lock = self.get_file_lock(inode as InodeIndex);
         let locked = lock.lock();
@@ -429,6 +429,7 @@ impl FileSystem for Rfs2 {
 
         Ok(())
     }
+
     async fn rename(&self, inode: VfsInodeIndex, parent_inode: VfsInodeIndex, name: &str) -> Result<(), ErrorCode> {
         if name.len() > 256 {
             return Err(ErrorCode::InvalidArgument);
@@ -446,8 +447,7 @@ impl FileSystem for Rfs2 {
             Self::dealloc_dirent_binding(binding, entries.len());
             return Err(ErrorCode::InodeNotPresent);
         };
-        let name_bytes = name.as_bytes();
-        entry.name[..name_bytes.len()].copy_from_slice(name_bytes);
+        entry.set_name(name);
 
         self.write_direntries(parent_inode, binding, entries.len() - 1).await;
 

@@ -16,7 +16,7 @@ use crate::{
         block_device::disk::{BlockDevice, DirEntry, MountedPartition, PartitionSchemeDriver},
         gpt::GPTDriver,
     },
-    vfs::{Inode, InodeIdentifier},
+    vfs::Inode,
 };
 
 use super::{
@@ -176,6 +176,7 @@ async fn mount_new_root(fs: &Arc<dyn FileSystem + Send>) -> Result<(), ErrorCode
     //root checks
     let root_dirs = fs.read_dir(inode_index).await?;
     let required_dirs = ["tty", "proc", "net"];
+    #[allow(clippy::never_loop)]
     for required_dir in required_dirs.iter() {
         if !root_dirs.iter().any(|entry| entry.name.as_ref() == *required_dir) {
             println!("Root filesystem is missing required directory {required_dir}, creating it");

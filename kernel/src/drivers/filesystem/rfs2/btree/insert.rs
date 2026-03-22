@@ -20,15 +20,14 @@ impl BTreeNode {
         if superblock.inode_tree_root_ptr == 0 {
             panic!("illegal root pointer");
         }
-        let mut root_block = rfs.get_inode_tree_block(superblock.inode_tree_root_ptr).await;
+        let mut root_block = rfs.get_disk_block(superblock.inode_tree_root_ptr).await;
         let root_node = root_block.get_as_mut::<BTreeNode>();
         let res = root_node.insert_inode(index, block, rfs).await;
         let InsertResult::TooBig(key, child) = res else {
-            if res == InsertResult::Updated {
-                root_block.write_and_dealloc(rfs).await;
-            } else {
-                root_block.forget_mem_binding();
+            if res != InsertResult::Updated {
+                root_block.changed = false;
             }
+            root_block.write_and_dealloc(rfs).await;
             return;
         };
         let mut new_block = WorkingBlock::get_disk_block(rfs).await;
@@ -50,7 +49,7 @@ impl BTreeNode {
         if new_node.key_indexes[0] > key.index {
             root_node.insert_key_child(key, child);
         } else {
-            let mut right_child = rfs.get_inode_tree_block(new_node.children[1]).await;
+            let mut right_child = rfs.get_disk_block(new_node.children[1]).await;
             let right_node = right_child.get_as_mut::<BTreeNode>();
             right_node.insert_key_child(key, child);
             right_child.write_and_dealloc(rfs).await;
@@ -83,20 +82,19 @@ impl BTreeNode {
         //find child
         let position = self.key_indexes.iter().position(|k| *k > index).unwrap_or(BTREE_KEY_CNT);
         let child_block_ptr = self.children[position];
-        let mut child_block = rfs.get_inode_tree_block(child_block_ptr).await;
+        let mut child_block = rfs.get_disk_block(child_block_ptr).await;
         let child_node = child_block.get_as_mut::<BTreeNode>();
         let insert_res = Box::pin(child_node.insert_inode(index, block, rfs)).await;
         let InsertResult::TooBig(insert_fail_key, insert_fail_child) = insert_res else {
-            if insert_res == InsertResult::Updated {
-                child_block.write_and_dealloc(rfs).await;
-            } else {
-                child_block.forget_mem_binding();
+            if insert_res != InsertResult::Updated {
+                child_block.changed = false;
             }
+            child_block.write_and_dealloc(rfs).await;
             return InsertResult::Nothing;
         };
 
         if position > 0 {
-            let mut left_sibling_block = rfs.get_inode_tree_block(self.children[position - 1]).await;
+            let mut left_sibling_block = rfs.get_disk_block(self.children[position - 1]).await;
             let left_sibling_node = left_sibling_block.get_as_mut::<BTreeNode>();
             if BTreeNode::try_rotate_right(self, position - 1, left_sibling_node, child_node) {
                 if self.key_indexes[position - 1] > index {
@@ -110,7 +108,7 @@ impl BTreeNode {
                 return InsertResult::Updated;
             }
         } else {
-            let mut right_sibling_block = rfs.get_inode_tree_block(self.children[position + 1]).await;
+            let mut right_sibling_block = rfs.get_disk_block(self.children[position + 1]).await;
             let right_sibling_node = right_sibling_block.get_as_mut::<BTreeNode>();
             if BTreeNode::try_rotate_right(self, position, right_sibling_node, child_node) {
                 if self.key_indexes[position] < index {
@@ -134,7 +132,7 @@ impl BTreeNode {
                 if new_fail_key.index > insert_fail_key.index {
                     child_node.insert_key_child(insert_fail_key, insert_fail_child);
                 } else {
-                    let mut to_insert_into = rfs.get_inode_tree_block(new_fail_child).await;
+                    let mut to_insert_into = rfs.get_disk_block(new_fail_child).await;
                     let to_insert_into_node = to_insert_into.get_as_mut::<BTreeNode>();
                     to_insert_into_node.insert_key_child(insert_fail_key, insert_fail_child);
                     to_insert_into.write_and_dealloc(rfs).await;
@@ -147,7 +145,7 @@ impl BTreeNode {
                 if self.key_indexes[key_index] > insert_fail_key.index {
                     child_node.insert_key_child(insert_fail_key, insert_fail_child);
                 } else {
-                    let mut right_sibling_block = rfs.get_inode_tree_block(self.children[position + 1]).await;
+                    let mut right_sibling_block = rfs.get_disk_block(self.children[position + 1]).await;
                     let right_sibling_node = right_sibling_block.get_as_mut::<BTreeNode>();
                     right_sibling_node.insert_key_child(insert_fail_key, insert_fail_child);
                     right_sibling_block.write_and_dealloc(rfs).await;

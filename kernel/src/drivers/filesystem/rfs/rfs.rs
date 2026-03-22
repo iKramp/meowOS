@@ -138,7 +138,7 @@ impl Rfs {
             block_alloc_lock: AsyncSpinlock::new(()),
         };
 
-        // rfs_driver.format_partition().await;
+        rfs_driver.format_partition().await;
         // panic!();
         rfs_driver
     }

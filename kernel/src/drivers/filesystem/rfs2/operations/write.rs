@@ -26,10 +26,6 @@ impl Rfs2 {
 
         let file_info = self.get_file_info(file_root).await;
 
-        if offset_blocks * 4096 > file_info.size {
-            return Ok(0);
-        }
-
         self.increase_file_size(file_root, offset_blocks as usize * 4096 + size_bytes as usize)
             .await;
 
@@ -40,7 +36,10 @@ impl Rfs2 {
 
         let small_file = file_info.levels == 0;
         if small_file {
-            return Ok(file_info.size.min(size_bytes) as u64);
+            let to_write = file_info.size.min(size_bytes);
+
+            self.partition.write(file_root as usize * BLOCK_SIZE_SECTORS + 1, BLOCK_SIZE_SECTORS - 1, buffer).await;
+            return Ok(to_write as u64);
         }
 
         //they must be contiguous both physically and virtually

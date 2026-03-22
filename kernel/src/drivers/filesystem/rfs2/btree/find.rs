@@ -23,7 +23,7 @@ impl BTreeNode {
             if self.key_indexes[i] == 0 {
                 break;
             }
-            if self.key_indexes[i] < inode_index {
+            if self.key_indexes[i] > inode_index {
                 let child_ptr = self.children[i];
                 if child_ptr == 0 {
                     return None;

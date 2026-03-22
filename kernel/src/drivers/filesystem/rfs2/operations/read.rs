@@ -1,7 +1,5 @@
 use std::{
-    error::ErrorCode,
-    mem_utils::{self, PhysAddr},
-    vec::Vec,
+    error::ErrorCode, mem_utils::{self, PhysAddr}, println, vec::Vec
 };
 
 use crate::{
@@ -40,27 +38,38 @@ impl Rfs2 {
         buffer: &[PhysAddr],
     ) -> Result<u64, ErrorCode> {
         if size_bytes == 0 {
+            println!("size is 0, nothing to read");
             return Ok(0);
         }
         if size_bytes.div_ceil(4096) > buffer.len() as u64 {
+            println!("buffer too small for requested size: buf_len {} blocks, size {} bytes", buffer.len(), size_bytes);
             return Err(ErrorCode::InvalidArgument);
         }
 
         let file_info = self.get_file_info(file_root).await;
 
         if offset_blocks * 4096 > file_info.size {
+            println!("offset is beyond file size, nothing to read");
             return Ok(0);
         }
 
         let working_block = physical_allocator::allocate_frame();
         self.partition
-            .read(file_root as usize * BLOCK_SIZE_SECTORS + 1, 7, &[working_block])
+            .read(file_root as usize * BLOCK_SIZE_SECTORS + 1, BLOCK_SIZE_SECTORS - 1, &[working_block])
             .await;
 
         let small_file = file_info.levels == 0;
         if small_file {
+            println!("small file read from block {} with offset {} blocks and size {}B", file_root, offset_blocks, size_bytes);
+
+            let src_virt = mem_utils::translate_phys_virt_addr(working_block);
+            let dest_virt = mem_utils::translate_phys_virt_addr(buffer[0]);
+
+            unsafe { core::ptr::copy_nonoverlapping(src_virt.0 as *const u8, dest_virt.0 as *mut u8, size_bytes as usize) };
+
             return Ok(file_info.size.min(size_bytes) as u64);
         }
+        println!("reading multi-level file");
 
         //they must be contiguous both physically and virtually
         let mut current_working_blocks = Vec::new();

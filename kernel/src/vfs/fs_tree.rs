@@ -188,6 +188,15 @@ async fn find_child_no_mounts(
         return Ok(child.1);
     }
     println!(level:error, "find_child_no_mounts: child still not found after loading directory for name: {}, inode: {:?}", f_name, current);
+    //print dir children
+
+    for child in &current_node.1.children {
+        println!(
+            "find_child_no_mounts: directory entry: {} with inode: {:?}",
+            child.0, child.1
+        );
+    }
+
     Err(ErrorCode::NoEntry)
 }
 
@@ -210,9 +219,12 @@ async fn load_dir(current: InodeIdentifier, cache: &mut Option<NoIntSpinlockGuar
     drop(cache.take()); //drop lock
 
     let dir = fs.read_dir(current.index).await?;
+    println!("load_dir: loaded directory for inode {:?}, entries: {}", current, dir.len());
+    println!("load_dir: directory entries for inode {:?}: {:?}", current, dir);
 
     let mut children = Vec::new();
     if dir.is_empty() {
+        *cache = Some(lock_w_info!(INODE_CACHE)); //get lock back
         return Ok(());
     }
     for dir_entry in dir.iter() {
@@ -235,8 +247,12 @@ async fn load_dir(current: InodeIdentifier, cache: &mut Option<NoIntSpinlockGuar
             .expect("is some")
             .inodes
             .insert(inode_index, (inode, FsTreeNode { children: Vec::new() }));
+        println!("load_dir: added inode {:?} to cache for directory entry: {}", inode_index, dir_entry.name);
         children.push((dir_entry.name.clone(), inode_index));
     }
+
+    println!("load_dir: finished loading directory for inode {:?}, children count: {}", current, children.len());
+
     cache
         .as_mut()
         .expect("is some")
@@ -245,6 +261,7 @@ async fn load_dir(current: InodeIdentifier, cache: &mut Option<NoIntSpinlockGuar
         .ok_or(ErrorCode::InodeNotPresent)?
         .1
         .children = children;
+
     Ok(())
 }
 

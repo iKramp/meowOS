@@ -2,32 +2,30 @@ use std::{boxed::Box, mem_utils::get_at_physical_addr, println, printlnc, string
 
 use crate::{
     memory::PAGE_TREE_ALLOCATOR,
-    task_runner::{add_task, block_task},
-    vfs::{self, file::FileFlags},
+    task_runner::block_task,
+    vfs::{self, InodeType, file::FileFlags, open_file},
 };
 
 const BEE_MOVIE_SCRIPT_START: &str = include_str!("./bee_movie_script.txt");
 
-const FILE_OPERATIONS: [FileOperation; 1] = [
-    // FileOperation::CreateFolder(CreateFolderOperation::new("/test")),
-    // FileOperation::ReadDir(ReadDirOperation::new("/")),
-    // FileOperation::CreateFile(CreateFileOperation::new("/test.txt")),
-    // FileOperation::CreateFile(CreateFileOperation::new("/test/test.txt")),
-    // FileOperation::ReadDir(ReadDirOperation::new("/")),
-    // FileOperation::Write(WriteFileOperation::new("/test.txt", "Hello, world!", 0)),
-    // FileOperation::Write(WriteFileOperation::new("/test/test.txt", BEE_MOVIE_SCRIPT_START, 0)),
-    // FileOperation::ReadFile(ReadFileOperation::new("/test.txt", 0, 5)),
-    // FileOperation::ReadFile(ReadFileOperation::new("/test.txt", 7, 6)),
+const FILE_OPERATIONS: [FileOperation; 10] = [
+    FileOperation::CreateFolder(CreateFolderOperation::new("/test")),
+    FileOperation::ReadDir(ReadDirOperation::new("/")),
+    FileOperation::CreateFile(CreateFileOperation::new("/test.txt")),
+    FileOperation::CreateFile(CreateFileOperation::new("/test/test.txt")),
+    FileOperation::ReadDir(ReadDirOperation::new("/")),
+    FileOperation::Write(WriteFileOperation::new("/test.txt", "Hello, world!", 0)),
+    FileOperation::Write(WriteFileOperation::new("/test/test.txt", BEE_MOVIE_SCRIPT_START, 0)),
+    FileOperation::ReadFile(ReadFileOperation::new("/test.txt", 0, 5)),
+    FileOperation::ReadFile(ReadFileOperation::new("/test.txt", 7, 6)),
     FileOperation::ReadFile(ReadFileOperation::new("/test/test.txt", 0, 49475)),
 ];
 
 pub fn do_file_operations() {
     // memory::print_state();
     for opeartion in FILE_OPERATIONS {
-        // println!("Executing operation: {:?}", opeartion);
+        println!("Executing operation: {:?}", opeartion);
         opeartion.execute();
-        // println!("Memory state after execution: {:?}", opeartion);
-        // memory::print_state();
     }
 }
 
@@ -70,10 +68,13 @@ impl ReadDirOperation {
     }
 
     fn execute(&self) {
-        // let path = vfs::resolve_path(self.folder_name);
-        // let entries = block_task(Box::pin(vfs::get_dir_entries((&path).into())));
-        // println!("Read dir: {}", self.folder_name);
-        // println!("Dir entries: {:?}", entries);
+        let path = vfs::resolve_path(self.folder_name);
+        let dir = block_task(Box::pin(open_file((&path).into(), None, FileFlags::new().with_read(true))))
+            .expect("fopen failed in debug function");
+        let entries = block_task(Box::pin(vfs::get_dir_entries(&dir))).expect("get dir entries failed in debug function");
+        block_task(Box::pin(vfs::close_file(dir)));
+        println!(level:info, "Read dir: {}", self.folder_name);
+        println!(level:info, "Dir entries: {:?}", entries);
     }
 }
 
@@ -83,12 +84,16 @@ impl CreateFileOperation {
     }
 
     fn execute(&self) {
-        // let split_index = self.file_name.rfind('/').unwrap();
-        // let (parent_path, file_name) = self.file_name.split_at(split_index + 1); //slash is in the
-        // println!("Creating file: {}", self.file_name);
-        // let path = vfs::resolve_path(parent_path);
-        // block_task(Box::pin(vfs::create_file((&path).into(), file_name, InodeType::new_file(0))));
-        // println!("Created file: {:?}", self.file_name);
+        let split_index = self.file_name.rfind('/').expect("wawa");
+        let (parent_path, file_name) = self.file_name.split_at(split_index + 1); //slash is in the
+        println!(level:info, "Creating file: {}", self.file_name);
+        let path = vfs::resolve_path(parent_path);
+
+        let mut parent = block_task(Box::pin(open_file((&path).into(), None, FileFlags::new().with_write(true))))
+            .expect("fopen failed in debug function");
+
+        let _ = block_task(Box::pin(vfs::create_file(&mut parent, file_name, InodeType::new_file(0))));
+        block_task(Box::pin(vfs::close_file(parent)));
     }
 }
 
@@ -141,9 +146,10 @@ impl WriteFileOperation {
         let mut file =
             block_task(Box::pin(vfs::open_file((&path).into(), None, open_file_flags))).expect("fopen failed in debug function");
 
-        println!("Writing file: {} of size: {}", self.file_name, content.len());
+        println!(level:info, "Writing file: {} of size: {}", self.file_name, content.len());
         block_task(Box::pin(vfs::write_file(&mut file, &frames, self.content.len() as u64)))
             .expect("file write failed in debug function");
+        block_task(Box::pin(vfs::close_file(file)));
 
         for frame in frames {
             unsafe { crate::memory::physical_allocator::deallocate_frame(frame) };
@@ -162,12 +168,16 @@ impl CreateFolderOperation {
     }
 
     fn execute(&self) {
-        todo!();
-        // let split_index = self.folder_name.rfind('/').unwrap();
-        // let (parent_path, file_name) = self.folder_name.split_at(split_index + 1); //slash is in the
-        // println!("Creating folder: {}", self.folder_name);
-        // let path = vfs::resolve_path(parent_path, "/");
-        // block_task(Box::pin(vfs::create_file((&path).into(), file_name, InodeType::new_file(0))));
+        let split_index = self.folder_name.rfind('/').expect("wawa");
+        let (parent_path, file_name) = self.folder_name.split_at(split_index + 1); //slash is in the
+        println!(level:info, "Creating folder: {}", self.folder_name);
+        let path = vfs::resolve_path(parent_path);
+
+        let mut parent = block_task(Box::pin(open_file((&path).into(), None, FileFlags::new().with_write(true))))
+            .expect("fopen failed in debug function");
+
+        let _ = block_task(Box::pin(vfs::create_file(&mut parent, file_name, InodeType::new_dir(0))));
+        block_task(Box::pin(vfs::close_file(parent)));
     }
 }
 
@@ -224,6 +234,9 @@ impl ReadFileOperation {
             vfs::read_file(&mut file, &buffer, real_length)
                 .await
                 .expect("file read failed in debug function");
+
+            vfs::close_file(file).await;
+
             let mut final_data = Vec::with_capacity(length as usize);
             let mut frame_ptr = (offset as usize) & 0xFFF;
             for (index, frame) in buffer.iter().enumerate() {
@@ -241,13 +254,13 @@ impl ReadFileOperation {
                 unsafe { crate::memory::physical_allocator::deallocate_frame(*frame) };
             }
 
-            println!("Read file: {} at offset {} and size of read {}", file_name, offset, length);
+            println!(level:info, "Read file: {} at offset {} and size of read {}", file_name, offset, length);
             // println!("File content: {:?}", final_data);
             //transofm into string
             let string = String::from_utf8(final_data).unwrap_or(String::from(""));
-            println!("File content as string:");
-            printlnc!((255, 200, 100), "{}", string);
+            println!(level:info, "File content as string:");
+            printlnc!(level:info, (255, 200, 100), "{}", string);
         };
-        add_task(Box::pin(task), None);
+        block_task(Box::pin(task));
     }
 }

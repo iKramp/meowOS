@@ -1,3 +1,5 @@
+use crate::drivers::filesystem::rfs2::BlockPtr;
+
 pub(super) struct BlockBitmask {
     bitmask: [u64; 4096 / core::mem::size_of::<u64>()],
 }
@@ -90,7 +92,7 @@ impl InodeBtmask {
         self.next_ptr
     }
 
-    pub fn set_ptr(&mut self, ptr: u64) {
+    pub fn set_ptr(&mut self, ptr: BlockPtr) {
         self.next_ptr = ptr;
     }
 }

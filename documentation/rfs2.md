@@ -62,3 +62,10 @@ const BTREE_KEY_CNT: u64 = (4096 - 8) / (8 + 12); //204
 The children array points to blocks containing another BTreeNode
 Each key contains an inode index and a pointer to its coresponding file block
 Keys in a node are always left aligned. Apart from the root node, 
+
+### Formatted partition
+Each group starts with a block bitmask (at least the first bit is set)
+Every 64 groups, the second block is a superblock (with a valid checksum)
+The third (index 2) block in the first (index 0) group is the root of the inode tree
+The fourth (index 3) block in the first (index 0) group is the inode bitmask
+The fifth (index 4) block in the first (index 0) group is the root inode block

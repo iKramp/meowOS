@@ -1,6 +1,6 @@
-use core::cell::{Cell, UnsafeCell};
+use core::cell::Cell;
+use std::boxed::Box;
 use std::{
-    collections::btree_map::BTreeMap,
     mem_utils::{self, PhysAddr, VirtAddr},
     println, r_lock_w_info,
     sync::{arc::Arc, async_lock::AsyncSpinlock, rw_lock::RWSpinlock},
@@ -8,12 +8,15 @@ use std::{
     w_lock_w_info,
 };
 
+use uuid::Uuid;
+
 use crate::{
     drivers::{
         block_device::disk::MountedPartition,
         filesystem::rfs2::{bitmask::INODES_PER_BITMASK, superblock::SuperBlock},
     },
     memory::{PAGE_TREE_ALLOCATOR, physical_allocator},
+    vfs::{FileSystem, FileSystemFactory},
 };
 
 mod bitmask;
@@ -102,13 +105,25 @@ impl Drop for WorkingBlock {
     }
 }
 
+pub struct Rfs2Factory;
+
+impl Rfs2Factory {
+    pub const UUID: Uuid = Uuid::from_u128(0x2477786763f94f0391447b0cad53daad);
+}
+
+#[async_trait::async_trait]
+impl FileSystemFactory for Rfs2Factory {
+    async fn mount(&self, partition: MountedPartition) -> Arc<dyn FileSystem + Send> {
+        Arc::new(Rfs2::new(partition).await)
+    }
+}
+
 #[derive(Debug)]
 struct Rfs2 {
     superblock: Cell<SuperBlock>,
     update_superblock_lock: AsyncSpinlock<()>,
 
     inode_lock: AsyncSpinlock<()>,
-    inode_tree_cache: UnsafeCell<BTreeMap<BlockPtr, UnsafeCell<WorkingBlock>>>, //maps from block to data
 
     file_locks: RWSpinlock<Vec<(InodeIndex, Arc<AsyncSpinlock<()>>)>>,
 
@@ -126,6 +141,30 @@ struct Rfs2 {
 unsafe impl Sync for Rfs2 {}
 
 impl Rfs2 {
+    async fn new(partition: MountedPartition) -> Self {
+        let blocks = partition.partition.size_sectors as u32 / BLOCK_SIZE_SECTORS as u32;
+        let groups = blocks.div_ceil(GROUP_SIZE_BLOCKS as u32);
+
+        let working_block = WorkingBlock::new();
+        partition.read(BLOCK_SIZE_SECTORS, 1, &[working_block.phys]).await;
+
+        let superblock = *working_block.get_as::<SuperBlock>();
+        working_block.forget_mem_binding();
+
+        let mut fs = Self {
+            superblock: Cell::new(superblock),
+            update_superblock_lock: AsyncSpinlock::new(()),
+            inode_lock: AsyncSpinlock::new(()),
+            file_locks: RWSpinlock::new(Vec::new()),
+            block_alloc_lock: AsyncSpinlock::new(()),
+            groups,
+            blocks,
+            partition,
+        };
+        fs.format().await.expect("failed to format rfs2 filesystem");
+        fs
+    }
+
     async fn update_superblock(&self, mut superblock: SuperBlock) {
         superblock.calculate_checksum();
 
@@ -323,6 +362,7 @@ impl Rfs2 {
             return item.1.clone();
         }
         let new_lock = Arc::new(AsyncSpinlock::new(()));
+        drop(vec);
         let mut vec = w_lock_w_info!(self.file_locks);
         vec.push((inode, new_lock.clone()));
         new_lock
@@ -337,50 +377,17 @@ impl Rfs2 {
         block
     }
 
-    pub async fn get_inode_tree_block(&self, disk_block: BlockPtr) -> WorkingBlock {
-        let lock = self.inode_lock.lock().await;
-        if let Some(block) = unsafe { &mut *self.inode_tree_cache.get() }.get(&disk_block) {
-            return unsafe { block.get().read() };
-        }
-        let block = self.get_disk_block(disk_block).await;
-        let block_clone = block.clone();
-        unsafe { &mut *self.inode_tree_cache.get() }.insert(disk_block, UnsafeCell::new(block));
-        drop(lock);
-        block_clone
-    }
-
-    pub fn update_inode_tree_block(&self, block: WorkingBlock) {
-        let Some(disk_block) = block.disk_block else {
-            core::mem::forget(block);
+    pub async fn write_disk_block(&self, block: &mut WorkingBlock) {
+        if !block.changed {
             return;
-        };
-        let lock = self.inode_lock.lock();
-        let old = unsafe { &mut *self.inode_tree_cache.get() }.insert(disk_block, UnsafeCell::new(block));
-        core::mem::forget(old);
-        drop(lock);
-    }
-
-    pub async fn delete_inode_tree_block(&self, block: WorkingBlock) {
-        let Some(disk_block) = block.disk_block else {
-            core::mem::forget(block);
-            return;
-        };
-        let lock = self.inode_lock.lock().await;
-        self.release_block(disk_block).await;
-        let old = unsafe { &mut *self.inode_tree_cache.get() }.remove(&disk_block);
-        core::mem::forget(old);
-        drop(lock);
-    }
-
-    pub async fn flush_inode_cache(&self) {
-        let lock = self.inode_lock.lock();
-
-        let cache = unsafe { &mut *self.inode_tree_cache.get() };
-        let cache = core::mem::take(cache);
-        for block in cache.into_values() {
-            let block = unsafe { block.get().read() };
-            block.write_and_dealloc(self).await;
         }
-        drop(lock);
+        if let Some(disk_block) = block.disk_block {
+            self.partition
+                .write(disk_block as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys])
+                .await;
+            block.changed = false;
+        } else {
+            panic!("cannot write a block that is not assigned to disk");
+        }
     }
 }

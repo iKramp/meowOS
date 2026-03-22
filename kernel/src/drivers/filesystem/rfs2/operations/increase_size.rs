@@ -10,11 +10,14 @@ use crate::{
 
 impl Rfs2 {
     pub(super) async fn increase_file_size(&self, file_root: BlockPtr, new_size: usize) {
+        let mut file_info = self.get_file_info(file_root).await;
+
         if new_size < (BLOCK_SIZE_SECTORS - 1) * 512 {
+            file_info.size = new_size as u64;
+            self.set_file_info(file_root, file_info).await;
             return; //small file, no increase
         }
 
-        let mut file_info = self.get_file_info(file_root).await;
         let current_size = file_info.size;
         let current_blocks = (current_size as usize).div_ceil(BLOCK_SIZE_SECTORS * 512);
         let current_levels = file_info.levels;

@@ -55,6 +55,18 @@ struct Key {
 }
 
 impl BTreeNode {
+    pub fn initialize_root(&mut self, root_inode_index: InodeIndex, root_inode_ptr: BlockPtr) {
+        for i in 0..BTREE_KEY_CNT {
+            self.children[i] = 0;
+            self.key_indexes[i] = 0;
+            self.key_ptrs[i] = 0;
+        }
+        self.children[BTREE_KEY_CNT] = 0;
+
+        self.key_indexes[0] = root_inode_index;
+        self.key_ptrs[0] = root_inode_ptr;
+    }
+
     fn get_state(&self) -> (FillState, LevelState) {
         let empty = self.key_indexes[0] == 0;
         let full = self.key_indexes[0] != 0;

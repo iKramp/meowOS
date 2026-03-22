@@ -5,9 +5,9 @@ use crate::drivers::filesystem::rfs2::{BlockPtr, InodeIndex};
 pub(in crate::drivers::filesystem::rfs2) struct SuperBlock {
     pub inode_mask_ptr: BlockPtr,
     pub inode_tree_root_ptr: BlockPtr,
-    fs_size: u64,
-    root_inode_index: InodeIndex,
-    checksum: u32,
+    pub fs_size: u64,
+    pub root_inode_index: InodeIndex,
+    pub checksum: u32,
 }
 
 impl SuperBlock {

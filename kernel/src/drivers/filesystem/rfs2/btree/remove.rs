@@ -18,7 +18,7 @@ impl BTreeNode {
         if superblock.inode_tree_root_ptr == 0 {
             panic!("illegal root pointer");
         }
-        let mut root_block = rfs.get_inode_tree_block(superblock.inode_tree_root_ptr).await;
+        let mut root_block = rfs.get_disk_block(superblock.inode_tree_root_ptr).await;
         let root_node = root_block.get_as_mut::<BTreeNode>();
         let result = Box::pin(root_node.remove_key(inode_index, rfs)).await;
         let Some((block, rmv_res)) = result else {
@@ -26,11 +26,13 @@ impl BTreeNode {
             return None;
         };
         if root_node.key_indexes[0] == 0 {
+            let prev_root_ptr = superblock.inode_tree_root_ptr;
             superblock.inode_tree_root_ptr = root_node.children[0];
             rfs.update_superblock(superblock).await;
-            rfs.delete_inode_tree_block(root_block).await;
+            rfs.release_block(prev_root_ptr).await;
+            root_block.forget_mem_binding();
         } else if rmv_res == RemoveResult::Updated || rmv_res == RemoveResult::TooShort {
-            rfs.update_inode_tree_block(root_block);
+            root_block.write_and_dealloc(rfs).await;
         } else {
             root_block.forget_mem_binding();
         }
@@ -79,7 +81,7 @@ impl BTreeNode {
                 }
 
                 let child = self.children[i];
-                let mut child_block = rfs.get_inode_tree_block(child).await;
+                let mut child_block = rfs.get_disk_block(child).await;
                 let child_node = child_block.get_as_mut::<BTreeNode>();
                 let child_result = child_node.take_largest_key(rfs).await;
                 let Some((key, remove_result)) = child_result else {
@@ -92,18 +94,18 @@ impl BTreeNode {
                 if remove_result == RemoveResult::TooShort {
                     let handling_result = self.handle_short_child(child_node, i, rfs).await;
                     if handling_result == RemoveResult::TooShort {
-                        rfs.update_inode_tree_block(child_block);
+                        child_block.write_and_dealloc(rfs).await;
                         return Some((block, RemoveResult::TooShort));
                     }
                 } else if remove_result == RemoveResult::Updated {
-                    rfs.update_inode_tree_block(child_block);
+                    child_block.write_and_dealloc(rfs).await;
                 } else {
                     child_block.forget_mem_binding();
                 }
                 return Some((block, RemoveResult::Updated));
             } else if self.key_indexes[i] > index {
                 let child_index = i;
-                let mut child_block = rfs.get_inode_tree_block(self.children[child_index]).await;
+                let mut child_block = rfs.get_disk_block(self.children[child_index]).await;
                 let child_node = child_block.get_as_mut::<BTreeNode>();
                 let result = Box::pin(child_node.remove_key(index, rfs)).await;
                 let Some((block, remove_result)) = result else {
@@ -113,11 +115,11 @@ impl BTreeNode {
 
                 if remove_result == RemoveResult::TooShort {
                     let child_result = self.handle_short_child(child_node, child_index, rfs).await;
-                    rfs.update_inode_tree_block(child_block);
+                    child_block.write_and_dealloc(rfs).await;
 
                     return Some((block, child_result));
                 } else if remove_result == RemoveResult::Updated {
-                    rfs.update_inode_tree_block(child_block);
+                    child_block.write_and_dealloc(rfs).await;
                 } else {
                     child_block.forget_mem_binding();
                 }
@@ -133,14 +135,16 @@ impl BTreeNode {
     async fn handle_short_child(&mut self, child: &mut Self, child_index: usize, rfs: &Rfs2) -> RemoveResult {
         if child_index > 0 {
             //try rotate and merge with left
-            let mut left_child_block = rfs.get_inode_tree_block(self.children[child_index - 1]).await;
+            let left_child_ptr = self.children[child_index - 1];
+            let mut left_child_block = rfs.get_disk_block(left_child_ptr).await;
             let left_child = left_child_block.get_as_mut::<BTreeNode>();
             if Self::try_rotate_right(self, child_index - 1, left_child, child) {
-                rfs.update_inode_tree_block(left_child_block);
+                left_child_block.write_and_dealloc(rfs).await;
                 return RemoveResult::Updated;
             }
             if Self::try_merge_ltr(self, child_index - 1, left_child, child) {
-                rfs.delete_inode_tree_block(left_child_block).await;
+                rfs.release_block(left_child_ptr).await;
+                left_child_block.forget_mem_binding();
                 if self.get_state().0 == FillState::TooShort {
                     return RemoveResult::TooShort;
                 } else {
@@ -150,14 +154,16 @@ impl BTreeNode {
             panic!("left child exists but could neither rotate nor merge");
         }
 
-        let mut right_child_block = rfs.get_inode_tree_block(self.children[child_index + 1]).await;
+        let right_child_ptr = self.children[child_index + 1];
+        let mut right_child_block = rfs.get_disk_block(right_child_ptr).await;
         let right_child = right_child_block.get_as_mut::<BTreeNode>();
         if Self::try_rotate_left(self, child_index, child, right_child) {
-            rfs.update_inode_tree_block(right_child_block);
+            right_child_block.write_and_dealloc(rfs).await;
             return RemoveResult::Updated;
         }
         if Self::try_merge_rtl(self, child_index, child, right_child) {
-            rfs.delete_inode_tree_block(right_child_block).await;
+            rfs.release_block(right_child_ptr).await;
+            right_child_block.forget_mem_binding();
             if self.get_state().0 == FillState::TooShort {
                 return RemoveResult::TooShort;
             } else {
@@ -235,7 +241,7 @@ impl BTreeNode {
             0
         };
         let child_index = if largest { key_index + 1 } else { key_index };
-        let mut child_block = rfs.get_inode_tree_block(self.children[child_index]).await;
+        let mut child_block = rfs.get_disk_block(self.children[child_index]).await;
         let child_node = child_block.get_as_mut::<BTreeNode>();
 
         let result = if largest {
@@ -249,11 +255,11 @@ impl BTreeNode {
         };
         if remove_result == RemoveResult::TooShort {
             let child_result = self.handle_short_child(child_node, child_index, rfs).await;
-            rfs.update_inode_tree_block(child_block);
+            child_block.write_and_dealloc(rfs).await;
 
             return Some((key, child_result));
         } else if remove_result == RemoveResult::Updated {
-            rfs.update_inode_tree_block(child_block);
+            child_block.write_and_dealloc(rfs).await;
         } else {
             child_block.forget_mem_binding();
         }
