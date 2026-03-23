@@ -110,9 +110,7 @@ extern "C" fn _start() -> ! {
         panic!("Failed to mount root partition");
     }
 
-    file_operations::do_file_operations();
-
-    panic!("stop here");
+    panic!();
 
     proc::init();
 

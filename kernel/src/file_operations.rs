@@ -216,51 +216,52 @@ impl ReadFileOperation {
         let offset = self.offset;
         let length = self.length;
         let file_name = self.file_name;
-        let task = async move {
-            let path = vfs::resolve_path(file_name);
-            let real_offset = offset & !4095;
-            let real_length = length - real_offset + offset;
-            let mut buffer = Vec::with_capacity(real_length.div_ceil(4096) as usize);
-            for _ in 0..(real_length.div_ceil(4096)) {
-                let frame = crate::memory::physical_allocator::allocate_frame();
-                buffer.push(frame);
+        let path = vfs::resolve_path(file_name);
+        let real_offset = offset & !4095;
+        let real_length = length - real_offset + offset;
+        let mut buffer = Vec::with_capacity(real_length.div_ceil(4096) as usize);
+        for _ in 0..(real_length.div_ceil(4096)) {
+            let frame = crate::memory::physical_allocator::allocate_frame();
+            buffer.push(frame);
+        }
+
+        let open_file_flags = FileFlags::new().with_read(true);
+        let mut file =
+            block_task(Box::pin(vfs::open_file((&path).into(), None, open_file_flags))).expect("fopen failed in debug function");
+
+        block_task(Box::pin(vfs::read_file(&mut file, &buffer, real_length)))
+            .expect("file read failed in debug function");
+
+        block_task(Box::pin(vfs::close_file(file)));
+
+        let mut final_data = Vec::with_capacity(length as usize);
+        let mut frame_ptr = (offset as usize) & 0xFFF;
+        for (index, frame) in buffer.iter().enumerate() {
+            let frame_ptr_start = frame_ptr;
+            let limit = if index == buffer.len() - 1 {
+                (length as usize) & 0xFFF
+            } else {
+                4096
+            };
+            let data = unsafe { get_at_physical_addr::<[u8; 4096]>(*frame) };
+            while frame_ptr < limit + frame_ptr_start {
+                final_data.push(data[frame_ptr & 0xFFF]);
+                frame_ptr += 1;
             }
+            unsafe { crate::memory::physical_allocator::deallocate_frame(*frame) };
+        }
 
-            let open_file_flags = FileFlags::new().with_read(true);
-            let mut file = vfs::open_file((&path).into(), None, open_file_flags)
-                .await
-                .expect("fopen failed in debug function");
-
-            vfs::read_file(&mut file, &buffer, real_length)
-                .await
-                .expect("file read failed in debug function");
-
-            vfs::close_file(file).await;
-
-            let mut final_data = Vec::with_capacity(length as usize);
-            let mut frame_ptr = (offset as usize) & 0xFFF;
-            for (index, frame) in buffer.iter().enumerate() {
-                let frame_ptr_start = frame_ptr;
-                let limit = if index == buffer.len() - 1 {
-                    (length as usize) & 0xFFF
-                } else {
-                    4096
-                };
-                let data = unsafe { get_at_physical_addr::<[u8; 4096]>(*frame) };
-                while frame_ptr < limit + frame_ptr_start {
-                    final_data.push(data[frame_ptr & 0xFFF]);
-                    frame_ptr += 1;
-                }
-                unsafe { crate::memory::physical_allocator::deallocate_frame(*frame) };
+        println!(level:info, "Read file: {} at offset {} and size of read {}", file_name, offset, length);
+        //transofm into string
+        let string = String::from_utf8(final_data);
+        match string {
+            Ok(s) => {
+                println!(level:info, "File content as string:");
+                printlnc!(level:info, (255, 200, 100), "{}", s);
+            },
+            Err(_) => {
+                println!(level:warn, "File content is not valid UTF-8, cannot display as string");
             }
-
-            println!(level:info, "Read file: {} at offset {} and size of read {}", file_name, offset, length);
-            // println!("File content: {:?}", final_data);
-            //transofm into string
-            let string = String::from_utf8(final_data).unwrap_or(String::from(""));
-            println!(level:info, "File content as string:");
-            printlnc!(level:info, (255, 200, 100), "{}", string);
         };
-        block_task(Box::pin(task));
     }
 }

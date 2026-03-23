@@ -270,7 +270,8 @@ pub async fn create_file(parent_dir: &mut FileHandle, name: &str, inode_type: In
         .ok_or(ErrorCode::InodeNotPresent)?;
     let fs = fs.clone();
     drop(vfs);
-    let (file_inode, parent_inode) = fs.create(name, parent_inode.index, inode_type, 0, 0).await?;
+    let (parent_inode, file_inode) = fs.create(name, parent_inode.index, inode_type, 0, 0).await?;
+    println!("create file returned file and parent inodes: {:X?}, {:X?}", file_inode, parent_inode);
     fs_tree::update_inode(parent_dir.inode, parent_inode)?;
     fs_tree::insert_inode(parent_dir.inode, name.to_string().into_boxed_str(), file_inode)?;
 

@@ -14,6 +14,7 @@ impl Rfs2 {
         let mut curr_size = 1;
         for ptr in pointers.iter().skip(1) {
             if *ptr == curr_ptr + 1 {
+                println!("pointer {} is contiguous with current pointer {}, increasing size to read", ptr, curr_ptr);
                 curr_size += 1;
                 continue;
             }
@@ -28,6 +29,13 @@ impl Rfs2 {
             curr_index += curr_size;
             curr_size = 1;
         }
+        self.partition
+            .read(
+                curr_ptr as usize * BLOCK_SIZE_SECTORS,
+                curr_size * BLOCK_SIZE_SECTORS,
+                &buffer[curr_index..(curr_index + curr_size)],
+            )
+            .await;
     }
 
     pub(super) async fn read_locked(
@@ -75,15 +83,19 @@ impl Rfs2 {
         let mut current_working_blocks = Vec::new();
         current_working_blocks.push(working_block);
 
+        //inclusive bounds of blocks to read
         let first_block_to_read = offset_blocks;
-        let last_block_to_read = (offset_blocks + size_bytes / 4096).min(file_info.size / 4096);
+        let last_block_to_read = (offset_blocks + (size_bytes - 1) / 4096).min(file_info.size.saturating_sub(1) / 4096);
 
         let mut current_ptr_level = 1;
         let levels = file_info.levels;
+        let mut skipped_blocks = 0;
         loop {
             let level_diff = levels - current_ptr_level;
-            let first_relevant_ptr = first_block_to_read / (PTRS_PER_BLOCK.pow(level_diff as u32) as u64);
-            let last_relevant_ptr = last_block_to_read / (PTRS_PER_BLOCK.pow(level_diff as u32) as u64);
+            let ptr_blocks = PTRS_PER_BLOCK.pow(level_diff as u32) as u64;
+            let first_relevant_ptr = (first_block_to_read - skipped_blocks) / ptr_blocks;
+            let last_relevant_ptr = (last_block_to_read - skipped_blocks) / ptr_blocks;
+            skipped_blocks += ptr_blocks * first_relevant_ptr;
 
             let ptr_virt =
                 mem_utils::translate_phys_virt_addr(*current_working_blocks.first().expect("must have at least 1 block"))

@@ -2,9 +2,9 @@ use std::{fs::File, process::Stdio};
 
 fn main() {
     //chose whether to debug with GDB
-    let debug = false;
+    let debug = true;
     let uefi = false;
-    let snapshot = false;
+    let snapshot = true;
     let cores = 1;
     let net = false;
 

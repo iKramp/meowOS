@@ -24,10 +24,11 @@ impl Rfs2 {
             return Err(ErrorCode::InvalidArgument);
         }
 
-        let file_info = self.get_file_info(file_root).await;
 
         self.increase_file_size(file_root, offset_blocks as usize * 4096 + size_bytes as usize)
             .await;
+
+        let file_info = self.get_file_info(file_root).await;
 
         let working_block = physical_allocator::allocate_frame();
         self.partition
