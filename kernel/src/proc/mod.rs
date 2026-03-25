@@ -19,9 +19,7 @@ use crate::{
         PAGE_TREE_ALLOCATOR,
         paging::{self, PageTree},
         physical_allocator,
-    },
-    task_runner,
-    vfs::{self, InodeType, ResolvedPathBorrowed, close_file, file::FileFlags},
+    }, task_runner, vfs::{self, InodeType, ResolvedPathBorrowed, close_file, file::FileFlags}
 };
 
 mod context;
@@ -96,32 +94,32 @@ pub fn init() {
     //     .expect("Failed to load test executable file reader");
     // let pid = create_process(&file_reader);
     // println!("Created file reader process with pid: {:?}", pid);
+    //
+    let proc_task = async move {
+        let path = vfs::resolve_path("/time_printer");
+        let root_path = vfs::resolve_path("/");
+        let mut root = vfs::open_file((&root_path).into(), None, FileFlags::new().with_read(true).with_write(true)).await.expect("failed to open root directory");
+        vfs::create_file(&mut root, "time_printer", InodeType::new_file(0o777)).await.expect("failed to create time printer file");
+        println!("created file for time printer");
+        let mut file_handle = vfs::open_file((&path).into(), None, FileFlags::new().with_read(true).with_write(true)).await.expect("failed to open time printer file");
 
-    // let proc_task = async move {
-    //     let path = vfs::resolve_path("/time_printer");
-    //     let root_path = vfs::resolve_path("/");
-    //     let mut root = vfs::open_file((&root_path).into(), None, FileFlags::new().with_read(true).with_write(true)).await.expect("failed to open root directory");
-    //     vfs::create_file(&mut root, "time_printer", InodeType::new_file(0o777)).await.expect("failed to create time printer file");
-    //     println!("created file for time printer");
-    //     let mut file_handle = vfs::open_file((&path).into(), None, FileFlags::new().with_read(true).with_write(true)).await.expect("failed to open time printer file");
-    //
-    //     let size_pages = crate::TIME_PRINTER.len().div_ceil(4096) as u64;
-    //     let phys_buf = physical_allocator::allocate_contiguius_high(size_pages);
-    //     let buf = unsafe { PAGE_TREE_ALLOCATOR.allocate_contigious(size_pages, Some(phys_buf), false) };
-    //     let phys_buf_vec = (0..size_pages).map(|i| phys_buf + i * 4096).collect::<Vec<_>>();
-    //     unsafe { core::ptr::copy_nonoverlapping(crate::TIME_PRINTER.as_ptr(), buf.0 as *mut u8, crate::TIME_PRINTER.len()) };
-    //     println!("allocated phys buffer for time printer file at phys addr: {phys_buf:?}, size: {size_pages} pages");
-    //
-    //     let res = vfs::write_file(&mut file_handle, &phys_buf_vec, crate::TIME_PRINTER.len() as u64).await.expect("failed to write to time printer file");
-    //     println!("wrote time printer file content to file. Wrote {} bytes", res);
-    //
-    //     //test
-    //     let res = vfs::stat_file(&file_handle).await.expect("failed to stat time printer file");
-    //     println!("stat printer file: {:?}", res);
-    //     close_file(file_handle).await;
-    // };
-    //
-    // task_runner::block_task(Box::pin(proc_task));
+        let size_pages = crate::TIME_PRINTER.len().div_ceil(4096) as u64;
+        let phys_buf = physical_allocator::allocate_contiguius_high(size_pages);
+        let buf = unsafe { PAGE_TREE_ALLOCATOR.allocate_contigious(size_pages, Some(phys_buf), false) };
+        let phys_buf_vec = (0..size_pages).map(|i| phys_buf + i * 4096).collect::<Vec<_>>();
+        unsafe { core::ptr::copy_nonoverlapping(crate::TIME_PRINTER.as_ptr(), buf.0 as *mut u8, crate::TIME_PRINTER.len()) };
+        println!("allocated phys buffer for time printer file at phys addr: {phys_buf:?}, size: {size_pages} pages");
+
+        let res = vfs::write_file(&mut file_handle, &phys_buf_vec, crate::TIME_PRINTER.len() as u64).await.expect("failed to write to time printer file");
+        println!("wrote time printer file content to file. Wrote {} bytes", res);
+
+        //test
+        let res = vfs::stat_file(&file_handle).await.expect("failed to stat time printer file");
+        println!("stat printer file: {:?}", res);
+        close_file(file_handle).await;
+    };
+
+    task_runner::block_task(Box::pin(proc_task));
 
     syscall::init();
     set_proc_initialized();
@@ -159,8 +157,9 @@ pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &s
         cmdline,
     ) {
         Ok(context) => context,
-        Err(_) => {
+        Err(e) => {
             println!(level:error, "Failed to load process from file: {}", path.to_string());
+            println!(level:error, "Error: {:?}", e);
             for i in 0..buf_pages {
                 unsafe { PAGE_TREE_ALLOCATOR.deallocate(buf + i * 4096) };
             }

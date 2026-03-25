@@ -1,16 +1,9 @@
 use std::{
-    boxed::Box,
-    format, lock_w_info,
-    string::{String, ToString},
-    sync::no_int_spinlock::NoIntSpinlock,
-    vec::Vec,
+    boxed::Box, lock_w_info, string::{String, ToString}, sync::no_int_spinlock::NoIntSpinlock, vec::Vec
 };
 
 use crate::{
-    keyboard::{self, Key},
-    proc::{self, Pid},
-    vfs,
-    vga::vga_text,
+    keyboard::{self, Key, KeyEvent}, proc::{self, Pid}, shell, vga::vga_text
 };
 
 pub static TTY: NoIntSpinlock<TtyState> = NoIntSpinlock::new(TtyState::new());
@@ -20,6 +13,21 @@ pub struct TtyState {
     input_buffer: String,
     running_pid: Option<Pid>,
     started_proc: bool,
+}
+
+pub fn handle_input(input: Box<[(Key, KeyEvent)]>, modifier_state: &keyboard::KeyboardState) {
+    let mut tty = lock_w_info!(TTY);
+    for (input, event) in input {
+        tty.handle_input(input, event, modifier_state);
+    }
+    if !tty.done_streams.is_empty() {
+        let mut shell = lock_w_info!(shell::SHELL_STATE);
+        if shell.can_consume_shell_command() {
+            let cmd = tty.done_streams.remove(0);
+            drop(tty);
+            shell.consume_shell_command(cmd);
+        }
+    }
 }
 
 impl TtyState {
@@ -54,7 +62,7 @@ impl TtyState {
         }
     }
 
-    pub fn handle_input(&mut self, input: Key, event: keyboard::KeyEvent, modifier_state: &keyboard::KeyboardState) {
+    fn handle_input(&mut self, input: Key, event: KeyEvent, modifier_state: &keyboard::KeyboardState) {
         if event == keyboard::KeyEvent::Released {
             return;
         }
@@ -230,10 +238,6 @@ impl TtyState {
             let last_char = unsafe { core::str::from_utf8_unchecked(last_char_bytes) };
             self.print(last_char);
         }
-
-        if self.running_pid.is_none() && !self.started_proc && !self.done_streams.is_empty() {
-            self.start_proc();
-        }
     }
 
     pub fn print(&self, data: &str) {
@@ -247,41 +251,5 @@ impl TtyState {
         }
         self.done_streams.push((done_stream, eof_line));
         lock_w_info!(vga_text::VGA_TEXT).do_newline();
-    }
-
-    fn start_proc(&mut self) {
-        let mut launch_command = self.done_streams.pop().unwrap_or((String::new(), false)).0;
-        let last_char = launch_command.pop(); //remove newline
-        if last_char != Some('\n') {
-            //if it was not a newline, put it back
-            if let Some(last_char) = last_char {
-                launch_command.push(last_char);
-            }
-        }
-
-        let mut chunks = proc::CommandSplitter::new(&launch_command);
-        let Some(program_path) = chunks.next() else {
-            //empty input
-            return;
-        };
-        if !program_path.starts_with("/") {
-            self.print("only absolute paths are allowed in a tty\n");
-            return;
-        }
-
-        let resolved_path = vfs::resolve_path(&program_path);
-
-        let start_tty_proc_future = async move {
-            let run_proc_future = proc::run_process_default_env((&resolved_path).into(), &launch_command);
-            match run_proc_future.await {
-                Ok(pid) => {
-                    lock_w_info!(TTY).running_pid = Some(pid);
-                }
-                Err(e) => {
-                    lock_w_info!(TTY).print(&format!("Failed to start process: {}, error: {:?}\n", program_path, e));
-                }
-            }
-        };
-        crate::task_runner::add_task(Box::pin(start_tty_proc_future), None);
     }
 }

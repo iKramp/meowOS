@@ -46,7 +46,10 @@ pub fn handle_keyboard_data(bytes: Vec<u8>, state: &mut KeyboardState) -> Vec<(K
         let byte = bytes_slice[0];
         let new_event;
 
-        if [0x00, 0xaa, 0xee, 0xf1, 0xfa, 0xfc, 0xfd, 0xfe, 0xff].contains(&byte) {
+        if [0x00, 0xee, 0xf1, 0xfa, 0xfc, 0xfd, 0xfe, 0xff].contains(&byte) {
+            //aa is also a
+            //protocol code, but
+            //is needed for shift
             bytes_slice = &bytes_slice[1..];
             continue; //ignore these scancodes for now, protocol scancodes
         }

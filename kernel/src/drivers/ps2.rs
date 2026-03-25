@@ -41,8 +41,5 @@ pub fn handle_ps2_keyboard_interrupt() {
     let scancodes = crate::drivers::ps2::read_scancodes();
     let keeb_state = unsafe { &mut PS2_KEYBOARD_STATE };
     let keys = crate::keyboard::handle_keyboard_data(scancodes, keeb_state);
-    let mut tty = lock_w_info!(crate::tty::TTY);
-    for key in keys {
-        tty.handle_input(key.0, key.1, keeb_state);
-    }
+    crate::tty::handle_input(keys.into_boxed_slice(), keeb_state);
 }

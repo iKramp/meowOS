@@ -151,6 +151,8 @@ impl Rfs2 {
         let superblock = *working_block.get_as::<SuperBlock>();
         working_block.forget_mem_binding();
 
+        #[allow(clippy::let_and_return)]
+        #[allow(unused_mut)]
         let mut fs = Self {
             superblock: Cell::new(superblock),
             update_superblock_lock: AsyncSpinlock::new(()),
@@ -161,7 +163,7 @@ impl Rfs2 {
             blocks,
             partition,
         };
-        fs.format().await.expect("failed to format rfs2 filesystem");
+        // fs.format().await.expect("failed to format rfs2 filesystem");
         fs
     }
 

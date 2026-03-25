@@ -126,6 +126,6 @@ impl Rfs2 {
             }
         }
 
-        Ok((last_block_to_read - first_block_to_read) * 4096)
+        Ok((last_block_to_read - first_block_to_read + 1) * 4096)
     }
 }

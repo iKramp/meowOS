@@ -48,6 +48,7 @@ mod tty;
 mod utils;
 mod vfs;
 mod vga;
+mod shell;
 use limine::LIMINE_BOOTLOADER_REQUESTS;
 use task_runner::block_task;
 use vfs::ResolvedPath;
@@ -110,9 +111,9 @@ extern "C" fn _start() -> ! {
         panic!("Failed to mount root partition");
     }
 
-    panic!();
-
     proc::init();
+    shell::init();
+
 
     // //start first proc
     unsafe { core::arch::asm!("int 254") };

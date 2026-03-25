@@ -52,7 +52,6 @@ pub fn init(root: Inode) {
 
 pub fn get_inode(inode_index: InodeIdentifier) -> Option<Inode> {
     let cache = &mut lock_w_info!(INODE_CACHE);
-    println!("inode cache: {:#?}", cache.inodes.values().collect::<Vec<_>>());
     cache.inodes.get(&inode_index).map(|(inode, _)| inode).cloned()
 }
 
@@ -187,7 +186,7 @@ async fn find_child_no_mounts(
         );
         return Ok(child.1);
     }
-    println!(level:error, "find_child_no_mounts: child still not found after loading directory for name: {}, inode: {:?}", f_name, current);
+    println!("find_child_no_mounts: child still not found after loading directory for name: {}, inode: {:?}", f_name, current);
     //print dir children
 
     for child in &current_node.1.children {
