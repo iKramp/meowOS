@@ -1,10 +1,11 @@
 use std::boxed::Box;
 use std::error::ErrorCode;
-use std::lock_w_info;
+use std::{Print, lock_w_info};
 use std::sync::no_int_spinlock::NoIntSpinlock;
 
 use crate::tty;
 use crate::vfs::{DeviceId, Inode, InodeIndex, InodeType};
+use crate::vga::vga_text;
 
 use super::{DirEntry, VfsAdapterTrait};
 
@@ -97,6 +98,7 @@ impl VfsAdapterTrait for TtyAdapter {
         };
         let ptr = std::mem_utils::translate_phys_virt_addr(*phys_ptr).0 as *const u8;
         let str = unsafe { core::str::from_raw_parts(ptr, (size % 4096) as usize) };
+
         tty.print(str);
 
         drop(tty);

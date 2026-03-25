@@ -170,7 +170,7 @@ impl FileSystem for Rfs2 {
         buffer: &[PhysAddr],
     ) -> Result<u64, ErrorCode> {
         if offset_bytes % 4096 != 0 {
-            return Err(ErrorCode::InvalidArgument);
+            panic!("non-page-aligned offset not yet supported");
         }
         for phys in buffer {
             if phys.0 % 4096 != 0 {
@@ -227,7 +227,7 @@ impl FileSystem for Rfs2 {
         buffer: &[PhysAddr],
     ) -> Result<(VfsInode, u64), ErrorCode> {
         if offset_bytes % 4096 != 0 {
-            return Err(ErrorCode::InvalidArgument);
+            panic!("non-page-aligned offset not yet supported");
         }
         for phys in buffer {
             if phys.0 % 4096 != 0 {

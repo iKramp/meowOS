@@ -295,95 +295,8 @@ pub async fn write_file(file_handle: &mut FileHandle, buffer: &[PhysAddr], size:
         file_handle.position
     };
 
-    if desired_offset % 4096 == 0 {
-        let res = unsafe { write_file_aligned(file_handle, &inode, buffer, desired_offset, size).await }?;
-
-        file_handle.position += res.1.min(size);
-
-        fs_tree::update_inode(file_handle.inode, res.0)?;
-
-        Ok(res.1)
-    } else {
-        let aligned_offset = desired_offset & !0xFFF;
-        let diff = desired_offset - aligned_offset;
-        let aligned_size = size + diff;
-        let needs_new_page = aligned_size.div_ceil(4096) > buffer.len() as u64;
-
-        let new_buf = if needs_new_page {
-            let mut new_buf = buffer.to_vec();
-            new_buf.push(crate::memory::physical_allocator::allocate_frame());
-            Some(new_buf)
-        } else {
-            None
-        };
-        let buf_to_use = if let Some(ref new_buf) = new_buf {
-            new_buf.as_slice()
-        } else {
-            buffer
-        };
-
-        let res = unsafe { write_file_aligned(file_handle, &inode, buf_to_use, aligned_offset, aligned_size).await };
-        let Ok(res) = res else {
-            if needs_new_page {
-                unsafe {
-                    crate::memory::physical_allocator::deallocate_frame(*buf_to_use.last().unwrap_unchecked());
-                }
-            }
-            return res.map(|_| 0); //change type info
-        };
-
-        let to_copy_first = 4096 - diff;
-        let to_copy_second = diff;
-        let total_copies = buffer.len();
-
-        for i in 0..total_copies {
-            unsafe {
-                core::ptr::copy(
-                    (translate_phys_virt_addr(buf_to_use[i]).0 + diff) as *mut u8,
-                    translate_phys_virt_addr(buf_to_use[i]).0 as *mut u8,
-                    to_copy_first as usize,
-                )
-            };
-            if i == total_copies - 1 && !needs_new_page {
-                break;
-            }
-            unsafe {
-                core::ptr::copy_nonoverlapping(
-                    translate_phys_virt_addr(buf_to_use[i + 1]).0 as *mut u8,
-                    (translate_phys_virt_addr(buf_to_use[i]).0 + diff) as *mut u8,
-                    to_copy_second as usize,
-                )
-            };
-        }
-
-        if needs_new_page {
-            unsafe { crate::memory::physical_allocator::deallocate_frame(*buf_to_use.last().unwrap_unchecked()) };
-        }
-
-        let bytes_written = res.1;
-
-        file_handle.position += (bytes_written - diff).min(size);
-        fs_tree::update_inode(file_handle.inode, res.0)?;
-
-        Ok((bytes_written - diff).min(size))
-    }
-}
-
-///# Safety:
-///Caller must ensure offset is page aligned, and must advance file handle position accordingly
-///This function just checks permissons and performs the write
-async unsafe fn write_file_aligned(
-    file_handle: &FileHandle,
-    inode: &Inode,
-    buffer: &[PhysAddr],
-    offset: u64,
-    size: u64,
-) -> Result<(Inode, u64), ErrorCode> {
     if !file_handle.file_flags.write() {
         return Err(ErrorCode::InsufficientPermissions);
-    }
-    if offset % 4096 != 0 {
-        return Err(ErrorCode::InvalidArgument);
     }
 
     if inode.type_mode.is_dir() {
@@ -397,11 +310,15 @@ async unsafe fn write_file_aligned(
     let fs = fs.clone();
     drop(vfs);
 
-    let res = fs.write(inode.index, offset, size, buffer).await?;
+    let res = fs.write(inode.index, desired_offset, size, buffer).await?;
 
-    println!("operations::write_file_aligned: Wrote {} bytes", res.1);
+    println!("operations::write_file: Wrote {} bytes", res.1);
 
-    Ok(res)
+    file_handle.position += res.1.min(size);
+
+    fs_tree::update_inode(file_handle.inode, res.0)?;
+
+    Ok(res.1)
 }
 
 pub async fn stat_file(file_handle: &FileHandle) -> Result<Inode, ErrorCode> {
@@ -409,84 +326,11 @@ pub async fn stat_file(file_handle: &FileHandle) -> Result<Inode, ErrorCode> {
 }
 
 pub async fn read_file(file_handle: &mut FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, ErrorCode> {
-    if file_handle.position % 4096 == 0 {
-        let res = unsafe { read_file_aligned(file_handle, buffer, file_handle.position, size).await }?;
-        file_handle.position += res;
-        Ok(res)
-    } else {
-        let offset = file_handle.position & !0xFFF;
-        let diff = file_handle.position - offset;
-        let aligned_size = size + diff;
-        let needs_new_page = aligned_size.div_ceil(4096) > buffer.len() as u64;
-        let new_buf = if needs_new_page {
-            let mut new_buf = buffer.to_vec();
-            new_buf.push(crate::memory::physical_allocator::allocate_frame());
-            Some(new_buf)
-        } else {
-            None
-        };
-        let buf_to_use = if let Some(ref new_buf) = new_buf {
-            new_buf.as_slice()
-        } else {
-            buffer
-        };
-
-        let res = unsafe { read_file_aligned(file_handle, buf_to_use, offset, aligned_size).await };
-        let Ok(bytes_read) = res else {
-            if needs_new_page {
-                unsafe { crate::memory::physical_allocator::deallocate_frame(*buf_to_use.last().unwrap_unchecked()) };
-            }
-            return res;
-        };
-
-        let to_copy_first = 4096 - diff; //within current page
-        let to_copy_second = diff; //next page
-        let total_copies = buffer.len();
-        for i in 0..total_copies {
-            unsafe {
-                core::ptr::copy(
-                    (translate_phys_virt_addr(buf_to_use[i]).0 + diff) as *mut u8,
-                    translate_phys_virt_addr(buf_to_use[i]).0 as *mut u8,
-                    to_copy_first as usize,
-                )
-            };
-            if i == total_copies - 1 && !needs_new_page {
-                break;
-            }
-            unsafe {
-                core::ptr::copy_nonoverlapping(
-                    translate_phys_virt_addr(buf_to_use[i + 1]).0 as *mut u8,
-                    (translate_phys_virt_addr(buf_to_use[i]).0 + diff) as *mut u8,
-                    to_copy_second as usize,
-                )
-            };
-        }
-
-        if needs_new_page {
-            unsafe { crate::memory::physical_allocator::deallocate_frame(*buf_to_use.last().expect("frame was just allocated")) };
-        }
-
-        file_handle.position += (bytes_read - diff).min(size);
-
-        Ok((bytes_read - diff).min(size))
-    }
-}
-
-///# Safety:
-///Caller must ensure offset is page aligned, and must advance file handle position accordingly
-///This function just checks permissons and performs the read
-async unsafe fn read_file_aligned(
-    file_handle: &FileHandle,
-    buffer: &[PhysAddr],
-    offset: u64,
-    size: u64,
-) -> Result<u64, ErrorCode> {
     if !file_handle.file_flags.read() {
         return Err(ErrorCode::InsufficientPermissions);
     }
-    if offset % 4096 != 0 {
-        return Err(ErrorCode::InvalidArgument);
-    }
+
+    let offset = file_handle.position;
 
     let inode = fs_tree::get_inode(file_handle.inode).ok_or(ErrorCode::InodeNotPresent)?;
 
@@ -503,7 +347,9 @@ async unsafe fn read_file_aligned(
 
     let bytes_read = fs.read(inode.index, offset, size, buffer).await?;
 
-    println!("operations::read_file_aligned: Read {} bytes", bytes_read);
+    println!("operations::read_file: Read {} bytes", bytes_read);
 
-    Ok(bytes_read.min(size))
+    let res = bytes_read.min(size);
+    file_handle.position += res;
+    Ok(res)
 }
