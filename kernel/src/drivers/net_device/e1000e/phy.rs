@@ -15,8 +15,11 @@ pub fn init_phy(dev: &mut E1000eDevice) -> Result<(), ErrorCode> {
     while mdio::read(&mdic_reg, dev.phy_addr, 0)? & (1 << 15) != 0 {}
     mdio::modify(&mdic_reg, dev.phy_addr, 0, |val| val | (1 << 12))?; //auto negotiate
     mdio::modify(&mdic_reg, dev.phy_addr, 0, |val| val | (1 << 9))?; //auto negotiate restart
+
     while mdio::read(&mdic_reg, dev.phy_addr, 1)? & (1 << 5) == 0 {} //wait for auto negotiate complete
+
     mdio::select_page(&mdic_reg, dev.phy_addr, 0)?;
+
 
     //config
 

@@ -105,6 +105,7 @@ impl AhciController {
 
     //https://forum.osdev.org/viewtopic.php?t=40969
     fn init(&mut self, _device: &pci::LegacyPciDevice) {
+
         let ghc_lock = w_lock_w_info!(self.ghc);
         println!("AhciController::init: staring ahci init");
         println!("AhciController::init: abar at {:p}", ghc_lock.as_ptr());
@@ -458,7 +459,7 @@ impl VirtualPort {
 
         let mut ci = self.get_property(0x38);
         while ci & (1 << identify_cmd_index) != 0 {
-            if now.elapsed().as_millis() > 500 {
+            if now.elapsed().as_millis() > 50 {
                 println!("Identify command timeout");
                 self.clean_command(identify_cmd_index);
                 self.release_command_index(identify_cmd_index);
@@ -467,8 +468,6 @@ impl VirtualPort {
             std::thread::sleep(Duration::from_micros(10));
             ci = self.get_property(0x38);
         }
-
-        std::thread::sleep(std::time::Duration::from_secs(1));
 
         self.clean_command(identify_cmd_index);
         self.release_command_index(identify_cmd_index);

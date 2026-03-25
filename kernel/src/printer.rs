@@ -41,50 +41,50 @@ impl Print for Printer {
     fn set_bg_color(&mut self, color: (u8, u8, u8)) {
         let mut vga = lock_w_info!(self.vga_text);
         vga.set_bg_color(color);
-        for byte in b"\x1b[48;2;" {
-            byte_to_port(0xe9, *byte);
-        }
-        for byte in &num_to_chars(color.2) {
-            byte_to_port(0xe9, *byte);
-        }
-        byte_to_port(0xe9, b';');
-        for byte in &num_to_chars(color.1) {
-            byte_to_port(0xe9, *byte);
-        }
-        byte_to_port(0xe9, b';');
-        for byte in &num_to_chars(color.0) {
-            byte_to_port(0xe9, *byte);
-        }
-        byte_to_port(0xe9, b'm');
+        // for byte in b"\x1b[48;2;" {
+        //     byte_to_port(0xe9, *byte);
+        // }
+        // for byte in &num_to_chars(color.2) {
+        //     byte_to_port(0xe9, *byte);
+        // }
+        // byte_to_port(0xe9, b';');
+        // for byte in &num_to_chars(color.1) {
+        //     byte_to_port(0xe9, *byte);
+        // }
+        // byte_to_port(0xe9, b';');
+        // for byte in &num_to_chars(color.0) {
+        //     byte_to_port(0xe9, *byte);
+        // }
+        // byte_to_port(0xe9, b'm');
     }
 
     fn set_fg_color(&mut self, color: (u8, u8, u8)) {
         let mut vga = lock_w_info!(self.vga_text);
         vga.set_fg_color(color);
-        for byte in b"\x1b[38;2;" {
-            byte_to_port(0xe9, *byte);
-        }
-        for byte in &num_to_chars(color.2) {
-            byte_to_port(0xe9, *byte);
-        }
-        byte_to_port(0xe9, b';');
-        for byte in &num_to_chars(color.1) {
-            byte_to_port(0xe9, *byte);
-        }
-        byte_to_port(0xe9, b';');
-        for byte in &num_to_chars(color.0) {
-            byte_to_port(0xe9, *byte);
-        }
-        byte_to_port(0xe9, b'm');
+        // for byte in b"\x1b[38;2;" {
+        //     byte_to_port(0xe9, *byte);
+        // }
+        // for byte in &num_to_chars(color.2) {
+        //     byte_to_port(0xe9, *byte);
+        // }
+        // byte_to_port(0xe9, b';');
+        // for byte in &num_to_chars(color.1) {
+        //     byte_to_port(0xe9, *byte);
+        // }
+        // byte_to_port(0xe9, b';');
+        // for byte in &num_to_chars(color.0) {
+        //     byte_to_port(0xe9, *byte);
+        // }
+        // byte_to_port(0xe9, b'm');
     }
 
     fn reset_color(&mut self) {
         let mut vga = lock_w_info!(self.vga_text);
         vga.reset_color();
-        byte_to_port(0xe9, 0x1b); //reset terminal color
-        byte_to_port(0xe9, b'[');
-        byte_to_port(0xe9, b'0');
-        byte_to_port(0xe9, b'm');
+        // byte_to_port(0xe9, 0x1b); //reset terminal color
+        // byte_to_port(0xe9, b'[');
+        // byte_to_port(0xe9, b'0');
+        // byte_to_port(0xe9, b'm');
     }
 
     fn set_log_level(&mut self, log_level: std::print::LogLevel) {
