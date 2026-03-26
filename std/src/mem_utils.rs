@@ -55,6 +55,14 @@ impl core::ops::Add<PhysOffset> for PhysAddr {
     }
 }
 
+impl core::ops::Sub<PhysOffset> for VirtAddr {
+    type Output = PhysAddr;
+    #[inline]
+    fn sub(self, rhs: PhysOffset) -> Self::Output {
+        PhysAddr(self.0 - rhs.0)
+    }
+}
+
 impl core::ops::Sub<u64> for PhysAddr {
     type Output = PhysAddr;
     #[inline]
@@ -121,8 +129,7 @@ pub unsafe fn get_at_physical_addr<T>(addr: PhysAddr) -> &'static mut T {
 #[inline]
 pub unsafe fn set_at_physical_addr<T>(addr: PhysAddr, data: T) {
     unsafe {
-        #[cfg(debug_assertions)]
-        assert!(MEM_INITIALIZED);
+        debug_assert!(MEM_INITIALIZED);
         set_at_virtual_addr(addr + HIGHER_HALF_DIRECT_MAP_ADDR, data);
     }
 }
@@ -130,8 +137,7 @@ pub unsafe fn set_at_physical_addr<T>(addr: PhysAddr, data: T) {
 #[inline]
 pub fn get_hhdm_addr() -> PhysOffset {
     unsafe {
-        #[cfg(debug_assertions)]
-        assert!(MEM_INITIALIZED);
+        debug_assert!(MEM_INITIALIZED);
         HIGHER_HALF_DIRECT_MAP_ADDR
     }
 }
@@ -139,9 +145,17 @@ pub fn get_hhdm_addr() -> PhysOffset {
 #[inline]
 pub fn get_hhdm_len() -> u64 {
     unsafe {
-        #[cfg(debug_assertions)]
-        assert!(MEM_INITIALIZED);
+        debug_assert!(MEM_INITIALIZED);
         HIGHER_HALF_DIRECT_MAP_LEN
+    }
+}
+
+#[inline]
+pub fn is_in_hhdm(addr: VirtAddr) -> bool {
+    unsafe {
+        debug_assert!(MEM_INITIALIZED);
+        let end = HIGHER_HALF_DIRECT_MAP_ADDR.0 + HIGHER_HALF_DIRECT_MAP_LEN;
+        addr.0 >= HIGHER_HALF_DIRECT_MAP_ADDR.0 && addr.0 < end
     }
 }
 
@@ -244,6 +258,10 @@ pub unsafe fn memcopy_physical_buffer(dest: PhysAddr, src: &[u8]) {
 }
 
 pub fn translate_virt_phys_addr(addr: VirtAddr, root_page_addr: PhysAddr) -> Option<PhysAddr> {
+    if is_in_hhdm(addr) {
+        return Some(addr - unsafe { HIGHER_HALF_DIRECT_MAP_ADDR })
+    }
+
     let mut page_addr = root_page_addr;
     #[allow(clippy::unusual_byte_groupings)] //they are grouped by section masks
     let mut final_mask: u64 = 0b111111111_111111111_111111111_111111111_111111111111;

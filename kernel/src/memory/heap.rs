@@ -1,7 +1,9 @@
+use crate::memory;
+use crate::memory::paging::PageTree;
 use std::sync::no_int_spinlock::NoIntSpinlock;
 use std::{lock_w_info, mem_utils::*};
 
-use super::PAGE_TREE_ALLOCATOR;
+use super::physical_allocator;
 
 //min allocation is 16 bytes
 //16
@@ -83,7 +85,7 @@ impl HeapAllocationData {
     pub fn allocate(&mut self) -> VirtAddr {
         unsafe {
             if self.free_objects == 0 {
-                let new_page = PAGE_TREE_ALLOCATOR.allocate(None, false);
+                let new_page = Heap::allocate_page();
                 let mut metadata = HeapPageMetadata {
                     size_order_of_objects: self.size_order_of_objects,
                     number_of_allocations: 0,
@@ -235,7 +237,7 @@ impl Heap {
             //allocate whole page/pages
             let n_of_pages = size.div_ceil(4096);
 
-            unsafe { PAGE_TREE_ALLOCATOR.allocate_contigious(n_of_pages, None, false) }
+            Self::allocate_contigious(n_of_pages)
         } else {
             let size_order = log2_rounded_up(size);
             let index = u64::max(4, size_order) - 4;
@@ -253,7 +255,7 @@ impl Heap {
             if size > 1024 {
                 let pages_allocated = size.div_ceil(4096);
                 for i in 0..pages_allocated {
-                    PAGE_TREE_ALLOCATOR.deallocate(page_addr + (i * 4096));
+                    Self::deallocate_page(page_addr + (i * 4096));
                 }
             } else {
                 let metadata = get_at_virtual_addr::<HeapPageMetadata>(page_addr);
@@ -265,6 +267,22 @@ impl Heap {
                 let index = metadata.size_order_of_objects - 4;
                 self.allocation_data[index as usize].deallocate(addr);
             }
+        }
+    }
+
+    fn allocate_page() -> VirtAddr {
+        translate_phys_virt_addr(physical_allocator::allocate_frame())
+    }
+
+    fn allocate_contigious(n_pages: u64) -> VirtAddr {
+        let phys_addr = physical_allocator::allocate_contiguius_high(n_pages);
+        translate_phys_virt_addr(phys_addr)
+    }
+
+    fn deallocate_page(addr: VirtAddr) {
+        let phys_addr = translate_virt_phys_addr(addr, unsafe { memory::PAGE_TREE_ALLOCATOR.root() });
+        if let Some(phys_addr) = phys_addr {
+            unsafe { physical_allocator::deallocate_frame(phys_addr) };
         }
     }
 }

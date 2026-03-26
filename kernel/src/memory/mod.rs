@@ -2,6 +2,7 @@ pub mod heap;
 pub mod paging;
 pub mod physical_allocator;
 pub mod stack;
+mod virt_mem_manager;
 
 use crate::LIMINE_BOOTLOADER_REQUESTS;
 use crate::interrupts::{disable_interrupts, enable_interrupts};

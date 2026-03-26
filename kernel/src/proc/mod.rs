@@ -1,6 +1,5 @@
 use context::{
     builder::create_process,
-    info::{ContextInfo, MemoryRegionDescriptor, MemoryRegionFlags},
 };
 use core::{mem::MaybeUninit, sync::atomic::AtomicU32};
 use scheduler::Scheduler;
@@ -19,7 +18,7 @@ use crate::{
         PAGE_TREE_ALLOCATOR,
         paging::{self, PageTree},
         physical_allocator,
-    }, task_runner, vfs::{self, InodeType, ResolvedPathBorrowed, close_file, file::FileFlags}
+    }, vfs::{self, ResolvedPathBorrowed, file::FileFlags}
 };
 
 mod context;
@@ -29,6 +28,7 @@ mod loaders;
 mod process_data;
 mod scheduler;
 mod syscall;
+mod namespaces;
 pub use context::CommandSplitter;
 pub use context_switch::{context_switch, interrupt_context_switch};
 pub use process_data::{ProcessData, StackCpuStateData};
@@ -79,7 +79,6 @@ pub fn init() {
     let mut scheduler = lock_w_info!(SCHEDULER);
     *scheduler = MaybeUninit::new(Scheduler::new());
     drop(scheduler);
-    create_fallback_process();
     loaders::init_process_loaders();
 
     // let time_printer = loaders::load_process(crate::TIME_PRINTER, "time_printer")
@@ -218,50 +217,4 @@ pub fn wake_process(pid: Pid) {
     let mut scheduler_lock = lock_w_info!(SCHEDULER);
     let scheduler = unsafe { scheduler_lock.assume_init_mut() };
     scheduler.wake_proc(pid);
-}
-
-//context switch to this process when no other processes exist
-pub fn create_fallback_process() {
-    let code_region = MemoryRegionDescriptor::new(VirtAddr(0x1000), 1, MemoryRegionFlags(2)).expect("fallback can't error");
-    let data_region = MemoryRegionDescriptor::new(VirtAddr(0x2000), 1, MemoryRegionFlags(1)).expect("fallback can't error");
-    let code_init = [
-        0x90,                  //nop
-        0x90,                  //nop
-        0x90,                  //nop
-        0x90,                  //nop
-        0x48,                  //vvv
-        0xC7,                  //vvv
-        0xC7,                  //mov rdi, imm
-        0x01,                  //vvv
-        0x00,                  //vvv
-        0x00,                  //vvv
-        0x00,                  //0x1
-        0x48,                  //vvv
-        0xC7,                  //vvv
-        0xC6,                  //mov rsi, imm
-        0x00,                  //vvv
-        0x20,                  //vvv
-        0x00,                  //vvv
-        0x00,                  //0x2000
-        0x0f,                  //vvv
-        0x05,                  //syscall
-        0x90,                  //nop
-        0xEB,                  //jmp
-        0_u8.wrapping_sub(20), //jmp offset
-    ];
-    let data_init = b"Message from user process: uhhhh idk something something works??\0";
-
-    let fake_context = ContextInfo::new(
-        false,
-        &mut [code_region, data_region],
-        Box::new([(VirtAddr(0x1000), &code_init), (VirtAddr(0x2000), data_init)]),
-        VirtAddr(0x1000),
-        "fallback_process",
-    )
-    .expect("fallback can't error");
-    let pid = create_process(&fake_context).expect("failed to create fallback process");
-    assert_eq!(pid.0, 0);
-    let mut scheduler_lock = lock_w_info!(SCHEDULER);
-    let scheduler = unsafe { scheduler_lock.assume_init_mut() };
-    scheduler.remove_process(pid);
 }

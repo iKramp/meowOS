@@ -86,9 +86,7 @@ fn init_e1000e(dev: &pci::PcieDevice) -> Result<Arc<E1000eDevice>, ErrorCode> {
         return Err(ErrorCode::IllegalValue);
     };
     dev.enable_bus_mastering();
-    let now = std::time::Instant::now();
     init::init(&mut e1000e_device);
-    println!("e1000e initialization took {} ms", now.elapsed().as_millis());
     let e1000e_device = Arc::new(e1000e_device);
     net::register_nic(e1000e_device.mac_address, e1000e_device.clone());
     Ok(e1000e_device)

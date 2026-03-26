@@ -1,5 +1,6 @@
 use core::cell::Cell;
 use std::boxed::Box;
+use std::mem_utils::translate_phys_virt_addr;
 use std::{
     mem_utils::{self, PhysAddr, VirtAddr},
     println, r_lock_w_info,
@@ -15,7 +16,7 @@ use crate::{
         block_device::disk::MountedPartition,
         filesystem::rfs2::{bitmask::INODES_PER_BITMASK, superblock::SuperBlock},
     },
-    memory::{PAGE_TREE_ALLOCATOR, physical_allocator},
+    memory::physical_allocator,
     vfs::{FileSystem, FileSystemFactory},
 };
 
@@ -41,7 +42,7 @@ struct WorkingBlock {
 impl WorkingBlock {
     fn new() -> Self {
         let phys = physical_allocator::allocate_frame();
-        let virt = unsafe { PAGE_TREE_ALLOCATOR.allocate(Some(phys), false) };
+        let virt = translate_phys_virt_addr(phys);
         //no need for UC because of x86 cache coherency
         Self {
             virt,
@@ -94,7 +95,7 @@ impl WorkingBlock {
     }
 
     fn dealloc(self) {
-        unsafe { PAGE_TREE_ALLOCATOR.deallocate(self.virt) };
+        unsafe { physical_allocator::deallocate_frame(self.phys) };
         core::mem::forget(self);
     }
 }

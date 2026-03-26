@@ -3,22 +3,35 @@ use std::{
 };
 
 use crate::{
-    keyboard::{self, Key, KeyEvent}, proc::{self, Pid}, shell, vga::vga_text
+    keyboard::{self, Key, KeyEvent}, shell, vga::vga_text
 };
 
 pub static TTY: NoIntSpinlock<TtyState> = NoIntSpinlock::new(TtyState::new());
 
+#[derive(PartialEq, Eq)]
+enum HandleInputResult {
+    Nothing,
+    KillProc,
+}
+
 pub struct TtyState {
     done_streams: Vec<(String, bool)>, //(stream, ends with EOF)
     input_buffer: String,
-    running_pid: Option<Pid>,
-    started_proc: bool,
 }
 
 pub fn handle_input(input: Box<[(Key, KeyEvent)]>, modifier_state: &keyboard::KeyboardState) {
     let mut tty = lock_w_info!(TTY);
     for (input, event) in input {
-        tty.handle_input(input, event, modifier_state);
+        let res = tty.handle_input(input, event, modifier_state);
+        if res == HandleInputResult::KillProc {
+            tty.done_streams.clear();
+            tty.input_buffer.clear();
+            drop(tty);
+            let mut shell = lock_w_info!(shell::SHELL_STATE);
+            shell.kill_proc();
+            drop(shell);
+            tty = lock_w_info!(TTY);
+        }
     }
     if !tty.done_streams.is_empty() {
         let mut shell = lock_w_info!(shell::SHELL_STATE);
@@ -35,8 +48,6 @@ impl TtyState {
         Self {
             done_streams: Vec::new(),
             input_buffer: String::new(),
-            running_pid: None,
-            started_proc: false,
         }
     }
 
@@ -62,24 +73,20 @@ impl TtyState {
         }
     }
 
-    fn handle_input(&mut self, input: Key, event: KeyEvent, modifier_state: &keyboard::KeyboardState) {
+    fn handle_input(&mut self, input: Key, event: KeyEvent, modifier_state: &keyboard::KeyboardState) -> HandleInputResult {
         if event == keyboard::KeyEvent::Released {
-            return;
+            return HandleInputResult::Nothing;
         }
 
         if modifier_state.ctrl() {
             if modifier_state.shift() {
-                return; //ctrl + shift is not a valid combination
+                return HandleInputResult::Nothing; //ctrl + shift is not a valid combination
             }
             //special keys
             match input {
                 Key::C => {
                     //TODO: signals
-                    if let Some(pid) = self.running_pid {
-                        proc::kill_process(pid, 0);
-                        self.running_pid = None;
-                        self.started_proc = false;
-                    }
+                    return HandleInputResult::KillProc;
                 }
                 Key::D => {
                     self.send_line(true);
@@ -238,6 +245,7 @@ impl TtyState {
             let last_char = unsafe { core::str::from_utf8_unchecked(last_char_bytes) };
             self.print(last_char);
         }
+        HandleInputResult::Nothing
     }
 
     pub fn print(&self, data: &str) {

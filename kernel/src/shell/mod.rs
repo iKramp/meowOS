@@ -132,6 +132,16 @@ impl ShellState {
                 borrowed.to_string()
             })
             .unwrap_or_else(|| "/".to_string());
-        lock_w_info!(TTY).print(&format!("{}> ", path));
+        lock_w_info!(TTY).print(&format!("\n{}> ", path));
+    }
+
+    pub fn kill_proc(&mut self) {
+        if let Some(pid) = self.running_proc {
+            proc::kill_process(pid, 0);
+            self.running_proc = None;
+            self.started_proc = false;
+        }
+
+        self.print_prompt();
     }
 }
