@@ -259,7 +259,7 @@ pub unsafe fn memcopy_physical_buffer(dest: PhysAddr, src: &[u8]) {
 
 pub fn translate_virt_phys_addr(addr: VirtAddr, root_page_addr: PhysAddr) -> Option<PhysAddr> {
     if is_in_hhdm(addr) {
-        return Some(addr - unsafe { HIGHER_HALF_DIRECT_MAP_ADDR })
+        return Some(addr - unsafe { HIGHER_HALF_DIRECT_MAP_ADDR });
     }
 
     let mut page_addr = root_page_addr;

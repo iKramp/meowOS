@@ -3,10 +3,10 @@ use std::mem_utils::{PhysAddr, VirtAddr, translate_phys_virt_addr, translate_vir
 
 use crate::memory::{self, physical_allocator};
 
-mod page_table_entry;
-mod virtual_memory_range;
-mod physical_memory_range;
 mod page_table;
+mod page_table_entry;
+mod physical_memory_range;
+mod virtual_memory_range;
 
 pub(super) fn init_paging() {}
 
@@ -69,7 +69,7 @@ pub fn kernel_free(addr: VirtAddr) {
 pub fn kernel_map_contiguous(phys_addr: Option<PhysAddr>, n_pages: u64) -> VirtAddr {
     let phys_addr = match phys_addr {
         Some(a) => a,
-        None => physical_allocator::allocate_contiguius_high(n_pages)
+        None => physical_allocator::allocate_contiguius_high(n_pages),
     };
     translate_phys_virt_addr(phys_addr)
 }

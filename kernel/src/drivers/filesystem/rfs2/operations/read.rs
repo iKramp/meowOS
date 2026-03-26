@@ -1,5 +1,8 @@
 use std::{
-    error::ErrorCode, mem_utils::{self, PhysAddr}, println, vec::Vec
+    error::ErrorCode,
+    mem_utils::{self, PhysAddr},
+    println,
+    vec::Vec,
 };
 
 use crate::{
@@ -14,7 +17,10 @@ impl Rfs2 {
         let mut curr_size = 1;
         for ptr in pointers.iter().skip(1) {
             if *ptr == curr_ptr + 1 {
-                println!("pointer {} is contiguous with current pointer {}, increasing size to read", ptr, curr_ptr);
+                println!(
+                    "pointer {} is contiguous with current pointer {}, increasing size to read",
+                    ptr, curr_ptr
+                );
                 curr_size += 1;
                 continue;
             }
@@ -50,7 +56,11 @@ impl Rfs2 {
             return Ok(0);
         }
         if size_bytes.div_ceil(4096) > buffer.len() as u64 {
-            println!("buffer too small for requested size: buf_len {} blocks, size {} bytes", buffer.len(), size_bytes);
+            println!(
+                "buffer too small for requested size: buf_len {} blocks, size {} bytes",
+                buffer.len(),
+                size_bytes
+            );
             return Err(ErrorCode::InvalidArgument);
         }
 
@@ -63,12 +73,19 @@ impl Rfs2 {
 
         let working_block = physical_allocator::allocate_frame();
         self.partition
-            .read(file_root as usize * BLOCK_SIZE_SECTORS + 1, BLOCK_SIZE_SECTORS - 1, &[working_block])
+            .read(
+                file_root as usize * BLOCK_SIZE_SECTORS + 1,
+                BLOCK_SIZE_SECTORS - 1,
+                &[working_block],
+            )
             .await;
 
         let small_file = file_info.levels == 0;
         if small_file {
-            println!("small file read from block {} with offset {} blocks and size {}B", file_root, offset_blocks, size_bytes);
+            println!(
+                "small file read from block {} with offset {} blocks and size {}B",
+                file_root, offset_blocks, size_bytes
+            );
 
             let src_virt = mem_utils::translate_phys_virt_addr(working_block);
             let dest_virt = mem_utils::translate_phys_virt_addr(buffer[0]);

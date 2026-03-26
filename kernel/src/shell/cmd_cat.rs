@@ -1,7 +1,10 @@
 use std::{error::ErrorCode, lock_w_info, mem_utils, vec::Vec};
 
-use crate::{memory::physical_allocator, tty::TTY, vfs::{self, file::FileFlags}};
-
+use crate::{
+    memory::physical_allocator,
+    tty::TTY,
+    vfs::{self, file::FileFlags},
+};
 
 pub(super) async fn cmd_cat(path: &str) -> Result<(), ErrorCode> {
     let resolved_path = vfs::resolve_path(path);
@@ -11,7 +14,7 @@ pub(super) async fn cmd_cat(path: &str) -> Result<(), ErrorCode> {
         Err(e) => {
             vfs::close_file(file_handle).await;
             return Err(e);
-        },
+        }
     };
 
     let file_size = file_info.size;

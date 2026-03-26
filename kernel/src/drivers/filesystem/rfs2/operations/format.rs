@@ -1,7 +1,12 @@
 use std::{error::ErrorCode, println};
 
-use crate::{drivers::filesystem::rfs2::{BLOCK_SIZE_SECTORS, GROUP_SIZE_BLOCKS, InodeIndex, Rfs2, SuperBlock, WorkingBlock, btree::BTreeNode, operations::InodeInfo}, vfs::{InodeType, ROOT_INODE_INDEX}};
-
+use crate::{
+    drivers::filesystem::rfs2::{
+        BLOCK_SIZE_SECTORS, GROUP_SIZE_BLOCKS, InodeIndex, Rfs2, SuperBlock, WorkingBlock, btree::BTreeNode,
+        operations::InodeInfo,
+    },
+    vfs::{InodeType, ROOT_INODE_INDEX},
+};
 
 impl Rfs2 {
     pub async fn format(&mut self) -> Result<(), ErrorCode> {
@@ -17,14 +22,22 @@ impl Rfs2 {
 
         //----------clear disk----------
         for i in 0..whole_blocks {
-            self.partition.write(i * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys]).await;
+            self.partition
+                .write(i * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys])
+                .await;
         }
 
         //----------initialize free block tables----------
 
         working_block.get_as_mut::<[u8; 4096]>()[0] = 1;
         for i in 0..whole_groups {
-            self.partition.write(i * GROUP_SIZE_BLOCKS * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys]).await;
+            self.partition
+                .write(
+                    i * GROUP_SIZE_BLOCKS * BLOCK_SIZE_SECTORS,
+                    BLOCK_SIZE_SECTORS,
+                    &[working_block.phys],
+                )
+                .await;
         }
 
         if last_group_blocks > 0 {
@@ -40,7 +53,13 @@ impl Rfs2 {
                 let index = arr.len() - 1 - whole_bytes;
                 arr[index] = (1 << remaining_bits) - 1;
             }
-            self.partition.write(whole_groups * GROUP_SIZE_BLOCKS * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys]).await;
+            self.partition
+                .write(
+                    whole_groups * GROUP_SIZE_BLOCKS * BLOCK_SIZE_SECTORS,
+                    BLOCK_SIZE_SECTORS,
+                    &[working_block.phys],
+                )
+                .await;
         }
 
         println!("blocks: {}", whole_blocks);
@@ -67,12 +86,18 @@ impl Rfs2 {
                 break;
             }
 
-            self.partition.read(block * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys]).await;
+            self.partition
+                .read(block * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys])
+                .await;
 
             working_block.get_as_mut::<[u8; 4096]>()[0] |= 3; //first 2 marked
 
-            self.partition.write(block * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys]).await;
-            self.partition.write((block + 1) * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[superblock_block.phys]).await;
+            self.partition
+                .write(block * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys])
+                .await;
+            self.partition
+                .write((block + 1) * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[superblock_block.phys])
+                .await;
         }
         superblock_block.forget_mem_binding();
 
@@ -83,20 +108,27 @@ impl Rfs2 {
         //----------initialize inode tree root----------
         let node = working_block.get_as_mut::<BTreeNode>();
         node.initialize_root(ROOT_INODE_INDEX as InodeIndex, 4);
-        self.partition.write(2 * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys]).await;
+        self.partition
+            .write(2 * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys])
+            .await;
 
         //----------initialize inode bitmask----------
         *working_block.get_as_mut::<[u8; 4096]>() = [0; 4096];
         const _: () = {
-            assert!(ROOT_INODE_INDEX < 8, "ROOT_INODE_INDEX must be less than 8 to fit in the first byte of the inode bitmask");
+            assert!(
+                ROOT_INODE_INDEX < 8,
+                "ROOT_INODE_INDEX must be less than 8 to fit in the first byte of the inode bitmask"
+            );
         };
         let byte = (2 << ROOT_INODE_INDEX) - 1;
         working_block.get_as_mut::<[u8; 4096]>()[0] = byte;
-        self.partition.write(3 * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys]).await;
+        self.partition
+            .write(3 * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys])
+            .await;
 
         //----------initialize root inode----------
         let inode_info = working_block.get_as_mut::<InodeInfo>();
-        
+
         let since_epoch = std::time::Instant::now().duration_since(std::time::UNIX_EPOCH).as_secs();
 
         *inode_info = InodeInfo {
@@ -110,7 +142,9 @@ impl Rfs2 {
             modification_seconds_since_epoch: since_epoch,
             stat_change_seconds_since_epoch: since_epoch,
         };
-        self.partition.write(4 * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys]).await;
+        self.partition
+            .write(4 * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys])
+            .await;
 
         working_block.forget_mem_binding();
 

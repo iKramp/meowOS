@@ -1,2 +1,1 @@
-
 mod memory_namespace;

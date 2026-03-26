@@ -108,7 +108,7 @@ impl PageTableEntry {
                 return None;
             }
             if page_table_entry.huge_page() || level == 0 {
-                return Some(page_table_entry)
+                return Some(page_table_entry);
             }
             page_node_addr = translate_phys_virt_addr(page_table_entry.address());
         }

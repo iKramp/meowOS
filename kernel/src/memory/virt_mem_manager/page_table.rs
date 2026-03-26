@@ -1,6 +1,6 @@
 use std::mem_utils::{PhysAddr, get_at_physical_addr};
 
-use crate::memory::{virt_mem_manager::page_table_entry::PageTableEntry, physical_allocator};
+use crate::memory::{physical_allocator, virt_mem_manager::page_table_entry::PageTableEntry};
 
 #[repr(C)]
 pub(super) struct PageTable {
@@ -31,7 +31,7 @@ impl PageTable {
                     unsafe { physical_allocator::deallocate_frame(phys_addr) };
                     continue;
                 }
-                
+
                 if entry.huge_page() && dealloc_phys {
                     let size_pages = 512_u64.pow(level as u32 - 1);
                     for i in 0..size_pages {

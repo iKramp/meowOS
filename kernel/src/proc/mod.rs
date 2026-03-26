@@ -1,6 +1,4 @@
-use context::{
-    builder::create_process,
-};
+use context::builder::create_process;
 use core::{mem::MaybeUninit, sync::atomic::AtomicU32};
 use scheduler::Scheduler;
 use std::{
@@ -18,17 +16,18 @@ use crate::{
         PAGE_TREE_ALLOCATOR,
         paging::{self, PageTree},
         physical_allocator,
-    }, vfs::{self, ResolvedPathBorrowed, file::FileFlags}
+    },
+    vfs::{self, ResolvedPathBorrowed, file::FileFlags},
 };
 
 mod context;
 mod context_switch;
 mod dispatcher;
 mod loaders;
+mod namespaces;
 mod process_data;
 mod scheduler;
 mod syscall;
-mod namespaces;
 pub use context::CommandSplitter;
 pub use context_switch::{context_switch, interrupt_context_switch};
 pub use process_data::{ProcessData, StackCpuStateData};

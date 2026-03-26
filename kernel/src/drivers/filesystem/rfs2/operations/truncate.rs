@@ -117,8 +117,7 @@ impl Rfs2 {
                 continue;
             }
 
-            Box::pin(self.decrease_file_size_recursively(pointers[i], current_level - 1, left_to_keep - scanned_blocks))
-                .await;
+            Box::pin(self.decrease_file_size_recursively(pointers[i], current_level - 1, left_to_keep - scanned_blocks)).await;
             scanned_blocks += ptr_blocks;
             if scanned_blocks >= left_to_keep {
                 for j in i..PTRS_PER_BLOCK {

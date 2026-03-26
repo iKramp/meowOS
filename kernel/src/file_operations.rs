@@ -230,8 +230,7 @@ impl ReadFileOperation {
         let mut file =
             block_task(Box::pin(vfs::open_file((&path).into(), None, open_file_flags))).expect("fopen failed in debug function");
 
-        block_task(Box::pin(vfs::read_file(&mut file, &buffer, real_length)))
-            .expect("file read failed in debug function");
+        block_task(Box::pin(vfs::read_file(&mut file, &buffer, real_length))).expect("file read failed in debug function");
 
         block_task(Box::pin(vfs::close_file(file)));
 
@@ -259,7 +258,7 @@ impl ReadFileOperation {
             Ok(s) => {
                 println!(level:info, "File content as string:");
                 printlnc!(level:info, (255, 200, 100), "{}", s);
-            },
+            }
             Err(_) => {
                 println!(level:warn, "File content is not valid UTF-8, cannot display as string");
             }

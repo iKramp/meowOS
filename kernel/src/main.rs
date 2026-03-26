@@ -41,6 +41,7 @@ mod parsers;
 mod printer;
 mod proc;
 mod rand;
+mod shell;
 mod task_runner;
 #[allow(unused_imports)]
 mod tests;
@@ -48,7 +49,6 @@ mod tty;
 mod utils;
 mod vfs;
 mod vga;
-mod shell;
 use limine::LIMINE_BOOTLOADER_REQUESTS;
 use task_runner::block_task;
 use vfs::ResolvedPath;
@@ -113,7 +113,6 @@ extern "C" fn _start() -> ! {
 
     proc::init();
     shell::init();
-
 
     // //start first proc
     unsafe { core::arch::asm!("int 254") };

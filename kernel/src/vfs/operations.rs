@@ -290,7 +290,7 @@ pub async fn write_file(file_handle: &mut FileHandle, buffer: &[PhysAddr], size:
     let inode = fs_tree::get_inode(file_handle.inode).ok_or(ErrorCode::InodeNotPresent)?;
 
     let desired_offset = if file_handle.file_flags.append() {
-        inode.size       
+        inode.size
     } else {
         file_handle.position
     };

@@ -20,7 +20,6 @@ pub fn init_phy(dev: &mut E1000eDevice) -> Result<(), ErrorCode> {
 
     mdio::select_page(&mdic_reg, dev.phy_addr, 0)?;
 
-
     //config
 
     let start = std::time::Instant::now();

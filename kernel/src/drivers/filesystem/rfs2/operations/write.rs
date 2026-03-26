@@ -24,7 +24,6 @@ impl Rfs2 {
             return Err(ErrorCode::InvalidArgument);
         }
 
-
         self.increase_file_size(file_root, offset_blocks as usize * 4096 + size_bytes as usize)
             .await;
 
@@ -39,7 +38,9 @@ impl Rfs2 {
         if small_file {
             let to_write = file_info.size.min(size_bytes);
 
-            self.partition.write(file_root as usize * BLOCK_SIZE_SECTORS + 1, BLOCK_SIZE_SECTORS - 1, buffer).await;
+            self.partition
+                .write(file_root as usize * BLOCK_SIZE_SECTORS + 1, BLOCK_SIZE_SECTORS - 1, buffer)
+                .await;
             return Ok(to_write as u64);
         }
 

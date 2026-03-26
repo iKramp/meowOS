@@ -105,7 +105,6 @@ impl AhciController {
 
     //https://forum.osdev.org/viewtopic.php?t=40969
     fn init(&mut self, _device: &pci::LegacyPciDevice) {
-
         let ghc_lock = w_lock_w_info!(self.ghc);
         println!("AhciController::init: staring ahci init");
         println!("AhciController::init: abar at {:p}", ghc_lock.as_ptr());
