@@ -1,5 +1,3 @@
-use crate::memory;
-use crate::memory::paging::PageTree;
 use std::sync::no_int_spinlock::NoIntSpinlock;
 use std::{lock_w_info, mem_utils::*};
 
@@ -280,7 +278,7 @@ impl Heap {
     }
 
     fn deallocate_page(addr: VirtAddr) {
-        let phys_addr = translate_virt_phys_addr(addr, unsafe { memory::PAGE_TREE_ALLOCATOR.root() });
+        let phys_addr = translate_virt_phys_addr(addr, None);
         if let Some(phys_addr) = phys_addr {
             unsafe { physical_allocator::deallocate_frame(phys_addr) };
         }

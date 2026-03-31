@@ -25,7 +25,7 @@ pub use mcfg::{BaseAddressAllocation, McfgTable};
 use platform_info::PlatformInfo;
 pub use smp::cpu_locals;
 
-use crate::{limine::LIMINE_BOOTLOADER_REQUESTS, memory::PAGE_TREE_ALLOCATOR, println, printlnc};
+use crate::{limine::LIMINE_BOOTLOADER_REQUESTS, memory, println, printlnc};
 
 static mut PLATFORM_INFO: Option<PlatformInfo> = None;
 pub static mut ACPI_TABLE_MAP: BTreeMap<&str, VirtAddr> = BTreeMap::new();
@@ -87,7 +87,7 @@ pub fn init_acpi() {
 
     smp::wake_cpus(platform_info);
     printlnc!(level:info, (0, 255, 0), "ACPI initialized and APs started");
-    unsafe { PAGE_TREE_ALLOCATOR.unmap_lower_half() };
+    memory::unmap_lower_half();
 
     //after loading dsdt
     /*

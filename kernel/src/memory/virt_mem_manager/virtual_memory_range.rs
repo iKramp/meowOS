@@ -1,6 +1,5 @@
 use std::{
     mem_utils::{PhysAddr, get_at_physical_addr},
-    sync::arc::Arc,
     vec::Vec,
 };
 
@@ -9,7 +8,7 @@ use crate::memory::{
     virt_mem_manager::{page_table::PageTable, physical_memory_range::PhysicalMmeoryRange},
 };
 
-enum VirtualMemoryRangeCapacity {
+pub enum VirtualMemoryRangeCapacity {
     _4KB,
     _2MB,
     _1GB,
@@ -37,8 +36,8 @@ impl VirtualMemoryRangeCapacity {
     }
 }
 
-struct VirtualMemoryRange {
-    phys_ranges: Vec<Arc<PhysicalMmeoryRange>>,
+pub struct VirtualMemoryRange {
+    phys_ranges: Vec<PhysicalMmeoryRange>,
     virt_tree_node: PhysAddr,
     virt_tree_level: u8, //0 means just 1 page, 1 means page tree node with allocated pages below
     allocated_pages: u64,
@@ -68,7 +67,7 @@ impl VirtualMemoryRange {
         self.expand_to(new_size);
     }
 
-    pub fn expand_to(&mut self, n_pages: u64) {
+    pub fn expand_to(&mut self, _n_pages: u64) {
         todo!()
     }
 
@@ -78,7 +77,7 @@ impl VirtualMemoryRange {
         self.shrink_to(new_size);
     }
 
-    pub fn shrink_to(&mut self, n_pages: u64) {
+    pub fn shrink_to(&mut self, _n_pages: u64) {
         todo!()
     }
 }

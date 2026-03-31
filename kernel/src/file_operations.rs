@@ -1,8 +1,13 @@
-use core::pin::Pin;
-use std::{boxed::Box, mem_utils::get_at_physical_addr, println, printlnc, string::String, vec::Vec};
+use std::{
+    boxed::Box,
+    mem_utils::{get_at_physical_addr, translate_phys_virt_addr},
+    println, printlnc,
+    string::String,
+    vec::Vec,
+};
 
 use crate::{
-    memory::PAGE_TREE_ALLOCATOR,
+    memory::physical_allocator,
     task_runner::block_task,
     vfs::{self, InodeType, file::FileFlags, open_file},
 };
@@ -121,16 +126,10 @@ impl WriteFileOperation {
         let mut frames = Vec::new();
         let mut frame_bindings = Vec::new();
         for _ in 0..(content.len().div_ceil(4096)) {
-            let frame = crate::memory::physical_allocator::allocate_frame();
+            let frame = physical_allocator::allocate_frame();
             frames.push(frame);
-            let frame_binding = unsafe { PAGE_TREE_ALLOCATOR.allocate(Some(frame), false) };
+            let frame_binding = translate_phys_virt_addr(frame);
             frame_bindings.push(frame_binding);
-            unsafe {
-                PAGE_TREE_ALLOCATOR
-                    .get_page_table_entry_mut(frame_binding)
-                    .expect("page entry must exist after allocation")
-                    .set_pat(crate::memory::paging::LiminePat::UC);
-            }
         }
         for i in 0..(content.len().div_ceil(4096)) {
             let ptr = frame_bindings[i].0 as *mut u8;

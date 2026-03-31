@@ -1,15 +1,13 @@
 pub mod heap;
-pub mod paging;
 pub mod physical_allocator;
 pub mod stack;
 mod virt_mem_manager;
+pub use virt_mem_manager::*;
 
 use crate::LIMINE_BOOTLOADER_REQUESTS;
 use crate::interrupts::{disable_interrupts, enable_interrupts};
 use crate::{println, printlnc};
 use std::mem_utils::{self, PhysAddr};
-
-pub static mut PAGE_TREE_ALLOCATOR: paging::PageTree = paging::PageTree::new(PhysAddr(0));
 
 pub static mut TRAMPOLINE_RESERVED: PhysAddr = PhysAddr(0);
 
@@ -41,17 +39,18 @@ pub fn init_memory() {
         println!(level:info, "offset: {:#x?}", offset);
         println!(level:info, "initializing physical allocator");
         physical_allocator::init();
+        std::mem_utils::set_heap_initialized(); //at the same time as physical
+
         //allocates low addresses first, so we reserve this for the trampoline
         TRAMPOLINE_RESERVED = physical_allocator::allocate_frame_low();
         println!(level:info, "initializing pager");
-        let page_table_root = paging::PageTree::get_level4_addr();
-        PAGE_TREE_ALLOCATOR = paging::PageTree::new(page_table_root);
+        virt_mem_manager::init_paging();
+
         printlnc!(level:info, (255, 200, 100), "Limine mem map:");
-        PAGE_TREE_ALLOCATOR.print_mapping();
-        PAGE_TREE_ALLOCATOR.init();
+        virt_mem_manager::print_mem_mapping();
+        virt_mem_manager::init_paging();
         printlnc!(level:info, (0, 255, 0), "memory initialized");
     }
-    std::mem_utils::set_heap_initialized();
 }
 
 pub fn print_limine_phys_map() {
@@ -110,6 +109,10 @@ pub fn probe_pointer_range(ptr_start: u64, mut ptr_end: u64) -> bool {
         println!(level:warn, "pointer range {:#x?} - {:#x?} is invalid", ptr_start, ptr_end);
     }
     valid
+}
+
+pub fn print_mem_mapping() {
+    virt_mem_manager::print_mem_mapping();
 }
 
 pub fn probe_ptr_u64(ptr: u64) -> Option<u64> {

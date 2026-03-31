@@ -2,6 +2,7 @@ use std::{
     boxed::Box,
     collections::btree_map::BTreeMap,
     lock_w_info,
+    mem_utils::PhysAddr,
     sync::{
         arc::Arc,
         no_int_spinlock::{NoIntSpinlock, NoIntSpinlockGuard},
@@ -10,7 +11,6 @@ use std::{
 
 use crate::{
     interrupts::InterruptProcessorState,
-    memory::paging::PageTree,
     vfs::{
         InodeIdentifier,
         file::{FileDescriptor, FileHandle},
@@ -25,7 +25,7 @@ pub struct ProcessData {
     pid: Pid,
     is_32_bit: bool,
     cmdline: Box<str>,
-    page_tree_root: PageTree,
+    page_tree_root: PhysAddr,
     internal: NoIntSpinlock<ProcessDataMutable>,
 }
 
@@ -75,7 +75,7 @@ impl ProcessData {
             pid,
             is_32_bit,
             cmdline,
-            page_tree_root: memory_context.page_tree.clone(),
+            page_tree_root: memory_context.page_tree_root,
             internal: NoIntSpinlock::new(ProcessDataMutable {
                 return_status: None,
                 memory_context,
@@ -122,8 +122,8 @@ impl ProcessData {
         self.pid
     }
 
-    pub fn page_tree(&self) -> &PageTree {
-        &self.page_tree_root
+    pub fn page_tree(&self) -> PhysAddr {
+        self.page_tree_root
     }
 
     pub fn take_cpu_state(&self) -> CpuStateType {

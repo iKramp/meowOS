@@ -1,4 +1,5 @@
 use crate::{
+    memory,
     proc::{self, Pid},
     shell::{cmd_cat::cmd_cat, cmd_ls::cmd_ls},
     tty::TTY,
@@ -80,6 +81,11 @@ impl ShellState {
                     }
                 };
                 crate::task_runner::add_task(Box::pin(task), None);
+            }
+            "mmap" => {
+                println!("mmap command executed");
+                memory::print_mem_mapping();
+                self.command_finished();
             }
             prog_path if prog_path.starts_with("/") => {
                 println!("Executing file operation command: {}", prog_path);

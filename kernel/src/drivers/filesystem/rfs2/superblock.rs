@@ -16,7 +16,7 @@ impl SuperBlock {
         for i in (0..core::mem::size_of::<SuperBlock>()).step_by(4) {
             let part = self as *const SuperBlock as *const u32;
             let part = unsafe { part.byte_add(i).read() };
-            checksum = checksum ^ part;
+            checksum ^= part;
         }
         checksum == 0
     }
@@ -27,7 +27,7 @@ impl SuperBlock {
         for i in (0..core::mem::size_of::<SuperBlock>()).step_by(4) {
             let part = self as *const SuperBlock as *const u32;
             let part = unsafe { part.byte_add(i).read() };
-            checksum = checksum ^ part;
+            checksum ^= part;
         }
         self.checksum = checksum;
     }

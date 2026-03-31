@@ -1,6 +1,6 @@
 use std::mem_utils::VirtAddr;
 
-use super::PAGE_TREE_ALLOCATOR;
+use crate::memory::{self, physical_allocator};
 
 pub const KERNEL_STACK_SIZE_PAGES: u8 = 16;
 
@@ -8,20 +8,15 @@ pub const KERNEL_STACK_SIZE_PAGES: u8 = 16;
 ///Pushes an illegal return address of 0 (and aligns to 16)
 pub fn prepare_kernel_stack(stack_size_pages: u8) -> VirtAddr {
     unsafe {
-        let addr = PAGE_TREE_ALLOCATOR.allocate_contigious(stack_size_pages as u64 + 1, None, false);
-        let lowest_entry = PAGE_TREE_ALLOCATOR
-            .get_page_table_entry_mut(addr)
-            .expect("page entry must exist after allocation");
+        let phys_addr = physical_allocator::allocate_contiguius_high(stack_size_pages as u64 + 1);
+        let (addr, lowest_entry) = memory::kernel_manual_map(phys_addr, stack_size_pages as u64 + 1, None);
         lowest_entry.set_writeable(false);
-        let highest_entry = PAGE_TREE_ALLOCATOR
-            .get_page_table_entry_mut(addr + (stack_size_pages as u64) * 0x1000)
-            .expect("page entry must exist after allocation");
-        let highest_phys_addr = highest_entry.address();
-        for i in (highest_phys_addr.0 - 16)..highest_phys_addr.0 {
+        let highest_addr = addr + (stack_size_pages as u64 + 1) * 0x1000;
+        for i in (highest_addr.0 - 16)..highest_addr.0 {
             let byte_ptr = i as *mut u8;
-            byte_ptr.write_volatile(0);
+            byte_ptr.write(0);
         }
 
-        addr + (stack_size_pages as u64 + 1) * 0x1000 - 16
+        highest_addr - 16
     }
 }

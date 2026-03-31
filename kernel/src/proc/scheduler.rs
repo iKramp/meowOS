@@ -1,7 +1,7 @@
 use crate::{acpi::cpu_locals::CpuLocals, interrupts::InterruptProcessorState, proc::Pid};
 use std::{
     collections::{btree_map::BTreeMap, btree_set::BTreeSet},
-    lock_w_info, println,
+    lock_w_info,
     sync::arc::Arc,
     vec::Vec,
 };

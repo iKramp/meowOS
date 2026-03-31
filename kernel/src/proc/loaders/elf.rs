@@ -22,7 +22,7 @@ fn load_elf_process<'a>(data: &'a [u8], cmdline: &'a str) -> Result<ContextInfo<
     let parsed_elf = if data.as_ptr() as usize % 8 == 0 {
         elf::parse(data)
     } else {
-        elf::parse_unaligned(data)
+        panic!("data into load_elf_process must be u64 aligned");
     };
 
     let parsed_elf = match parsed_elf {

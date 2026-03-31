@@ -1,4 +1,3 @@
-use context::builder::create_process;
 use core::{mem::MaybeUninit, sync::atomic::AtomicU32};
 use scheduler::Scheduler;
 use std::{
@@ -6,19 +5,11 @@ use std::{
     error::ErrorCode,
     lock_w_info,
     mem_utils::{PhysAddr, VirtAddr},
-    println,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
     vec::Vec,
 };
 
-use crate::{
-    memory::{
-        PAGE_TREE_ALLOCATOR,
-        paging::{self, PageTree},
-        physical_allocator,
-    },
-    vfs::{self, ResolvedPathBorrowed, file::FileFlags},
-};
+use crate::{memory, vfs::ResolvedPathBorrowed};
 
 mod context;
 mod context_switch;
@@ -50,7 +41,7 @@ pub struct Pid(pub u32);
 pub(super) struct MemoryContext {
     initialized: bool,
     is_32_bit: bool,
-    page_tree: PageTree,
+    page_tree_root: PhysAddr,
     owned_memory_regions: Vec<MappedMemoryRegion>,
     //shared regions here?
 }
@@ -60,7 +51,7 @@ impl Default for MemoryContext {
         Self {
             initialized: false,
             is_32_bit: false,
-            page_tree: PageTree::new(PhysAddr(0)),
+            page_tree_root: PhysAddr(0),
             owned_memory_regions: Vec::new(),
         }
     }
@@ -127,69 +118,76 @@ pub fn init_ap() {
     syscall::init();
 }
 
-pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &str) -> Result<Pid, ErrorCode> {
-    let mut file_handle = vfs::open_file(path, None, FileFlags::new().with_read(true)).await?;
-    let res = vfs::stat_file(&file_handle);
-    let stat = match res.await {
-        Err(e) => {
-            vfs::close_file(file_handle).await;
-            return Err(e);
-        }
-        Ok(stat) => stat,
-    };
-    let buf_pages = stat.size.div_ceil(4096);
-    let phys_buf = physical_allocator::allocate_contiguius_high(buf_pages);
-    let buf = unsafe { PAGE_TREE_ALLOCATOR.allocate_contigious(buf_pages, Some(phys_buf), false) };
-    let phys_buf_vec = (0..buf_pages).map(|i| phys_buf + i * 4096).collect::<Vec<_>>();
-    let read_res = vfs::read_file(&mut file_handle, &phys_buf_vec, stat.size).await?;
-    vfs::close_file(file_handle).await;
-    if read_res != stat.size {
-        for i in 0..buf_pages {
-            unsafe { PAGE_TREE_ALLOCATOR.deallocate(buf + i * 4096) };
-        }
-        return Err(ErrorCode::InternalFSError);
-    }
-
-    let context = match loaders::load_process_context(
-        unsafe { core::slice::from_raw_parts(buf.0 as *const u8, stat.size as usize) },
-        cmdline,
-    ) {
-        Ok(context) => context,
-        Err(e) => {
-            println!(level:error, "Failed to load process from file: {}", path.to_string());
-            println!(level:error, "Error: {:?}", e);
-            for i in 0..buf_pages {
-                unsafe { PAGE_TREE_ALLOCATOR.deallocate(buf + i * 4096) };
-            }
-            return Err(ErrorCode::InvalidProcessFile);
-        }
-    };
-
-    let new_pid = match create_process(&context) {
-        Ok(pid) => pid,
-        Err(e) => {
-            println!(level:error, "Failed to create process from file: {}, error: {:?}", path.to_string(), e);
-            for i in 0..buf_pages {
-                unsafe { PAGE_TREE_ALLOCATOR.deallocate(buf + i * 4096) };
-            }
-            return Err(e);
-        }
-    };
-    for i in 0..buf_pages {
-        unsafe { PAGE_TREE_ALLOCATOR.deallocate(buf + i * 4096) };
-    }
-
-    Ok(new_pid)
+pub async fn run_process_default_env(_path: ResolvedPathBorrowed<'_>, _cmdline: &str) -> Result<Pid, ErrorCode> {
+    todo!()
+    // let mut file_handle = vfs::open_file(path, None, FileFlags::new().with_read(true)).await?;
+    // let res = vfs::stat_file(&file_handle);
+    // let stat = match res.await {
+    //     Err(e) => {
+    //         vfs::close_file(file_handle).await;
+    //         return Err(e);
+    //     }
+    //     Ok(stat) => stat,
+    // };
+    // let buf_pages = stat.size.div_ceil(4096);
+    // let phys_buf = physical_allocator::allocate_contiguius_high(buf_pages);
+    // // let buf = unsafe { PAGE_TREE_ALLOCATOR.allocate_contigious(buf_pages, Some(phys_buf), false) };
+    // let buf = VirtAddr(0);
+    // todo!("change to new memory api");
+    // let phys_buf_vec = (0..buf_pages).map(|i| phys_buf + i * 4096).collect::<Vec<_>>();
+    // let read_res = vfs::read_file(&mut file_handle, &phys_buf_vec, stat.size).await?;
+    // vfs::close_file(file_handle).await;
+    // if read_res != stat.size {
+    //     for i in 0..buf_pages {
+    //         // unsafe { PAGE_TREE_ALLOCATOR.deallocate(buf + i * 4096) };
+    //         todo!("move to new memory api");
+    //     }
+    //     return Err(ErrorCode::InternalFSError);
+    // }
+    //
+    // let context = match loaders::load_process_context(
+    //     unsafe { core::slice::from_raw_parts(buf.0 as *const u8, stat.size as usize) },
+    //     cmdline,
+    // ) {
+    //     Ok(context) => context,
+    //     Err(e) => {
+    //         println!(level:error, "Failed to load process from file: {}", path.to_string());
+    //         println!(level:error, "Error: {:?}", e);
+    //         for i in 0..buf_pages {
+    //             // unsafe { PAGE_TREE_ALLOCATOR.deallocate(buf + i * 4096) };
+    //             todo!("move to new memory api");
+    //         }
+    //         return Err(ErrorCode::InvalidProcessFile);
+    //     }
+    // };
+    //
+    // let new_pid = match create_process(&context) {
+    //     Ok(pid) => pid,
+    //     Err(e) => {
+    //         println!(level:error, "Failed to create process from file: {}, error: {:?}", path.to_string(), e);
+    //         for i in 0..buf_pages {
+    //             // unsafe { PAGE_TREE_ALLOCATOR.deallocate(buf + i * 4096) };
+    //             todo!("move to new memory api");
+    //         }
+    //         return Err(e);
+    //     }
+    // };
+    // for i in 0..buf_pages {
+    //     // unsafe { PAGE_TREE_ALLOCATOR.deallocate(buf + i * 4096) };
+    //     todo!("move to new memory api");
+    // }
+    //
+    // Ok(new_pid)
 }
 
 pub fn switch_to_generic_mem_tree() {
-    paging::PageTree::set_level4_addr(unsafe { GENERIC_PAGE_TREE });
+    memory::set_cr3(unsafe { GENERIC_PAGE_TREE });
 }
 
 //set this AFTER the process with pid 1 is loaded (pid 0 is fallback, might be removed)
 pub fn set_proc_initialized() {
     unsafe {
-        GENERIC_PAGE_TREE = paging::PageTree::get_level4_addr();
+        GENERIC_PAGE_TREE = memory::current_root();
         PROC_INITIALIZED = true;
     }
 }

@@ -5,6 +5,7 @@ use bitfield::bitfield;
 
 bitfield! {
     pub struct PageTableEntry(u64);
+    impl Debug;
     pub present, set_present: 0;
     pub writeable, set_writeable: 1;
     pub user_accessible, set_user_accessible: 2;
@@ -20,11 +21,19 @@ bitfield! {
 
 impl Display for PageTableEntry {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_tuple("PageTableEntry")
-            .field(&format_args!("P({})", self.0 & 0b1))
-            .field(&format_args!("R/W({})", self.writeable()))
-            .field(&format_args!("U({})", self.user_accessible()))
-            .field(&format_args!("RSVD({})", self.reserved()))
+        // Format the output
+        f.debug_struct("PageTableEntry")
+            .field("present", &self.present())
+            .field("address", &self.address())
+            .field("huge page", &self.huge_page())
+            .field("no execute", &self.no_execute())
+            .field("writeable", &self.writeable())
+            .field("write through", &self.page_write_through())
+            .field("disable cache", &self.page_cache_disable())
+            .field("user accessible", &self.user_accessible())
+            .field("accessed", &self.accessed())
+            .field("dirty", &self.dirty())
+            .field("global", &self.global())
             .finish()
     }
 }

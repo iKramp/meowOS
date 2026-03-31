@@ -5,15 +5,16 @@ use crate::proc::SCHEDULER;
 use crate::proc::process_data::CpuStateType;
 use std::error::ErrorCode;
 use std::lock_w_info;
+use std::mem_utils::PhysAddr;
 use std::string::ToString;
 use std::sync::arc::Arc;
 use std::{
-    mem_utils::{self, VirtAddr, memset_physical_addr},
+    mem_utils::{VirtAddr, memset_physical_addr},
     println,
 };
 
 use crate::{
-    memory::{self, paging::PageTree},
+    memory,
     proc::{MappedMemoryRegion, MemoryContext, Pid},
 };
 
@@ -51,51 +52,51 @@ pub fn create_process(context_info: &ContextInfo) -> Result<Pid, ErrorCode> {
 }
 
 pub fn build_generic_memory_context(context: &ContextInfo) -> MemoryContext {
-    let mut memory_tree = build_generic_memory_tree();
+    let memory_tree = build_generic_memory_tree();
 
     // map memory regions
     for region in context.mem_regions().iter() {
         let start = region.start().0;
         debug_assert!(start % 0x1000 == 0, "region start not page aligned");
         let end = start + region.size_pages() as u64 * 0x1000;
-        for page_addr in (start..end).step_by(0x1000) {
-            let _phys_addr_map = memory_tree.allocate_set_virtual(None, VirtAddr(page_addr));
-            let page = memory_tree
-                .get_page_table_entry_mut(VirtAddr(page_addr))
-                .expect("page must exist after allocation");
-            page.set_writeable(region.flags().is_writeable());
-            page.set_user_accessible(true);
-
-            if region.flags().is_executable() {
-                memory_tree.set_execute(VirtAddr(page_addr));
-            }
+        for _page_addr in (start..end).step_by(0x1000) {
+            // let _phys_addr_map = memory_tree.allocate_set_virtual(None, VirtAddr(page_addr));
+            todo!("move to new memory api");
+            // let page = memory_tree
+            //     .get_page_table_entry_mut(VirtAddr(page_addr))
+            //     .expect("page must exist after allocation");
+            // page.set_writeable(region.flags().is_writeable());
+            // page.set_user_accessible(true);
+            // page.set_no_execute(!region.flags.is_executable());
         }
     }
 
     for mem_init in context.mem_init() {
         let first_page = mem_init.0.0 & (!0xfff);
         let last_page = (mem_init.0.0 + mem_init.1.len() as u64) & (!0xfff); //inclusive
-        for page_addr in (first_page..=last_page).step_by(0x1000) {
-            let page = memory_tree
-                .get_page_table_entry_mut(VirtAddr(page_addr))
-                .expect("page must exist after allocation");
-            let start_mem_addr = page_addr.max(mem_init.0.0);
-            let start_data_index = (start_mem_addr - mem_init.0.0) as usize;
-            let mem_offset = start_mem_addr & 0xFFF;
-            let end_data_index = mem_init.1.len().min(start_data_index + 0x1000 - mem_offset as usize);
-
-            let physical_addr = page.address();
-
-            unsafe {
-                mem_utils::memcopy_physical_buffer(physical_addr + mem_offset, &mem_init.1[start_data_index..end_data_index])
-            }
+        for _page_addr in (first_page..=last_page).step_by(0x1000) {
+            todo!("move to new mem api");
+            // let page = memory_tree
+            //     .get_page_table_entry_mut(VirtAddr(page_addr))
+            //     .expect("page must exist after allocation");
+            // let physical_addr = page.address();
+            // let physical_addr = PhysAddr(0);
+            //
+            // let start_mem_addr = page_addr.max(mem_init.0.0);
+            // let start_data_index = (start_mem_addr - mem_init.0.0) as usize;
+            // let mem_offset = start_mem_addr & 0xFFF;
+            // let end_data_index = mem_init.1.len().min(start_data_index + 0x1000 - mem_offset as usize);
+            //
+            // unsafe {
+            //     mem_utils::memcopy_physical_buffer(physical_addr + mem_offset, &mem_init.1[start_data_index..end_data_index])
+            // }
         }
     }
 
     MemoryContext {
         initialized: true,
         is_32_bit: context.is_32_bit(),
-        page_tree: memory_tree,
+        page_tree_root: memory_tree,
         owned_memory_regions: context
             .mem_regions()
             .iter()
@@ -132,77 +133,80 @@ pub fn add_stack(context: &mut MemoryContext, stack_size_pages: u8) -> Result<()
     };
 
     let stack_reserve_pages = stack_size_pages as u64 + 1;
-    let mem_tree = &mut context.page_tree;
     let stack_search_page = (highest_userspace_addr >> 12) - 1;
 
     let mut top_page = 0;
-    'top_loop: for _top_page in (0..stack_search_page).rev() {
-        for page in (_top_page - stack_reserve_pages + 1)..=_top_page {
-            if mem_tree.get_page_table_entry_mut(VirtAddr(page << 12)).is_some() {
-                //found a page that is already mapped, so we can't use this address
-                continue 'top_loop;
-            }
+    '_top_loop: for _top_page in (0..stack_search_page).rev() {
+        for _page in (_top_page - stack_reserve_pages + 1)..=_top_page {
+            todo!("move to new mem api");
+            // if mem_tree.get_page_table_entry_mut(VirtAddr(page << 12)).is_some() {
+            //     //found a page that is already mapped, so we can't use this address
+            //     continue 'top_loop;
+            // }
         }
         top_page = _top_page;
         break;
     }
 
     //found a free stack at this address
-    for page in (top_page - stack_reserve_pages + 2)..=top_page {
-        match mem_tree.allocate_set_virtual(None, VirtAddr(page << 12)) {
-            Ok(_) => {}
-            Err(e) => {
-                for page in (top_page - stack_reserve_pages + 2)..page {
-                    mem_tree.deallocate(VirtAddr(page << 12));
-                }
-                return Err(e);
-            }
-        }
-        let entry = mem_tree
-            .get_page_table_entry_mut(VirtAddr(page << 12))
-            .expect("page must exist after allocation");
-        entry.set_writeable(true);
-        entry.set_no_execute(true);
-        entry.set_user_accessible(true);
+    for _page in (top_page - stack_reserve_pages + 2)..=top_page {
+        todo!("move to new mamory api");
+        // match mem_tree.allocate_set_virtual(None, VirtAddr(page << 12)) {
+        //     Ok(_) => {}
+        //     Err(e) => {
+        //         for page in (top_page - stack_reserve_pages + 2)..page {
+        //             // mem_tree.deallocate(VirtAddr(page << 12));
+        //             todo!("move to new memory api");
+        //         }
+        //         return Err(e);
+        //     }
+        // }
+        // let entry = mem_tree
+        //     .get_page_table_entry_mut(VirtAddr(page << 12))
+        //     .expect("page must exist after allocation");
+        // entry.set_writeable(true);
+        // entry.set_no_execute(true);
+        // entry.set_user_accessible(true);
     }
     //add a non-accessible page to catch stack overflows
     let overflow_page = top_page - stack_reserve_pages + 1;
     println!("allocating stack overflow page at {:#X}", overflow_page << 12);
-    match mem_tree.allocate_set_virtual(None, VirtAddr(overflow_page << 12)) {
-        Ok(_) => {}
-        Err(e) => {
-            for page in (top_page - stack_reserve_pages + 2)..=top_page {
-                mem_tree.deallocate(VirtAddr(page << 12));
-            }
-            return Err(e);
-        }
-    }
-    let entry = mem_tree
-        .get_page_table_entry_mut(VirtAddr(overflow_page << 12))
-        .expect("page must exist after allocation");
-    entry.set_writeable(true);
-    entry.set_no_execute(true);
-    entry.set_user_accessible(false);
+    todo!("move to new memory api");
+    // match mem_tree.allocate_set_virtual(None, VirtAddr(overflow_page << 12)) {
+    //     Ok(_) => {}
+    //     Err(e) => {
+    //         for page in (top_page - stack_reserve_pages + 2)..=top_page {
+    //             // mem_tree.deallocate(VirtAddr(page << 12));
+    //             todo!("move to new memory api");
+    //         }
+    //         return Err(e);
+    //     }
+    // }
+    // let entry = mem_tree
+    //     .get_page_table_entry_mut(VirtAddr(overflow_page << 12))
+    //     .expect("page must exist after allocation");
+    // entry.set_writeable(true);
+    // entry.set_no_execute(true);
+    // entry.set_user_accessible(false);
 
-    let stack = MappedMemoryRegion {
-        name: "[stack]".to_string().into_boxed_str(),
-        base: VirtAddr(((top_page - stack_size_pages as u64) << 12) + 0x1000),
-        size_pages: stack_size_pages as u64,
-    };
-    context.owned_memory_regions.push(stack);
-
-    Ok(())
+    // let stack = MappedMemoryRegion {
+    //     name: "[stack]".to_string().into_boxed_str(),
+    //     base: VirtAddr(((top_page - stack_size_pages as u64) << 12) + 0x1000),
+    //     size_pages: stack_size_pages as u64,
+    // };
+    // context.owned_memory_regions.push(stack);
+    //
+    // Ok(())
 }
 
-pub fn build_generic_memory_tree() -> PageTree {
-    let page_tree_root = memory::physical_allocator::allocate_frame();
-    unsafe { memset_physical_addr(page_tree_root, 0x0, 0x1000) };
-    let mut new_page_tree = PageTree::new(page_tree_root);
+pub fn build_generic_memory_tree() -> PhysAddr {
+    let new_page_tree_root = memory::physical_allocator::allocate_frame();
+    unsafe { memset_physical_addr(new_page_tree_root, 0x0, 0x1000) };
 
-    let existing_page_tree = PageTree::new(PageTree::get_level4_addr());
-    existing_page_tree.copy_higher_half(&mut new_page_tree);
+    let existing_page_tree_root = memory::current_root();
+    memory::copy_higher_half(existing_page_tree_root, new_page_tree_root);
 
-    new_page_tree
+    new_page_tree_root
 }
 
 pub fn tear_down_mem_context(_context: &MemoryContext) {

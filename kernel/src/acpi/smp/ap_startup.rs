@@ -5,10 +5,7 @@ use crate::println;
 use core::arch::asm;
 use core::time::Duration;
 
-use crate::{
-    memory::paging::PageTree,
-    msr::{get_mtrr_cap, set_msr, set_mtrr_def_type},
-};
+use crate::msr::{get_mtrr_cap, set_msr, set_mtrr_def_type};
 
 use super::cpu_locals;
 
@@ -29,7 +26,6 @@ pub extern "C" fn ap_started_wait_loop() -> ! {
 
     set_mtrrs(comm_lock);
     set_cr_registers(comm_lock);
-    PageTree::reload();
 
     set_cpu_local(comm_lock);
     set_idt();

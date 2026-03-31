@@ -10,7 +10,7 @@ use reg_map::RegMap;
 use crate::{
     acpi,
     clocks::TIMER_INTERRUPT_VECTOR,
-    memory::{PAGE_TREE_ALLOCATOR, paging::LiminePat},
+    memory::{self, LiminePat},
 };
 
 use super::Timer;
@@ -39,14 +39,9 @@ impl HpetWrapper {
     }
 
     fn get_registers(&mut self, reg_phys_addr: PhysAddr) -> bool {
-        let virt_addr = unsafe { PAGE_TREE_ALLOCATOR.allocate(Some(reg_phys_addr), false) };
+        let (virt_addr, entry) = unsafe { memory::kernel_manual_map(reg_phys_addr, 1, None) };
+        entry.set_pat(LiminePat::UC, virt_addr);
         self.allocated_page = virt_addr;
-        let entry = unsafe {
-            PAGE_TREE_ALLOCATOR
-                .get_page_table_entry_mut(virt_addr)
-                .expect("Failed to get page table entry for HPET")
-        };
-        entry.set_pat(LiminePat::UC);
 
         let registers = unsafe { HpetRegistersPtr::from_ptr(virt_addr.0 as *mut HpetRegisters) };
         let general_cap = registers.general_capabilities().read();
@@ -110,7 +105,7 @@ impl Drop for HpetWrapper {
 
         //free allocated page
         unsafe {
-            PAGE_TREE_ALLOCATOR.deallocate(self.allocated_page);
+            memory::kernel_manual_unmap(self.allocated_page, 1, None);
         }
     }
 }

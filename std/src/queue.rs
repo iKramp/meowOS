@@ -94,4 +94,8 @@ impl<T> DataQueueHead<T> {
     pub fn len(&self) -> usize {
         self.curr_nodes
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.curr_nodes == 0
+    }
 }

@@ -83,6 +83,14 @@ impl core::ops::Add for VirtAddr {
     }
 }
 
+impl core::ops::Sub for VirtAddr {
+    type Output = VirtAddr;
+    #[inline]
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self(self.0 - rhs.0)
+    }
+}
+
 impl core::ops::AddAssign for VirtAddr {
     #[inline]
     fn add_assign(&mut self, rhs: Self) {
@@ -119,8 +127,9 @@ impl core::ops::Sub<u64> for VirtAddr {
 pub unsafe fn get_at_physical_addr<T>(addr: PhysAddr) -> &'static mut T {
     unsafe {
         debug_assert!(MEM_INITIALIZED);
-        let data: *mut T = (addr + HIGHER_HALF_DIRECT_MAP_ADDR).0 as *mut T;
-        &mut *data
+        let virt_addr = addr.0.checked_add(HIGHER_HALF_DIRECT_MAP_ADDR.0).expect("incorrect addr");
+        assert!(is_in_hhdm(VirtAddr(virt_addr)));
+        get_at_virtual_addr(VirtAddr(virt_addr))
     }
 }
 
@@ -130,6 +139,8 @@ pub unsafe fn get_at_physical_addr<T>(addr: PhysAddr) -> &'static mut T {
 pub unsafe fn set_at_physical_addr<T>(addr: PhysAddr, data: T) {
     unsafe {
         debug_assert!(MEM_INITIALIZED);
+        let virt_addr = addr.0.checked_add(HIGHER_HALF_DIRECT_MAP_ADDR.0).expect("incorrect addr");
+        assert!(is_in_hhdm(VirtAddr(virt_addr)));
         set_at_virtual_addr(addr + HIGHER_HALF_DIRECT_MAP_ADDR, data);
     }
 }
@@ -157,6 +168,20 @@ pub fn is_in_hhdm(addr: VirtAddr) -> bool {
         let end = HIGHER_HALF_DIRECT_MAP_ADDR.0 + HIGHER_HALF_DIRECT_MAP_LEN;
         addr.0 >= HIGHER_HALF_DIRECT_MAP_ADDR.0 && addr.0 < end
     }
+}
+
+#[inline]
+pub fn extend_addr(addr: VirtAddr) -> VirtAddr {
+    if addr.0 & (1 << 47) != 0 {
+        VirtAddr(addr.0 | 0xFFFF000000000000)
+    } else {
+        addr
+    }
+}
+
+#[inline]
+pub fn trim_addr_extension(addr: VirtAddr) -> VirtAddr {
+    VirtAddr(addr.0 & 0x0000FFFFFFFFFFFF)
 }
 
 ///# Safety
@@ -257,12 +282,12 @@ pub unsafe fn memcopy_physical_buffer(dest: PhysAddr, src: &[u8]) {
     }
 }
 
-pub fn translate_virt_phys_addr(addr: VirtAddr, root_page_addr: PhysAddr) -> Option<PhysAddr> {
+pub fn translate_virt_phys_addr(addr: VirtAddr, root_page_addr: Option<PhysAddr>) -> Option<PhysAddr> {
     if is_in_hhdm(addr) {
         return Some(addr - unsafe { HIGHER_HALF_DIRECT_MAP_ADDR });
     }
 
-    let mut page_addr = root_page_addr;
+    let mut page_addr = root_page_addr?;
     #[allow(clippy::unusual_byte_groupings)] //they are grouped by section masks
     let mut final_mask: u64 = 0b111111111_111111111_111111111_111111111_111111111111;
     let mask = 0b111_111_111_000;
@@ -288,7 +313,9 @@ pub fn translate_virt_phys_addr(addr: VirtAddr, root_page_addr: PhysAddr) -> Opt
 pub fn translate_phys_virt_addr(addr: PhysAddr) -> VirtAddr {
     unsafe {
         debug_assert!(MEM_INITIALIZED);
-        addr + HIGHER_HALF_DIRECT_MAP_ADDR
+        let res = addr + HIGHER_HALF_DIRECT_MAP_ADDR;
+        debug_assert!(is_in_hhdm(res));
+        res
     }
 }
 

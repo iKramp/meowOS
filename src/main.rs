@@ -12,7 +12,7 @@ fn main() {
     //general config
     cmd.arg("-debugcon").arg("stdio");
     cmd.arg("-d")
-        .arg("cpu_reset")
+        .arg("cpu_reset,int")
         .arg("-D")
         .arg("./log.txt")
         .arg("-no-reboot")
@@ -20,7 +20,7 @@ fn main() {
 
     //cpu
     cmd.arg("-machine").arg("q35");
-    // cmd.arg("-cpu").arg("Skylake-Client");
+    // cmd.arg("-cpu").arg("Skylake-Client,+invtsc");
     cmd.arg("-cpu").arg("host,invtsc");
     cmd.arg("-enable-kvm");
     cmd.arg("-smp").arg(cores.to_string());

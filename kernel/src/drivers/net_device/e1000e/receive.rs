@@ -1,9 +1,6 @@
 use crate::{
     drivers::net_device::e1000e::{E1000eDevice, registers::MRQC},
-    memory::{
-        paging::{self, PageTree},
-        physical_allocator,
-    },
+    memory::{self, physical_allocator},
     net::{self, MacAddress, RawNetDataChunk},
     rand,
 };
@@ -118,19 +115,11 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
     let queue_size_bytes = RX_DESC_COUNT * core::mem::size_of::<ReceiveDescriptor>();
     let queue_size_pages = queue_size_bytes.div_ceil(4096);
 
-    let rx_queue_virt = paging::PageTree::current().allocate_contigious(queue_size_pages as u64, None, false);
+    let rx_queue_virt = memory::kernel_map_contiguous(None, queue_size_pages as u64);
     let rx_queue: &mut [UnsafeCell<ReceiveDescriptor>; RX_DESC_COUNT] =
         unsafe { &mut *(rx_queue_virt.0 as *mut [UnsafeCell<ReceiveDescriptor>; RX_DESC_COUNT]) };
 
-    let mut page_tree = PageTree::current();
-    for page in 0..queue_size_pages {
-        let page_virt = rx_queue_virt + 4096 * page as u64;
-        let page = page_tree.get_page_table_entry_mut(page_virt).expect("was just allocated");
-        page.set_pat(paging::LiminePat::UC);
-    }
-
-    let rx_queue_phys =
-        translate_virt_phys_addr(rx_queue_virt, PageTree::get_level4_addr()).expect("Failed to translate RX queue address");
+    let rx_queue_phys = translate_virt_phys_addr(rx_queue_virt, None).expect("Failed to translate RX queue address");
 
     for descriptor in rx_queue[..RX_DESC_COUNT - 1].iter_mut() {
         let mut default_desc = UnsafeCell::new(ReceiveDescriptor::default());

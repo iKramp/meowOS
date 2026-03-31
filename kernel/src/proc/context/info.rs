@@ -1,11 +1,6 @@
 use bitfield::bitfield;
 use core::{fmt::Debug, str::Chars};
-use std::{
-    boxed::Box,
-    mem_utils::VirtAddr,
-    string::{self, String},
-    vec::Vec,
-};
+use std::{boxed::Box, mem_utils::VirtAddr, string::String, vec::Vec};
 
 use crate::proc::MemoryContext;
 
@@ -170,7 +165,7 @@ impl<'a> ContextInfo<'a> {
             }
         }
 
-        let mut chunks = CommandSplitter::new(&cmdline);
+        let mut chunks = CommandSplitter::new(cmdline);
 
         let Some(program_path) = chunks.next() else {
             //empty input

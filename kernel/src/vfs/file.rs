@@ -1,5 +1,3 @@
-use std::sync::async_lock::AsyncSpinlock;
-
 use bitfield::bitfield;
 
 use super::{InodeIdentifier, InodeIdentifierChain};

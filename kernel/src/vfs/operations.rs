@@ -2,7 +2,7 @@ use std::{
     boxed::Box,
     error::ErrorCode,
     lock_w_info,
-    mem_utils::{PhysAddr, translate_phys_virt_addr},
+    mem_utils::PhysAddr,
     println, printlnc,
     string::ToString,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlockGuard},

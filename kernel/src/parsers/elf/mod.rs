@@ -1,7 +1,5 @@
 use std::{boxed::Box, vec::Vec};
 
-use crate::memory;
-
 mod header;
 mod program_header;
 mod section;
@@ -52,16 +50,4 @@ pub fn parse<'a>(data: &'a [u8]) -> Result<ParsedElf<'a>, ParseError> {
     };
 
     Ok(parsed)
-}
-
-pub fn parse_unaligned<'a>(data: &'a [u8]) -> Result<ParsedElf<'a>, ParseError> {
-    let size_pages = data.len().div_ceil(0x1000);
-    let virt_addr = unsafe { memory::PAGE_TREE_ALLOCATOR.allocate_contigious(size_pages as u64, None, false) };
-
-    let source = data.as_ptr();
-    let dest = virt_addr.0 as *mut u8;
-    unsafe { core::ptr::copy(source, dest, data.len()) }
-
-    let data = unsafe { core::slice::from_raw_parts(dest, data.len()) };
-    parse(data)
 }

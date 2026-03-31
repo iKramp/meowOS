@@ -1,4 +1,4 @@
-use crate::{memory::paging::PageTree, println};
+use crate::println;
 use kernel_test::{kernel_test, kernel_test_mod};
 use std::mem_utils;
 kernel_test_mod!(crate::tests::memory_utils);

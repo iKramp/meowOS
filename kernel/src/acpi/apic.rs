@@ -1,6 +1,6 @@
 #![allow(clippy::unusual_byte_groupings, static_mut_refs)]
 
-use crate::interrupts::disable_pic_completely;
+use crate::{interrupts::disable_pic_completely, memory};
 use core::mem::MaybeUninit;
 use std::mem_utils::PhysAddr;
 
@@ -13,7 +13,7 @@ use crate::{
         handlers::*,
         idt::{Entry, IDT},
     },
-    memory::paging::LiminePat,
+    memory::LiminePat,
     println,
 };
 
@@ -109,24 +109,16 @@ pub fn enable_apic(platform_info: &super::platform_info::PlatformInfo, processor
 
 fn map_lapic_registers(lapic_address: PhysAddr) {
     unsafe {
-        let lapic_virt_addr = crate::memory::PAGE_TREE_ALLOCATOR.allocate(Some(lapic_address), false);
-        let apic_registers_page_entry = crate::memory::PAGE_TREE_ALLOCATOR
-            .get_page_table_entry_mut(lapic_virt_addr)
-            .expect("LAPIC page entry must exist after allocation");
-        apic_registers_page_entry.set_pat(LiminePat::UC);
-        let lapic_ref = &mut *(lapic_virt_addr.0 as *mut LapicRegisters);
+        let (virt_addr, entry) = memory::kernel_manual_map(lapic_address, 1, None);
+        entry.set_pat(LiminePat::UC, virt_addr);
+
+        let lapic_ref = &mut *(virt_addr.0 as *mut LapicRegisters);
         LAPIC_REGISTERS = MaybeUninit::new(LapicRegistersPtr::from_mut(lapic_ref));
 
         println!(
             "Mapping LAPIC registers. Phys: {:016X}, Virt: {:016X}",
-            lapic_address.0, lapic_virt_addr.0
+            lapic_address.0, virt_addr.0
         );
-
-        core::arch::asm!(
-            "mov rax, cr3",
-            "mov cr3, rax",
-            out("rax") _
-        ); //clear the TLB
     }
 }
 

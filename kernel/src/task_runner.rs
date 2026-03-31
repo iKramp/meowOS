@@ -13,7 +13,7 @@ use std::{
 
 use crate::{
     acpi::cpu_locals::CpuLocals,
-    memory::paging,
+    memory,
     proc::{self, Pid, ProcessData, switch_to_generic_mem_tree},
 };
 
@@ -265,8 +265,8 @@ fn process_single_task(mut task: AsyncTaskHolder) {
 
 fn switch_mem_tree<'a>(old_proc: &mut Option<&'a Arc<ProcessData>>, new_proc: Option<&'a Arc<ProcessData>>) {
     if let Some(new) = new_proc {
-        let addr = new.get().page_tree().root();
-        paging::PageTree::set_level4_addr(addr);
+        let addr = new.get().page_tree();
+        memory::set_cr3(addr);
     } else {
         proc::switch_to_generic_mem_tree();
     }

@@ -1,6 +1,6 @@
 use std::{mem_utils::VirtAddr, println, printlnc};
 
-use crate::{acpi::cpu_locals::PageFaultHandleMode, interrupts::InterruptProcessorState, memory::paging::PageTree};
+use crate::{acpi::cpu_locals::PageFaultHandleMode, interrupts::InterruptProcessorState, memory};
 
 #[derive(Debug)]
 #[allow(dead_code)] //not actually dead, is used in println
@@ -58,9 +58,8 @@ fn fatal_page_fault(proc_data: &InterruptProcessorState, page_fault_addr: u64) -
         proc_data,
         proc_data.interrupt_frame.rip,
     );
-    let mut page_tree = PageTree::new(PageTree::get_level4_addr());
-    page_tree
-        .get_page_table_entry_mut(VirtAddr(page_fault_addr & 0xFFFF_FFFF_FFFF_F000))
+
+    memory::get_page_table_entry(VirtAddr(page_fault_addr & 0xFFFF_FFFF_FFFF_F000), None)
         .map(|entry| {
             println!(level:error,
                 "Page fault at {:#X?} with entry: {:#X?}",

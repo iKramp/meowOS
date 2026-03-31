@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::drivers::{
     block_device::disk::{BlockDevice, Partition},
-    filesystem::{rfs::RfsFactory, rfs2::Rfs2Factory},
+    filesystem::rfs2::Rfs2Factory,
 };
 
 mod adapters;
@@ -91,8 +91,6 @@ impl Vfs {
 
 pub fn init() {
     let mut vfs = lock_w_info!(VFS);
-    vfs.filesystem_driver_factories
-        .insert(RfsFactory::UUID, Arc::new(RfsFactory {}));
     vfs.filesystem_driver_factories
         .insert(DtmpfsFactory::UUID, Arc::new(DtmpfsFactory {}));
     vfs.filesystem_driver_factories

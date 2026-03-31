@@ -3,7 +3,7 @@ use std::println;
 use crate::{
     acpi::cpu_locals::PageFaultHandleMode,
     interrupts::{InterruptProcessorState, disable_interrupts},
-    memory::paging,
+    memory,
 };
 
 use super::{ProcessData, process_data::CpuStateType, syscall::SyscallCpuState};
@@ -27,7 +27,7 @@ pub(super) fn dispatch(new_proc: &ProcessData) -> ! {
     //syscall.rs
 
     let new_page_tree = new_proc.page_tree();
-    paging::PageTree::set_level4_addr(new_page_tree.root());
+    memory::set_cr3(new_page_tree);
     let mut locals = crate::acpi::cpu_locals::CpuLocals::get_mut();
     disable_interrupts();
     let cpu_state = new_proc.take_cpu_state();

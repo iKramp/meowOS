@@ -115,17 +115,6 @@ pub fn allocate_contiguius_low(n_pages: u64) -> PhysAddr {
     lock_w_info!(BUDDY_ALLOCATOR).allocate_contiguius_low(n_pages)
 }
 
-///# Safety
-///addr must be a page aligned physical frame address
-pub unsafe fn mark_addr(addr: PhysAddr, allocated: bool) {
-    let allocator = lock_w_info!(BUDDY_ALLOCATOR);
-    if (addr.0 >> 12) >= allocator.n_pages {
-        //we're dealing with mmio
-        return;
-    }
-    allocator.mark_addr(addr, allocated)
-}
-
 impl BuddyAllocator {
     fn is_frame_allocated(&self, addr: PhysAddr) -> bool {
         #[cfg(debug_assertions)]

@@ -126,7 +126,7 @@ pub(in crate::net) fn call_hooks(packet: &mut Acow<NetPacket>, stage: HookStage)
         HookResult::Nothing => HookFilter::Continue,
         HookResult::LayerModified => {
             todo!("fix layer modification");
-            HookFilter::Continue
+            // HookFilter::Continue
         }
         HookResult::Drop => return HookFilter::Drop,
     };

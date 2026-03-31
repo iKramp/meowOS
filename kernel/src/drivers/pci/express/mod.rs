@@ -16,7 +16,7 @@ use crate::{
             express_device::PcieDevice,
         },
     },
-    memory::{PAGE_TREE_ALLOCATOR, paging::LiminePat},
+    memory,
 };
 
 mod configuration_space;
@@ -120,13 +120,8 @@ fn is_pcie(device: &mut PcieDevice) -> bool {
 }
 
 fn map_config_space(phys_addr: PhysAddr) -> VirtAddr {
-    let pci_dev_virt = unsafe { PAGE_TREE_ALLOCATOR.allocate(Some(phys_addr), false) };
-    let page_entry = unsafe {
-        PAGE_TREE_ALLOCATOR
-            .get_page_table_entry_mut(pci_dev_virt)
-            .expect("just allocated")
-    };
-    page_entry.set_pat(LiminePat::UC);
+    let (pci_dev_virt, entry) = unsafe { memory::kernel_manual_map(phys_addr, 1, None) };
+    entry.set_pat(memory::LiminePat::UC, pci_dev_virt);
 
     pci_dev_virt
 }

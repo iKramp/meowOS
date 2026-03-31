@@ -7,9 +7,7 @@ use crate::{
 };
 #[allow(unused_imports)] //they are used in macros
 use core::arch::asm;
-use core::ops::DerefMut;
 use std::{
-    lock_w_info,
     mem_utils::{VirtAddr, get_at_virtual_addr},
     println, printlnc,
 };

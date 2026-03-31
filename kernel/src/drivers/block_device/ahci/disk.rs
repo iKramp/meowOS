@@ -24,7 +24,7 @@ use crate::{
         },
         pci::{self, LegacyPciDriver},
     },
-    memory::{PAGE_TREE_ALLOCATOR, paging::LiminePat, physical_allocator},
+    memory::{self, physical_allocator},
     task_runner::{self, block_task},
 };
 
@@ -323,28 +323,16 @@ impl VirtualPort {
         self.set_property(12, (fis_base.0 >> 32) as u32);
         drop(lock);
 
-        let clb_virt = unsafe { PAGE_TREE_ALLOCATOR.allocate(Some(cmd_list_base), false) };
+        let clb_virt = memory::kernel_map(Some(cmd_list_base));
+
         unsafe { memset_virtual_addr(clb_virt, 0, 0x1000) };
         let fis_virt = if !FIS_SWITCHING {
             clb_virt + 0x400
         } else {
-            let temp = unsafe { PAGE_TREE_ALLOCATOR.allocate(Some(fis_base), false) };
-            unsafe { memset_virtual_addr(temp, 0, 0x1000) };
-            temp
+            let tmp_virt = memory::kernel_map(Some(fis_base));
+            unsafe { memset_virtual_addr(tmp_virt, 0, 0x1000) };
+            tmp_virt
         };
-
-        unsafe {
-            PAGE_TREE_ALLOCATOR
-                .get_page_table_entry_mut(clb_virt)
-                .expect("page entry must exist after allocation")
-                .set_pat(LiminePat::UC);
-            if FIS_SWITCHING {
-                PAGE_TREE_ALLOCATOR
-                    .get_page_table_entry_mut(fis_virt)
-                    .expect("page entry must exist after allocation")
-                    .set_pat(LiminePat::UC);
-            }
-        }
 
         self.command_list = clb_virt;
         self.fis = fis_virt;
@@ -505,11 +493,7 @@ impl VirtualPort {
             let cmd_header_ptr = (self.command_list.0 as *mut CmdHeader).add(index as usize * 4);
             cmd_header_ptr.write_volatile(cmd_header);
 
-            let cmd_table_virt = PAGE_TREE_ALLOCATOR.allocate(Some(cmd_table_page), false);
-            PAGE_TREE_ALLOCATOR
-                .get_page_table_entry_mut(cmd_table_virt)
-                .expect("page entry must exist after allocation")
-                .set_pat(LiminePat::UC);
+            let cmd_table_virt = memory::kernel_map(Some(cmd_table_page));
             let cmd_table_raw = cmd_table_virt.0 as *mut u8;
             for (i, byte) in cfis.iter().enumerate() {
                 cmd_table_raw.add(i).write_volatile(*byte);
@@ -523,8 +507,6 @@ impl VirtualPort {
                 prdt_entry.SetDBC(prdt.count as u128 - 1);
                 prdt_entry_ptr.write_volatile(PrdtEntry(prdt_entry.0));
             }
-
-            PAGE_TREE_ALLOCATOR.unmap(cmd_table_virt);
         }
 
         let cmd_issue = 1 << index;
@@ -540,7 +522,7 @@ impl VirtualPort {
             let table_lower = cmd_header.add(2).read_volatile();
             let table_upper = cmd_header.add(3).read_volatile();
             let table = (table_upper as u64) << 32 | table_lower as u64;
-            physical_allocator::mark_addr(PhysAddr(table), false);
+            physical_allocator::deallocate_frame(PhysAddr(table));
         }
         //potentially anything else
     }

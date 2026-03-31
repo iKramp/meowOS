@@ -1,7 +1,7 @@
 use std::{
     boxed::Box,
     lock_w_info,
-    mem_utils::{PhysAddr, get_at_virtual_addr, translate_virt_phys_addr},
+    mem_utils::{PhysAddr, get_at_physical_addr, translate_phys_virt_addr},
     println,
     string::{String, ToString},
     vec::Vec,
@@ -9,15 +9,7 @@ use std::{
 
 use uuid::Uuid;
 
-use crate::{
-    drivers::filesystem::rfs::RfsFactory,
-    memory::{
-        PAGE_TREE_ALLOCATOR,
-        paging::{LiminePat, PageTree},
-        physical_allocator,
-    },
-    vfs::VFS,
-};
+use crate::{memory::physical_allocator, vfs::VFS};
 
 use super::block_device::disk::{BlockDevice, Partition, PartitionSchemeDriver};
 
@@ -28,15 +20,9 @@ impl PartitionSchemeDriver for GPTDriver {
     async fn partitions(&self, disk: &dyn BlockDevice) -> Vec<(Uuid, Partition)> {
         println!("GPT partitions");
         let first_lba = physical_allocator::allocate_frame();
-        let first_lba_binding = unsafe { PAGE_TREE_ALLOCATOR.allocate(Some(first_lba), false) };
-        unsafe {
-            PAGE_TREE_ALLOCATOR
-                .get_page_table_entry_mut(first_lba_binding)
-                .expect("page entry must exist after allocation")
-                .set_pat(LiminePat::UC);
-        }
+
         disk.read(1, 1, &[first_lba]).await;
-        let header = unsafe { get_at_virtual_addr::<GptHeader>(first_lba_binding) };
+        let header = unsafe { get_at_physical_addr::<GptHeader>(first_lba) };
 
         assert_eq!(header.signature, *b"EFI PART", "Not a GPT disk");
 
@@ -45,20 +31,12 @@ impl PartitionSchemeDriver for GPTDriver {
         let entry_size = header.size_partition_entry as usize;
         let entry_num_lbas = (num_entries * entry_size).div_ceil(512);
         let entry_num_pages = (entry_num_lbas as u64).div_ceil(8);
-        let buffer = unsafe { PAGE_TREE_ALLOCATOR.allocate_contigious(entry_num_pages, None, false) };
-        let page_tree_root = PageTree::get_level4_addr();
-        let physical_addresses: Vec<PhysAddr> = (0..entry_num_pages)
-            .inspect(|i| unsafe {
-                PAGE_TREE_ALLOCATOR
-                    .get_page_table_entry_mut(buffer + (*i * 4096))
-                    .expect("page entry must exist after allocation")
-                    .set_pat(LiminePat::UC)
-            })
-            .map(|i| {
-                translate_virt_phys_addr(buffer + (i * 4096), page_tree_root)
-                    .expect("must translate to physical addr after allocation")
-            })
-            .collect();
+        let phys_addr = physical_allocator::allocate_contiguius_high(entry_num_pages);
+        let physical_addresses = (0..entry_num_pages)
+            .map(|i| phys_addr + (i * 4096))
+            .collect::<Vec<PhysAddr>>();
+        let virt_addr = translate_phys_virt_addr(phys_addr);
+
         disk.read(start_entries, entry_num_lbas, &physical_addresses).await;
 
         let mut partitions = Vec::new();
@@ -67,7 +45,7 @@ impl PartitionSchemeDriver for GPTDriver {
 
         for i in 0..num_entries {
             unsafe {
-                let ptr = (buffer.0 as *mut u8).add(i * entry_size);
+                let ptr = (virt_addr.0 as *mut u8).add(i * entry_size);
                 let entry_ptr = ptr as *mut GptEntry;
                 let entry = entry_ptr.read_volatile();
                 if entry.partition_type_guid == [0; 16] {
@@ -130,10 +108,10 @@ impl PartitionSchemeDriver for GPTDriver {
 
         unsafe {
             //free memory
-            for i in 0..(entry_num_lbas / 8) {
-                PAGE_TREE_ALLOCATOR.deallocate(buffer + (i as u64 * 4096));
+            for phys_addr in physical_addresses {
+                physical_allocator::deallocate_frame(phys_addr);
             }
-            PAGE_TREE_ALLOCATOR.deallocate(first_lba_binding);
+            physical_allocator::deallocate_frame(first_lba);
         }
 
         println!("Partitions: {:#?}", partitions);
@@ -142,17 +120,10 @@ impl PartitionSchemeDriver for GPTDriver {
 
     async fn guid(&self, disk: &dyn BlockDevice) -> Uuid {
         let first_lba = physical_allocator::allocate_frame();
-        let first_lba_binding = unsafe { PAGE_TREE_ALLOCATOR.allocate(Some(first_lba), false) };
-        unsafe {
-            PAGE_TREE_ALLOCATOR
-                .get_page_table_entry_mut(first_lba_binding)
-                .expect("page entry must exist after allocation")
-                .set_pat(LiminePat::UC);
-        }
         disk.read(1, 1, &[first_lba]).await;
-        let header = unsafe { get_at_virtual_addr::<GptHeader>(first_lba_binding) };
+        let header = unsafe { get_at_physical_addr::<GptHeader>(first_lba) };
         let guid = header.disk_guid;
-        unsafe { PAGE_TREE_ALLOCATOR.deallocate(first_lba_binding) };
+        unsafe { physical_allocator::deallocate_frame(first_lba) };
         Uuid::from_fields(
             u32::from_le_bytes(guid[0..4].try_into().expect("slice with incorrect length")),
             u16::from_le_bytes(guid[4..6].try_into().expect("slice with incorrect length")),

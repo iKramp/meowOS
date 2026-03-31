@@ -25,7 +25,7 @@ use crate::{
         },
         pci::{self, BarTrait, NetworkController, PciClass, PcieDriver},
     },
-    memory::paging::PageTree,
+    memory,
     net::{self, MacAddress, NIC, NicIdentifier, RawNetDataChunk, deregister_nic},
 };
 
@@ -247,20 +247,14 @@ impl Drop for E1000eDevice {
             let queue_size_bytes = RX_DESC_COUNT * core::mem::size_of::<ReceiveDescriptor>();
             let queue_size_pages = queue_size_bytes.div_ceil(4096);
 
-            let mut page_tree = PageTree::current();
-            for page in 0..queue_size_pages {
-                page_tree.unmap(queue.1.0 + 4096 * page as u64);
-            }
+            memory::kernel_free_contiguous(queue.1.0, queue_size_pages as u64);
         }
 
         if let Some(queue) = &self.transmit_queue {
             let queue_size_bytes = TX_DESC_COUNT * core::mem::size_of::<TransmitDescriptor>();
             let queue_size_pages = queue_size_bytes.div_ceil(4096);
 
-            let mut page_tree = PageTree::current();
-            for page in 0..queue_size_pages {
-                page_tree.unmap(queue.1.0 + 4096 * page as u64);
-            }
+            memory::kernel_free_contiguous(queue.1.0, queue_size_pages as u64);
         }
     }
 }

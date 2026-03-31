@@ -9,11 +9,8 @@ use std::{
 
 use crate::{
     drivers::net_device::e1000e::E1000eDevice,
-    memory::{
-        paging::{self, PageTree},
-        physical_allocator,
-    },
-    net::{self, RawNetDataChunk},
+    memory::{self, physical_allocator},
+    net::RawNetDataChunk,
 };
 
 #[derive(Debug)]
@@ -57,21 +54,14 @@ pub(super) fn init_transmit(dev: &mut E1000eDevice) {
     );
 
     let queue_size_bytes = TX_DESC_COUNT * std::mem::size_of::<TransmitDescriptor>();
-    let queue_size_pages = queue_size_bytes.div_ceil(4096);
+    let queue_size_pages = queue_size_bytes.div_ceil(4096) as u64;
 
-    let tx_queue_virt = paging::PageTree::current().allocate_contigious(queue_size_pages as u64, None, false);
+    // let tx_queue_virt = paging::PageTree::current().allocate_contigious(queue_size_pages as u64, None, false);
+    let tx_queue_virt = memory::kernel_map_contiguous(None, queue_size_pages);
     let tx_queue: &mut [UnsafeCell<TransmitDescriptor>; TX_DESC_COUNT] =
         unsafe { &mut *(tx_queue_virt.0 as *mut [UnsafeCell<TransmitDescriptor>; TX_DESC_COUNT]) };
 
-    let mut page_tree = paging::PageTree::current();
-    for i in 0..queue_size_pages {
-        let page_virt = tx_queue_virt + (i * 4096) as u64;
-        let page = page_tree.get_page_table_entry_mut(page_virt).expect("was just allocated");
-        page.set_pat(paging::LiminePat::UC);
-    }
-
-    let tx_queue_phys =
-        translate_virt_phys_addr(tx_queue_virt, PageTree::get_level4_addr()).expect("Failed to translate TX queue address");
+    let tx_queue_phys = translate_virt_phys_addr(tx_queue_virt, None).expect("Failed to translate TX queue address");
 
     for descriptor in tx_queue.iter_mut() {
         let phys_addr = physical_allocator::allocate_frame();

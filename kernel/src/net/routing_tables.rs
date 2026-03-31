@@ -70,7 +70,8 @@ static IPV4_ROUTING_TABLE: RWSpinlock<(Vec<Ipv4Network>, Vec<Ipv4Route>)> = RWSp
 
 static MAC_BRIDGE_DOMAINS: RWSpinlock<Vec<MacBridgeDomain>> = RWSpinlock::new(Vec::new());
 
-static NIC_INFO: RWSpinlock<Vec<(NicIdentifier, (Vec<protocols::NetAddress>, NicType))>> = RWSpinlock::new(Vec::new());
+type NicInfo = (Vec<protocols::NetAddress>, NicType);
+static NIC_INFO: RWSpinlock<Vec<(NicIdentifier, NicInfo)>> = RWSpinlock::new(Vec::new());
 
 static FIRST_IP_ADDED: AtomicBool = AtomicBool::new(false);
 

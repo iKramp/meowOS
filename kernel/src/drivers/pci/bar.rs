@@ -4,7 +4,7 @@ use std::{
     vec::Vec,
 };
 
-use crate::memory::{PAGE_TREE_ALLOCATOR, paging::LiminePat};
+use crate::memory;
 
 pub trait BarTrait {
     fn write_to_bar<T: Sized>(&self, data: &T, offset: u64);
@@ -148,26 +148,23 @@ impl Drop for MemoryBar {
             return;
         };
         let pages = self.size.div_ceil(0x1000);
-        for i in 0..pages {
-            unsafe { PAGE_TREE_ALLOCATOR.unmap(addr + i * 0x1000) };
-        }
+        unsafe { memory::kernel_manual_unmap(addr, pages, None) };
     }
 }
 
 impl MemoryBar {
     fn map(&self, phys_addr: PhysAddr, prefetchable: bool) -> VirtAddr {
         let pages = self.size.div_ceil(0x1000);
-        let virt_addr = unsafe { PAGE_TREE_ALLOCATOR.allocate_contigious(pages, Some(phys_addr), false) };
+
+        let page_tree_root = memory::current_root();
+
+        let (virt_addr, _entry) = unsafe { memory::kernel_manual_map(phys_addr, pages, Some(page_tree_root)) };
         for i in 0..pages {
-            unsafe {
-                let page_entry = PAGE_TREE_ALLOCATOR
-                    .get_page_table_entry_mut(virt_addr + i * 0x1000)
-                    .expect("just allocated");
-                if prefetchable {
-                    page_entry.set_pat(LiminePat::WT);
-                } else {
-                    page_entry.set_pat(LiminePat::UC);
-                }
+            let page_entry = memory::get_page_table_entry(virt_addr + i * 0x1000, Some(page_tree_root)).expect("just allocated");
+            if prefetchable {
+                page_entry.set_pat(memory::LiminePat::WT, virt_addr + i * 0x1000);
+            } else {
+                page_entry.set_pat(memory::LiminePat::UC, virt_addr + i * 0x1000);
             }
         }
         virt_addr

@@ -1,11 +1,10 @@
 use std::boxed::Box;
 use std::error::ErrorCode;
+use std::lock_w_info;
 use std::sync::no_int_spinlock::NoIntSpinlock;
-use std::{Print, lock_w_info};
 
 use crate::tty;
 use crate::vfs::{DeviceId, Inode, InodeIndex, InodeType};
-use crate::vga::vga_text;
 
 use super::{DirEntry, VfsAdapterTrait};
 

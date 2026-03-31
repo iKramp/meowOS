@@ -5,8 +5,7 @@ use crate::{
         idt::{IDT_POINTER, TablePointer},
     },
     memory::{
-        PAGE_TREE_ALLOCATOR,
-        paging::PageTree,
+        self,
         stack::{KERNEL_STACK_SIZE_PAGES, prepare_kernel_stack},
     },
     msr::{get_msr, get_mtrr_cap, get_mtrr_def_type},
@@ -36,7 +35,6 @@ pub fn wake_cpus(platform_info: &PlatformInfo) {
         let comm_lock = destination.add(56);
         for cpu in platform_info.application_processors.iter().enumerate() {
             let ap_stack_top = prepare_kernel_stack(KERNEL_STACK_SIZE_PAGES);
-            PAGE_TREE_ALLOCATOR.print_entries(VirtAddr(0xfffffffffff92fe8));
             (destination.add(32) as *mut u64).write_volatile(ap_stack_top.0);
 
             let lapic_registers = LAPIC_REGISTERS.assume_init_mut();
@@ -97,11 +95,10 @@ fn copy_trampoline() {
         );
         assert!(cr3 < 2_u64.pow(32));
         let gdt_ptr = crate::interrupts::STATIC_GDT_PTR;
-        let page_tree_root = PageTree::get_level4_addr();
         let gdt_ptr = TablePointer {
             limit: gdt_ptr.limit,
-            base: std::mem_utils::translate_virt_phys_addr(VirtAddr(gdt_ptr.base), page_tree_root)
-                .expect("page of a static is mapped")
+            base: std::mem_utils::translate_virt_phys_addr(VirtAddr(gdt_ptr.base), Some(memory::current_root()))
+                .expect("page of a static should be mapped")
                 .0,
         };
         let wait_loop_ptr = super::ap_startup::ap_started_wait_loop as *const () as u64;

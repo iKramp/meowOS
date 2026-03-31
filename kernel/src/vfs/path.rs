@@ -1,4 +1,4 @@
-use std::{boxed::Box, string::String, vec::Vec};
+use std::{boxed::Box, vec::Vec};
 
 ///A wrapper type for path, that have been resolved to a list of path components
 ///That is, the path starts from root and does not contain any "." or ".." components
@@ -76,17 +76,17 @@ impl ResolvedPathBorrowed<'_> {
     pub fn inner(&self) -> &[Box<str>] {
         self.0
     }
+}
 
-    pub fn to_string(&self) -> String {
-        let mut result = String::new();
+impl core::fmt::Display for ResolvedPathBorrowed<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         for component in self.0.iter() {
-            result.push('/');
-            result.push_str(component);
+            write!(f, "/{}", component)?;
         }
-        if result.is_empty() {
-            result.push('/');
+        if self.0.is_empty() {
+            write!(f, "/")?;
         }
-        result
+        Ok(())
     }
 }
 
