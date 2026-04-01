@@ -3,36 +3,34 @@ use std::{
     collections::btree_map::BTreeMap,
     lock_w_info,
     mem_utils::PhysAddr,
-    sync::{
-        arc::Arc,
-        no_int_spinlock::{NoIntSpinlock, NoIntSpinlockGuard},
-    },
+    sync::no_int_spinlock::{NoIntSpinlock, NoIntSpinlockGuard},
 };
 
 use crate::{
     interrupts::InterruptProcessorState,
+    proc::ProcNamespaces,
     vfs::{
         InodeIdentifier,
         file::{FileDescriptor, FileHandle},
     },
 };
 
-use super::{MemoryContext, Pid, syscall::SyscallCpuState};
+use super::{Pid, syscall::SyscallCpuState};
 
 ///Describes the process metadata like memory mapping, open files, etc.
 #[derive(Debug)]
 pub struct ProcessData {
     pid: Pid,
     is_32_bit: bool,
-    cmdline: Box<str>,
     page_tree_root: PhysAddr,
+    cmdline: Box<str>,
     internal: NoIntSpinlock<ProcessDataMutable>,
 }
 
 impl ProcessData {
     pub fn cleanup(&self) {
         let mut internal = lock_w_info!(self.internal);
-        internal.memory_context = Arc::new(MemoryContext::default());
+        internal.namespaces = ProcNamespaces::default();
         internal.file_handles.clear();
     }
 
@@ -48,7 +46,7 @@ pub struct ProcessDataMutable {
     return_status: Option<u64>,
     file_handles: BTreeMap<u64, FileHandle>,
     file_handle_index: FileDescriptor,
-    memory_context: Arc<MemoryContext>,
+    namespaces: ProcNamespaces,
 }
 
 #[derive(Debug)]
@@ -64,24 +62,19 @@ pub enum StackCpuStateData<'a> {
 }
 
 impl ProcessData {
-    pub fn new(
-        pid: Pid,
-        is_32_bit: bool,
-        cmdline: Box<str>,
-        memory_context: Arc<MemoryContext>,
-        cpu_state: CpuStateType,
-    ) -> Self {
+    pub fn new(pid: Pid, is_32_bit: bool, cmdline: Box<str>, cpu_state: CpuStateType, namespaces: ProcNamespaces) -> Self {
+        let root = lock_w_info!(namespaces.memory_namespace).page_tree_root();
         Self {
             pid,
             is_32_bit,
+            page_tree_root: root,
             cmdline,
-            page_tree_root: memory_context.page_tree_root,
             internal: NoIntSpinlock::new(ProcessDataMutable {
                 return_status: None,
-                memory_context,
                 cpu_state,
                 file_handles: BTreeMap::new(),
                 file_handle_index: 0,
+                namespaces,
             }),
         }
     }

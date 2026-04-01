@@ -12,7 +12,7 @@ use crate::{
     proc::namespaces::ProcNamespace,
 };
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(in crate::proc) enum MemoryRangeType {
     Stack,
     Code,
@@ -22,11 +22,11 @@ pub(in crate::proc) enum MemoryRangeType {
 
 #[derive(Debug)]
 pub(in crate::proc) struct OwnedVirtualMemoryRange {
-    shared_range: Arc<VirtualMemoryRange>,
-    name: Box<str>,
-    range_type: MemoryRangeType,
-    map_address: VirtAddr,
-    range_id: u32,
+    pub shared_range: Arc<VirtualMemoryRange>,
+    pub name: Box<str>,
+    pub range_type: MemoryRangeType,
+    pub map_address: VirtAddr,
+    pub range_id: u32,
 }
 
 #[derive(Debug)]
@@ -165,6 +165,12 @@ impl MemoryNamespace {
 
     pub fn regions(&self) -> &Vec<OwnedVirtualMemoryRange> {
         &self.memory_ranges
+    }
+}
+
+impl Default for MemoryNamespace {
+    fn default() -> Self {
+        Self::new(PhysAddr(0))
     }
 }
 

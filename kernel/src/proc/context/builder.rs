@@ -1,7 +1,9 @@
 use crate::interrupts::InterruptProcessorState;
 use crate::memory::VirtualMemoryRange;
 use crate::memory::VirtualMemoryRangePermissions;
+use crate::proc::MemoryRangeType;
 use crate::proc::PROCESS_ID_COUNTER;
+use crate::proc::ProcNamespaces;
 use crate::proc::ProcessData;
 use crate::proc::SCHEDULER;
 use crate::proc::namespaces::MemoryNamespace;
@@ -10,6 +12,7 @@ use std::error::ErrorCode;
 use std::lock_w_info;
 use std::string::ToString;
 use std::sync::arc::Arc;
+use std::sync::no_int_spinlock::NoIntSpinlock;
 use std::{
     mem_utils::{VirtAddr, memset_physical_addr},
     println,
@@ -31,22 +34,22 @@ pub fn create_process(context_info: &ContextInfo) -> Result<Pid, ErrorCode> {
     let cmdline = context_info.cmdline().to_string().into_boxed_str();
     let rip = context_info.entry_point().0;
 
-    let memory_namespace = build_mem_context_for_new_proc(context_info)?;
+    let memory_namespace = build_mem_namespace_for_new_proc(context_info)?;
 
     let stack = memory_namespace
         .regions()
         .iter()
-        .find(|region| region)
+        .find(|region| region.range_type == MemoryRangeType::Stack)
         .expect("stack must exist for each proc");
-    let rsp = stack.base.0 + (stack.size_pages as u64 * 0x1000) - 16; //-16 just in case (ret val and other things are 0)
+    let rsp = stack.shared_range.reserved_range(stack.map_address).end.0 - 16;
 
     let cpu_state = InterruptProcessorState::new(rip, rsp);
     let process_data = ProcessData::new(
         pid,
         is_32_bit,
         cmdline,
-        Arc::new(memory_namespace),
         CpuStateType::Interrupt(cpu_state),
+        ProcNamespaces::new(Arc::new(NoIntSpinlock::new(memory_namespace))),
     );
 
     let mut scheduler_lock = lock_w_info!(SCHEDULER);
@@ -112,7 +115,7 @@ pub fn build_initialized_memory_namespace(context: &ContextInfo, empty_namespace
     }
 }
 
-pub fn build_mem_context_for_new_proc(context: &ContextInfo) -> Result<MemoryNamespace, ErrorCode> {
+pub fn build_mem_namespace_for_new_proc(context: &ContextInfo) -> Result<MemoryNamespace, ErrorCode> {
     let mut mem_namespace = build_empty_memory_namespace();
 
     let current_root = memory::current_root();
@@ -141,6 +144,10 @@ pub fn add_stack(mem_namespace: &mut MemoryNamespace, stack_size_pages: u8) -> R
     permissions.set_execute(false);
     let mut mem_range = VirtualMemoryRange::create(memory::VirtualMemoryRangeCapacity::_1GB, permissions);
     mem_range.expand_to(stack_size_pages as u64);
+    let stack_highest_addr = mem_range.reserved_range(free_area).end;
+
+    unsafe { *((stack_highest_addr.0 - 0x08) as *mut u64) = 0 };
+    unsafe { *((stack_highest_addr.0 - 0x10) as *mut u64) = 0 };
 
     mem_namespace.add_mem_range(
         Arc::new(mem_range),
@@ -161,8 +168,4 @@ pub fn build_empty_memory_namespace() -> MemoryNamespace {
     memory::copy_higher_half(existing_page_tree_root, new_page_tree_root);
 
     namespace
-}
-
-pub fn tear_down_mem_context(_context: &MemoryContext) {
-    todo!("tear down mem context")
 }
