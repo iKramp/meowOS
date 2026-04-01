@@ -6,10 +6,9 @@ use std::{
     lock_w_info,
     mem_utils::{PhysAddr, VirtAddr},
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
-    vec::Vec,
 };
 
-use crate::{memory, vfs::ResolvedPathBorrowed};
+use crate::{memory, proc::namespaces::*, vfs::ResolvedPathBorrowed};
 
 mod context;
 mod context_switch;
@@ -41,8 +40,7 @@ pub struct Pid(pub u32);
 pub(super) struct MemoryContext {
     initialized: bool,
     is_32_bit: bool,
-    page_tree_root: PhysAddr,
-    owned_memory_regions: Vec<MappedMemoryRegion>,
+    memory_namespace: MemoryNamespace,
     //shared regions here?
 }
 
@@ -51,8 +49,7 @@ impl Default for MemoryContext {
         Self {
             initialized: false,
             is_32_bit: false,
-            page_tree_root: PhysAddr(0),
-            owned_memory_regions: Vec::new(),
+            memory_namespace: MemoryNamespace::new(PhysAddr(0)),
         }
     }
 }

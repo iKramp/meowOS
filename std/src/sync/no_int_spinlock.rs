@@ -40,7 +40,6 @@ macro_rules! lock_w_info {
 
 impl<T: ?Sized> NoIntSpinlock<T> {
     pub fn lock(&self, location: LockLocationInfo) -> NoIntSpinlockGuard<'_, T> {
-        let info = unsafe { super::lock_info::GET_LOCK_INFO() };
         let prev_rflags: u64;
         unsafe {
             core::arch::asm!(
@@ -56,13 +55,13 @@ impl<T: ?Sized> NoIntSpinlock<T> {
         }
         // Safety:
         // interrupts are disabled, and it is from CPU local
+        let info = unsafe { super::lock_info::GET_LOCK_INFO() };
         info.inc_spinlocks(prev_int_state, location.clone());
         NoIntSpinlockGuard { location, lock: self }
     }
 
     /// only use this in a panic handler
     pub fn force_get_lock(&self) -> NoIntSpinlockGuard<'_, T> {
-        let info = unsafe { super::lock_info::GET_LOCK_INFO() };
         let prev_rflags: u64;
         unsafe {
             core::arch::asm!(
@@ -77,6 +76,7 @@ impl<T: ?Sized> NoIntSpinlock<T> {
 
         // Safety:
         // interrupts are disabled, and it is from CPU local
+        let info = unsafe { super::lock_info::GET_LOCK_INFO() };
         info.inc_spinlocks((prev_rflags & (1 << 9)) != 0, location.clone());
         NoIntSpinlockGuard { location, lock: self }
     }

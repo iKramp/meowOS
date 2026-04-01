@@ -1,6 +1,8 @@
+use core::arch::asm;
+
 use alloc::collections::btree_set::BTreeSet;
 
-use crate::mem_utils::get_heap_initialized;
+use crate::{format, mem_utils::get_heap_initialized, println};
 
 static mut GLOBAL_LOCK_INFO: LockInfo = LockInfo::new();
 
@@ -56,8 +58,12 @@ impl LockInfo {
 
     /// returns whether interrupts should be re-enabled
     pub fn dec_spinlocks(&mut self, location: &LockLocationInfo) -> bool {
-        let old_val = self.num_no_int_spinlocks;
-        self.num_no_int_spinlocks = old_val - 1;
+        // let test_ptr = &self.num_no_int_spinlocks as *const _ as *const u8;
+        // byte_to_port(0xe9, unsafe { *(test_ptr) });
+        // byte_to_port(0xe9, unsafe { *(test_ptr.byte_add(1)) });
+        // serial_print_unlocked("mmmmmmmmmmmmmmmmm");
+        //
+        self.num_no_int_spinlocks -= 1;
         #[cfg(debug_assertions)]
         {
             let is_mem_loc = location.0.contains("memory");
@@ -69,7 +75,11 @@ impl LockInfo {
             }
         }
 
-        if old_val == 1 { self.prev_int_state } else { false }
+        if self.num_no_int_spinlocks == 0 {
+            self.prev_int_state
+        } else {
+            false
+        }
     }
 
     pub fn num_locks(&self) -> u16 {
@@ -138,5 +148,17 @@ pub fn set_lock_info_func(f: fn() -> &'static mut LockInfo) {
     assert!(f().num_locks() == 0);
     unsafe {
         GET_LOCK_INFO = f;
+    }
+}
+
+pub fn serial_print_unlocked(str: &str) {
+    for char in str.as_bytes() {
+        byte_to_port(0xe9, *char);
+    }
+}
+
+pub fn byte_to_port(port: u16, byte: u8) {
+    unsafe {
+        asm!("out dx, al", in("dx") port, in("al") byte);
     }
 }

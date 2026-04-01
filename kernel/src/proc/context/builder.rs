@@ -1,11 +1,13 @@
 use crate::interrupts::InterruptProcessorState;
+use crate::memory::VirtualMemoryRange;
+use crate::memory::VirtualMemoryRangePermissions;
 use crate::proc::PROCESS_ID_COUNTER;
 use crate::proc::ProcessData;
 use crate::proc::SCHEDULER;
+use crate::proc::namespaces::MemoryNamespace;
 use crate::proc::process_data::CpuStateType;
 use std::error::ErrorCode;
 use std::lock_w_info;
-use std::mem_utils::PhysAddr;
 use std::string::ToString;
 use std::sync::arc::Arc;
 use std::{
@@ -20,7 +22,7 @@ use crate::{
 
 use super::info::ContextInfo;
 
-const DEFAULT_PROC_STACK_SIZE: usize = 0x4000; // 8KB
+const DEFAULT_PROC_STACK_SIZE: usize = 0x1000; // 1kB initial stack
 
 pub fn create_process(context_info: &ContextInfo) -> Result<Pid, ErrorCode> {
     println!("creating process with context: {:#?}", context_info);
@@ -28,11 +30,13 @@ pub fn create_process(context_info: &ContextInfo) -> Result<Pid, ErrorCode> {
     let is_32_bit = context_info.is_32_bit();
     let cmdline = context_info.cmdline().to_string().into_boxed_str();
     let rip = context_info.entry_point().0;
-    let memory_context = build_mem_context_for_new_proc(context_info)?;
-    let stack = memory_context
-        .owned_memory_regions
+
+    let memory_namespace = build_mem_context_for_new_proc(context_info)?;
+
+    let stack = memory_namespace
+        .regions()
         .iter()
-        .find(|region| (*region.name).eq("[stack]"))
+        .find(|region| region)
         .expect("stack must exist for each proc");
     let rsp = stack.base.0 + (stack.size_pages as u64 * 0x1000) - 16; //-16 just in case (ret val and other things are 0)
 
@@ -41,19 +45,18 @@ pub fn create_process(context_info: &ContextInfo) -> Result<Pid, ErrorCode> {
         pid,
         is_32_bit,
         cmdline,
-        Arc::new(memory_context),
+        Arc::new(memory_namespace),
         CpuStateType::Interrupt(cpu_state),
     );
 
     let mut scheduler_lock = lock_w_info!(SCHEDULER);
     let scheduler = unsafe { scheduler_lock.assume_init_mut() };
     scheduler.accept_new_process(pid, process_data);
+
     Ok(pid)
 }
 
-pub fn build_generic_memory_context(context: &ContextInfo) -> MemoryContext {
-    let memory_tree = build_generic_memory_tree();
-
+pub fn build_initialized_memory_namespace(context: &ContextInfo, empty_namespace: &mut MemoryNamespace) {
     // map memory regions
     for region in context.mem_regions().iter() {
         let start = region.start().0;
@@ -96,7 +99,7 @@ pub fn build_generic_memory_context(context: &ContextInfo) -> MemoryContext {
     MemoryContext {
         initialized: true,
         is_32_bit: context.is_32_bit(),
-        page_tree_root: memory_tree,
+        page_tree_root: memory_namespace,
         owned_memory_regions: context
             .mem_regions()
             .iter()
@@ -109,104 +112,55 @@ pub fn build_generic_memory_context(context: &ContextInfo) -> MemoryContext {
     }
 }
 
-pub fn build_mem_context_for_new_proc(context: &ContextInfo) -> Result<MemoryContext, ErrorCode> {
-    let mut generic_context = build_generic_memory_context(context);
+pub fn build_mem_context_for_new_proc(context: &ContextInfo) -> Result<MemoryNamespace, ErrorCode> {
+    let mut mem_namespace = build_empty_memory_namespace();
+
+    let current_root = memory::current_root();
+    memory::set_cr3(mem_namespace.page_tree_root());
+
+    build_initialized_memory_namespace(context, &mut mem_namespace);
     let stack_size_pages = DEFAULT_PROC_STACK_SIZE.div_ceil(0x1000) as u8; // convert to pages
 
     //add stack
-    if let Err(e) = add_stack(&mut generic_context, stack_size_pages) {
-        tear_down_mem_context(&generic_context);
+    if let Err(e) = add_stack(&mut mem_namespace, stack_size_pages) {
+        memory::set_cr3(current_root);
         return Err(e);
     }
-    Ok(generic_context)
+    memory::set_cr3(current_root);
+    Ok(mem_namespace)
 }
 
-pub fn add_stack(context: &mut MemoryContext, stack_size_pages: u8) -> Result<(), ErrorCode> {
-    let highest_userspace_addr: u64 = if context.is_32_bit {
-        //highest address is 0xFFFF_FFFF, highest quarter is kernel on 32 bit applications
-        //The kernel here will STILL be in higher half of 64(48) bit address space, but maybe
-        //applications assume their address can't be in the highest qurter
-        0xC000_0000
-    } else {
-        //48 bits for addressing, so highest userspace addr is 0x7FFF_FFFF_FFFF
-        0x8000_0000_0000
+pub fn add_stack(mem_namespace: &mut MemoryNamespace, stack_size_pages: u8) -> Result<(), ErrorCode> {
+    let Some(free_area) = mem_namespace.find_hole(memory::VirtualMemoryRangeCapacity::_1GB) else {
+        println!("no free area for stack");
+        return Err(ErrorCode::OutOfMemory);
     };
 
-    let stack_reserve_pages = stack_size_pages as u64 + 1;
-    let stack_search_page = (highest_userspace_addr >> 12) - 1;
+    let mut permissions = VirtualMemoryRangePermissions(0);
+    permissions.set_write(true);
+    permissions.set_execute(false);
+    let mut mem_range = VirtualMemoryRange::create(memory::VirtualMemoryRangeCapacity::_1GB, permissions);
+    mem_range.expand_to(stack_size_pages as u64);
 
-    let mut top_page = 0;
-    '_top_loop: for _top_page in (0..stack_search_page).rev() {
-        for _page in (_top_page - stack_reserve_pages + 1)..=_top_page {
-            todo!("move to new mem api");
-            // if mem_tree.get_page_table_entry_mut(VirtAddr(page << 12)).is_some() {
-            //     //found a page that is already mapped, so we can't use this address
-            //     continue 'top_loop;
-            // }
-        }
-        top_page = _top_page;
-        break;
-    }
-
-    //found a free stack at this address
-    for _page in (top_page - stack_reserve_pages + 2)..=top_page {
-        todo!("move to new mamory api");
-        // match mem_tree.allocate_set_virtual(None, VirtAddr(page << 12)) {
-        //     Ok(_) => {}
-        //     Err(e) => {
-        //         for page in (top_page - stack_reserve_pages + 2)..page {
-        //             // mem_tree.deallocate(VirtAddr(page << 12));
-        //             todo!("move to new memory api");
-        //         }
-        //         return Err(e);
-        //     }
-        // }
-        // let entry = mem_tree
-        //     .get_page_table_entry_mut(VirtAddr(page << 12))
-        //     .expect("page must exist after allocation");
-        // entry.set_writeable(true);
-        // entry.set_no_execute(true);
-        // entry.set_user_accessible(true);
-    }
-    //add a non-accessible page to catch stack overflows
-    let overflow_page = top_page - stack_reserve_pages + 1;
-    println!("allocating stack overflow page at {:#X}", overflow_page << 12);
-    todo!("move to new memory api");
-    // match mem_tree.allocate_set_virtual(None, VirtAddr(overflow_page << 12)) {
-    //     Ok(_) => {}
-    //     Err(e) => {
-    //         for page in (top_page - stack_reserve_pages + 2)..=top_page {
-    //             // mem_tree.deallocate(VirtAddr(page << 12));
-    //             todo!("move to new memory api");
-    //         }
-    //         return Err(e);
-    //     }
-    // }
-    // let entry = mem_tree
-    //     .get_page_table_entry_mut(VirtAddr(overflow_page << 12))
-    //     .expect("page must exist after allocation");
-    // entry.set_writeable(true);
-    // entry.set_no_execute(true);
-    // entry.set_user_accessible(false);
-
-    // let stack = MappedMemoryRegion {
-    //     name: "[stack]".to_string().into_boxed_str(),
-    //     base: VirtAddr(((top_page - stack_size_pages as u64) << 12) + 0x1000),
-    //     size_pages: stack_size_pages as u64,
-    // };
-    // context.owned_memory_regions.push(stack);
-    //
-    // Ok(())
+    mem_namespace.add_mem_range(
+        Arc::new(mem_range),
+        "[stack]".to_string().into_boxed_str(),
+        crate::proc::MemoryRangeType::Stack,
+        free_area,
+    )?;
+    Ok(())
 }
 
-pub fn build_generic_memory_tree() -> PhysAddr {
+pub fn build_empty_memory_namespace() -> MemoryNamespace {
     let new_page_tree_root = memory::physical_allocator::allocate_frame();
     unsafe { memset_physical_addr(new_page_tree_root, 0x0, 0x1000) };
+
+    let namespace = MemoryNamespace::new(new_page_tree_root);
 
     let existing_page_tree_root = memory::current_root();
     memory::copy_higher_half(existing_page_tree_root, new_page_tree_root);
 
-    new_page_tree_root
+    namespace
 }
 
 pub fn tear_down_mem_context(_context: &MemoryContext) {

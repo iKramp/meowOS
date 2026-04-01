@@ -32,18 +32,25 @@ impl PageTable {
             let self_obj = unsafe { get_at_physical_addr::<Self>(self_phys) };
 
             for entry in self_obj.entries {
+                if !entry.present() {
+                    continue;
+                }
                 let phys_addr = entry.address();
 
                 if level == 1 {
-                    unsafe { physical_allocator::deallocate_frame(phys_addr) };
+                    if dealloc_phys {
+                        unsafe { physical_allocator::deallocate_frame(phys_addr) };
+                    }
                     continue;
                 }
 
-                if entry.huge_page() && dealloc_phys {
-                    let size_pages = 512_u64.pow(level as u32 - 1);
-                    for i in 0..size_pages {
-                        let addr_to_dealloc = phys_addr + i * 4096;
-                        unsafe { physical_allocator::deallocate_frame(addr_to_dealloc) };
+                if entry.huge_page() {
+                    if dealloc_phys {
+                        let size_pages = 512_u64.pow(level as u32 - 1);
+                        for i in 0..size_pages {
+                            let addr_to_dealloc = phys_addr + i * 4096;
+                            unsafe { physical_allocator::deallocate_frame(addr_to_dealloc) };
+                        }
                     }
                     continue;
                 }
@@ -210,28 +217,75 @@ impl PageTable {
         virt_addr: VirtAddr,
         current_node_virt: VirtAddr,
         current_node_level: u8,
+        desired_level: u8,
+        allocate_missing: bool,
     ) -> Option<&'static mut PageTableEntry> {
         let addr_diff = virt_addr - current_node_virt;
         let index = (addr_diff.0 >> (12 + 9 * (current_node_level - 1))) & 0x1FF;
         let entry = &mut self.entries[index as usize];
 
-        if !entry.present() {
-            return None;
-        }
-
-        if current_node_level == 1 {
+        if current_node_level == desired_level {
             return unsafe { Some(set_static_lifetime_mut(entry)) };
         }
 
+        if !entry.present() {
+            if allocate_missing {
+                let new_frame = physical_allocator::allocate_frame();
+                unsafe { memset_physical_addr(new_frame, 0, 4096) };
+                *entry = PageTableEntry::new(new_frame, false);
+            } else {
+                return None;
+            }
+        }
+
         if entry.huge_page() {
-            panic!("disallowing editing of huge page entries");
+            return None;
         }
 
         let lower_table_phys = entry.address();
         let new_table = unsafe { get_at_physical_addr::<PageTable>(lower_table_phys) };
         let new_node_virt = current_node_virt + (index << (12 + 9 * (current_node_level - 1)));
 
-        new_table.get_page_table_entry(virt_addr, new_node_virt, current_node_level - 1)
+        new_table.get_page_table_entry(
+            virt_addr,
+            new_node_virt,
+            current_node_level - 1,
+            desired_level,
+            allocate_missing,
+        )
+    }
+
+    pub fn get_table_at_level(
+        &self,
+        addr: VirtAddr,
+        current_node_virt: VirtAddr,
+        current_node_level: u8,
+        wanted_node_level: u8,
+    ) -> Option<&'static mut PageTable> {
+        let addr_diff = addr - current_node_virt;
+        let index = (addr_diff.0 >> (12 + 9 * (current_node_level - 1))) & 0x1FF;
+        let entry = &self.entries[index as usize];
+
+        if !entry.present() {
+            return None;
+        }
+
+        if current_node_level == 1 {
+            panic!("level 1 page tables don't point to other tables");
+        }
+
+        if entry.huge_page() {
+            return None;
+        }
+
+        let lower_table_phys = entry.address();
+        let new_node_virt = current_node_virt + (index << (12 + 9 * (current_node_level - 1)));
+        let new_node = unsafe { get_at_physical_addr::<PageTable>(lower_table_phys) };
+        if current_node_level == wanted_node_level + 1 {
+            Some(new_node)
+        } else {
+            new_node.get_table_at_level(addr, new_node_virt, current_node_level - 1, wanted_node_level)
+        }
     }
 
     pub fn get_free_ranges(&mut self, current_node_virt: VirtAddr, current_node_level: u8) -> Vec<(VirtAddr, u64)> {

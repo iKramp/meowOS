@@ -2,6 +2,7 @@ use std::mem_utils::PhysAddr;
 
 use crate::memory::physical_allocator;
 
+#[derive(Debug)]
 pub(super) struct PhysicalMmeoryRange {
     addr: PhysAddr,
     len_frames: u64,

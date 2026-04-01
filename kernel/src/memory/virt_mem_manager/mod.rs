@@ -20,7 +20,7 @@ mod debug_printing;
 mod physical_memory_range;
 mod virtual_memory_range;
 pub(super) use debug_printing::print_mem_mapping;
-pub use virtual_memory_range::VirtualMemoryRange;
+pub use virtual_memory_range::*;
 
 pub(super) fn init_paging() {
     prepare_higher_half();
@@ -151,8 +151,18 @@ pub unsafe fn kernel_manual_unmap(virt_addr: VirtAddr, pages: u64, page_tree_roo
 
 pub fn get_page_table_entry(virt_addr: VirtAddr, page_tree_root: Option<PhysAddr>) -> Option<&'static mut PageTableEntry> {
     let page_tree_root = page_tree_root.unwrap_or_else(current_root);
-    let page_table = unsafe { get_at_physical_addr::<PageTable>(page_tree_root) };
-    page_table.get_page_table_entry(virt_addr, VirtAddr(0), 4)
+    get_page_table_entry_at_level(page_tree_root, virt_addr, 1, false)
+}
+
+pub fn get_page_table_entry_at_level(
+    root: PhysAddr,
+    virt_addr: VirtAddr,
+    level: u8,
+    allocate_missing: bool,
+) -> Option<&'static mut PageTableEntry> {
+    assert!((1..=4).contains(&level));
+    let page_table = unsafe { get_at_physical_addr::<PageTable>(root) };
+    page_table.get_page_table_entry(virt_addr, VirtAddr(0), 4, level, allocate_missing)
 }
 
 pub fn unmap_lower_half() {
@@ -169,6 +179,10 @@ pub fn unmap_lower_half() {
         //deallocated
         PageTable::delete(entry.address(), 3, false);
     }
+}
+
+pub fn delete_page_table(root: PhysAddr, level: u8, unmap_phys: bool) {
+    PageTable::delete(root, level, unmap_phys);
 }
 
 pub fn prepare_higher_half() {

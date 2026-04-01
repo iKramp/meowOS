@@ -51,8 +51,8 @@ pub enum LiminePat {
 
 impl PageTableEntry {
     //creates default entry:
-    //present, writeable, not user accessible, not write-through, not cache disabled, not accessed,
-    //not dirty, not huge, not global
+    //present, writeable, not write-through, not cache disabled, not accessed,
+    //not dirty, not huge, not global, no execute, user/supervisor based on argument
     pub fn new(phys_address: PhysAddr, user_mode: bool) -> Self {
         let mut entry = Self((phys_address.0 & 0x_FFF_FFF_FFF_000) | 0b000000011 | (1 << 63));
         if user_mode {
