@@ -1,14 +1,13 @@
 use bitfield::bitfield;
-use core::ops::Range;
+use core::{ops::Range, sync::atomic::AtomicU32};
 use std::{
+    error::ErrorCode,
+    lock_w_info,
     mem_utils::{PhysAddr, VirtAddr, get_at_physical_addr},
-    vec::Vec,
+    sync::no_int_spinlock::NoIntSpinlock,
 };
 
-use crate::memory::{
-    physical_allocator,
-    virt_mem_manager::{page_table::PageTable, physical_memory_range::PhysicalMmeoryRange},
-};
+use crate::memory::{self, physical_allocator, virt_mem_manager::page_table::PageTable};
 
 #[derive(Debug, Clone, Copy)]
 pub enum VirtualMemoryRangeCapacity {
@@ -38,20 +37,25 @@ impl VirtualMemoryRangeCapacity {
         }
     }
 
+    pub fn pages(self) -> u32 {
+        let level = self.into_level();
+        512u64.pow(level as u32) as u32
+    }
+
     pub fn reserved_range(&self, start: VirtAddr) -> Range<VirtAddr> {
-        let level = self.clone().into_level();
+        let level = self.into_level();
         let size = 4096 * 512u64.pow(level as u32);
         start..(start + size)
     }
 
     pub fn align_up(&self, addr: VirtAddr) -> VirtAddr {
-        let level = self.clone().into_level();
+        let level = self.into_level();
         let size = 4096 * 512u64.pow(level as u32);
         VirtAddr((addr.0 + size - 1) & !(size - 1))
     }
 
     pub fn align_down(&self, addr: VirtAddr) -> VirtAddr {
-        let level = self.clone().into_level();
+        let level = self.into_level();
         let size = 4096 * 512u64.pow(level as u32);
         VirtAddr(addr.0 & !(size - 1))
     }
@@ -64,13 +68,26 @@ bitfield! {
     pub execute, set_execute: 1;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VirtualMemoryRangeType {
+    Managed(VirtualMemoryRangeGrowDirection),
+    Manual,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VirtualMemoryRangeGrowDirection {
+    Up,
+    Down,
+}
+
 #[derive(Debug)]
 pub struct VirtualMemoryRange {
-    phys_ranges: Vec<PhysicalMmeoryRange>,
     virt_tree_node: PhysAddr,
     virt_tree_level: u8, //0 means just 1 page, 1 means page tree node with allocated pages below
-    allocated_pages: u64,
+    mem_range_type: VirtualMemoryRangeType,
     perms: VirtualMemoryRangePermissions,
+    allocated_pages: AtomicU32,
+    alloc_lock: NoIntSpinlock<()>,
 }
 
 impl VirtualMemoryRange {
@@ -78,8 +95,12 @@ impl VirtualMemoryRange {
         VirtualMemoryRangeCapacity::from_level(self.virt_tree_level)
     }
 
-    pub fn current_size_pages(&self) -> u64 {
-        self.allocated_pages
+    pub fn current_size_pages(&self) -> u32 {
+        self.allocated_pages.load(core::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn set_current_size_pages(&self, new_size: u32) {
+        self.allocated_pages.store(new_size, core::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn level(&self) -> u8 {
@@ -98,38 +119,122 @@ impl VirtualMemoryRange {
         self.perms
     }
 
-    pub fn create(capacity: VirtualMemoryRangeCapacity, perms: VirtualMemoryRangePermissions) -> Self {
+    pub fn create(
+        capacity: VirtualMemoryRangeCapacity,
+        perms: VirtualMemoryRangePermissions,
+        mem_range_type: VirtualMemoryRangeType,
+    ) -> Self {
         let table_addr = physical_allocator::allocate_frame();
         let table = unsafe { get_at_physical_addr::<PageTable>(table_addr) };
         table.clear();
 
         Self {
-            phys_ranges: Vec::new(),
             virt_tree_node: table_addr,
             virt_tree_level: capacity.into_level(),
-            allocated_pages: 0,
+            allocated_pages: AtomicU32::new(0),
             perms,
+            mem_range_type,
+            alloc_lock: NoIntSpinlock::new(()),
         }
     }
 
-    pub fn expand_by(&mut self, n_pages: u64) {
-        let current_pages = self.allocated_pages;
+    pub fn expand_by(&self, n_pages: u32) -> Result<(), ErrorCode> {
+        let current_pages = self.current_size_pages();
         let new_size = current_pages.saturating_add(n_pages);
-        self.expand_to(new_size);
+        self.expand_to(new_size)
     }
 
-    pub fn expand_to(&mut self, _n_pages: u64) {
-        todo!("expand userspace memory range")
+    pub fn expand_to(&self, n_pages: u32) -> Result<(), ErrorCode> {
+        let VirtualMemoryRangeType::Managed(grow_direction) = self.mem_range_type else {
+            return Err(ErrorCode::InvalidOperation);
+        };
+        if n_pages > self.max_size().pages() {
+            return Err(ErrorCode::InvalidArgument);
+        }
+        if n_pages <= self.current_size_pages() {
+            return Err(ErrorCode::InvalidArgument);
+        }
+
+        let range = if grow_direction == VirtualMemoryRangeGrowDirection::Up {
+            self.current_size_pages()..n_pages
+        } else {
+            let max = self.max_size().pages();
+            let start = max.saturating_sub(self.current_size_pages());
+            let new_start = max.saturating_sub(n_pages);
+            new_start..start
+        };
+
+        self.allocate_manual(range, self.perms)?;
+        Ok(())
     }
 
-    pub fn shrink_by(&mut self, n_pages: u64) {
-        let current_pages = self.allocated_pages;
+    pub fn shrink_by(&mut self, n_pages: u32) -> Result<(), ErrorCode> {
+        let current_pages = self.current_size_pages();
         let new_size = current_pages.saturating_sub(n_pages);
-        self.shrink_to(new_size);
+        self.shrink_to(new_size)
     }
 
-    pub fn shrink_to(&mut self, _n_pages: u64) {
-        todo!("shrink userspace memory range")
+    pub fn shrink_to(&self, n_pages: u32) -> Result<(), ErrorCode> {
+        let VirtualMemoryRangeType::Managed(grow_direction) = self.mem_range_type else {
+            return Err(ErrorCode::InvalidOperation);
+        };
+
+        let range = if grow_direction == VirtualMemoryRangeGrowDirection::Up {
+            n_pages..self.current_size_pages()
+        } else {
+            let max = self.max_size().pages();
+            let start = max.saturating_sub(self.current_size_pages());
+            let new_start = max.saturating_sub(n_pages);
+            start..new_start
+        };
+
+        self.free_manual(range)
+    }
+
+    pub fn allocate_manual_external(
+        &self,
+        pages_to_map: Range<u32>,
+        perms: VirtualMemoryRangePermissions,
+    ) -> Result<(), ErrorCode> {
+        if self.mem_range_type != VirtualMemoryRangeType::Manual {
+            return Err(ErrorCode::InvalidOperation);
+        }
+        self.allocate_manual(pages_to_map, perms)?;
+        Ok(())
+    }
+
+    pub fn allocate_manual(&self, pages_to_map: Range<u32>, perms: VirtualMemoryRangePermissions) -> Result<(), ErrorCode> {
+        let alloc_lock = lock_w_info!(self.alloc_lock);
+        let newly_allocated_pages = pages_to_map.end - pages_to_map.start;
+        let current_allocated = self.current_size_pages();
+
+        memory::userspace_map(pages_to_map, perms, self.virt_tree_node, self.virt_tree_level, 0)?;
+
+        self.set_current_size_pages(current_allocated.saturating_add(newly_allocated_pages));
+
+        drop(alloc_lock);
+        Ok(())
+    }
+
+    pub fn free_manual_external(&self, pages_to_free: Range<u32>) -> Result<(), ErrorCode> {
+        if self.mem_range_type != VirtualMemoryRangeType::Manual {
+            return Err(ErrorCode::InvalidOperation);
+        }
+        self.free_manual(pages_to_free)?;
+        Ok(())
+    }
+
+    pub fn free_manual(&self, pages_to_free: Range<u32>) -> Result<(), ErrorCode> {
+        let alloc_lock = lock_w_info!(self.alloc_lock);
+        let freed_pages = pages_to_free.end - pages_to_free.start;
+        let current_allocated = self.current_size_pages();
+
+        memory::userspace_unmap(pages_to_free, self.virt_tree_node, self.virt_tree_level, 0)?;
+
+        self.set_current_size_pages(current_allocated.saturating_sub(freed_pages));
+
+        drop(alloc_lock);
+        Ok(())
     }
 }
 

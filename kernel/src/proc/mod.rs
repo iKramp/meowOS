@@ -4,11 +4,18 @@ use std::{
     boxed::Box,
     error::ErrorCode,
     lock_w_info,
-    mem_utils::{PhysAddr, VirtAddr},
+    mem_utils::{PhysAddr, VirtAddr, translate_phys_virt_addr},
+    println,
+    string::ToString,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
+    vec::Vec,
 };
 
-use crate::{memory, proc::namespaces::*, vfs::ResolvedPathBorrowed};
+use crate::{
+    memory::{self, physical_allocator},
+    proc::{context::builder::create_process, namespaces::*},
+    vfs::{self, ResolvedPathBorrowed, file::FileFlags},
+};
 
 mod context;
 mod context_switch;
@@ -115,66 +122,60 @@ pub fn init_ap() {
     syscall::init();
 }
 
-pub async fn run_process_default_env(_path: ResolvedPathBorrowed<'_>, _cmdline: &str) -> Result<Pid, ErrorCode> {
-    todo!()
-    // let mut file_handle = vfs::open_file(path, None, FileFlags::new().with_read(true)).await?;
-    // let res = vfs::stat_file(&file_handle);
-    // let stat = match res.await {
-    //     Err(e) => {
-    //         vfs::close_file(file_handle).await;
-    //         return Err(e);
-    //     }
-    //     Ok(stat) => stat,
-    // };
-    // let buf_pages = stat.size.div_ceil(4096);
-    // let phys_buf = physical_allocator::allocate_contiguius_high(buf_pages);
-    // // let buf = unsafe { PAGE_TREE_ALLOCATOR.allocate_contigious(buf_pages, Some(phys_buf), false) };
-    // let buf = VirtAddr(0);
-    // todo!("change to new memory api");
-    // let phys_buf_vec = (0..buf_pages).map(|i| phys_buf + i * 4096).collect::<Vec<_>>();
-    // let read_res = vfs::read_file(&mut file_handle, &phys_buf_vec, stat.size).await?;
-    // vfs::close_file(file_handle).await;
-    // if read_res != stat.size {
-    //     for i in 0..buf_pages {
-    //         // unsafe { PAGE_TREE_ALLOCATOR.deallocate(buf + i * 4096) };
-    //         todo!("move to new memory api");
-    //     }
-    //     return Err(ErrorCode::InternalFSError);
-    // }
-    //
-    // let context = match loaders::load_process_context(
-    //     unsafe { core::slice::from_raw_parts(buf.0 as *const u8, stat.size as usize) },
-    //     cmdline,
-    // ) {
-    //     Ok(context) => context,
-    //     Err(e) => {
-    //         println!(level:error, "Failed to load process from file: {}", path.to_string());
-    //         println!(level:error, "Error: {:?}", e);
-    //         for i in 0..buf_pages {
-    //             // unsafe { PAGE_TREE_ALLOCATOR.deallocate(buf + i * 4096) };
-    //             todo!("move to new memory api");
-    //         }
-    //         return Err(ErrorCode::InvalidProcessFile);
-    //     }
-    // };
-    //
-    // let new_pid = match create_process(&context) {
-    //     Ok(pid) => pid,
-    //     Err(e) => {
-    //         println!(level:error, "Failed to create process from file: {}, error: {:?}", path.to_string(), e);
-    //         for i in 0..buf_pages {
-    //             // unsafe { PAGE_TREE_ALLOCATOR.deallocate(buf + i * 4096) };
-    //             todo!("move to new memory api");
-    //         }
-    //         return Err(e);
-    //     }
-    // };
-    // for i in 0..buf_pages {
-    //     // unsafe { PAGE_TREE_ALLOCATOR.deallocate(buf + i * 4096) };
-    //     todo!("move to new memory api");
-    // }
-    //
-    // Ok(new_pid)
+pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &str) -> Result<Pid, ErrorCode> {
+    let mut file_handle = vfs::open_file(path, None, FileFlags::new().with_read(true)).await?;
+    let res = vfs::stat_file(&file_handle);
+    let stat = match res.await {
+        Err(e) => {
+            vfs::close_file(file_handle).await;
+            return Err(e);
+        }
+        Ok(stat) => stat,
+    };
+    let buf_pages = stat.size.div_ceil(4096);
+    let phys_buf = physical_allocator::allocate_contiguius_high(buf_pages);
+    let buf = translate_phys_virt_addr(phys_buf);
+
+    let phys_buf_vec = (0..buf_pages).map(|i| phys_buf + i * 4096).collect::<Vec<_>>();
+    let read_res = vfs::read_file(&mut file_handle, &phys_buf_vec, stat.size).await?;
+    vfs::close_file(file_handle).await;
+    if read_res != stat.size {
+        for frame in phys_buf_vec {
+            unsafe { physical_allocator::deallocate_frame(frame) };
+        }
+        return Err(ErrorCode::InternalFSError);
+    }
+
+    let context = match loaders::load_process_context(
+        unsafe { core::slice::from_raw_parts(buf.0 as *const u8, stat.size as usize) },
+        cmdline,
+    ) {
+        Ok(context) => context,
+        Err(e) => {
+            println!(level:error, "Failed to load process from file: {}", path.to_string());
+            println!(level:error, "Error: {:?}", e);
+            for frame in phys_buf_vec {
+                unsafe { physical_allocator::deallocate_frame(frame) };
+            }
+            return Err(ErrorCode::InvalidProcessFile);
+        }
+    };
+
+    let new_pid = match create_process(&context) {
+        Ok(pid) => pid,
+        Err(e) => {
+            println!(level:error, "Failed to create process from file: {}, error: {:?}", path.to_string(), e);
+            for frame in phys_buf_vec {
+                unsafe { physical_allocator::deallocate_frame(frame) };
+            }
+            return Err(e);
+        }
+    };
+    for frame in phys_buf_vec {
+        unsafe { physical_allocator::deallocate_frame(frame) };
+    }
+
+    Ok(new_pid)
 }
 
 pub fn switch_to_generic_mem_tree() {

@@ -62,7 +62,13 @@ pub enum StackCpuStateData<'a> {
 }
 
 impl ProcessData {
-    pub fn new(pid: Pid, is_32_bit: bool, cmdline: Box<str>, cpu_state: CpuStateType, namespaces: ProcNamespaces) -> Self {
+    pub(in crate::proc) fn new(
+        pid: Pid,
+        is_32_bit: bool,
+        cmdline: Box<str>,
+        cpu_state: CpuStateType,
+        namespaces: ProcNamespaces,
+    ) -> Self {
         let root = lock_w_info!(namespaces.memory_namespace).page_tree_root();
         Self {
             pid,

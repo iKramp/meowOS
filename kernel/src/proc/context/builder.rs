@@ -1,6 +1,9 @@
 use crate::interrupts::InterruptProcessorState;
 use crate::memory::VirtualMemoryRange;
+use crate::memory::VirtualMemoryRangeGrowDirection;
 use crate::memory::VirtualMemoryRangePermissions;
+use crate::memory::VirtualMemoryRangeType;
+use crate::memory::current_root;
 use crate::proc::MemoryRangeType;
 use crate::proc::PROCESS_ID_COUNTER;
 use crate::proc::ProcNamespaces;
@@ -18,10 +21,7 @@ use std::{
     println,
 };
 
-use crate::{
-    memory,
-    proc::{MappedMemoryRegion, MemoryContext, Pid},
-};
+use crate::{memory, proc::Pid};
 
 use super::info::ContextInfo;
 
@@ -59,69 +59,81 @@ pub fn create_process(context_info: &ContextInfo) -> Result<Pid, ErrorCode> {
     Ok(pid)
 }
 
-pub fn build_initialized_memory_namespace(context: &ContextInfo, empty_namespace: &mut MemoryNamespace) {
+pub fn build_initialized_memory_namespace(
+    context: &ContextInfo,
+    mut mem_namespace: MemoryNamespace,
+) -> Result<MemoryNamespace, ErrorCode> {
+    let proc_mem_range = VirtualMemoryRange::create(
+        memory::VirtualMemoryRangeCapacity::_05TB,
+        VirtualMemoryRangePermissions(0),
+        VirtualMemoryRangeType::Manual,
+    );
+    let proc_mem_range_bounds = proc_mem_range.reserved_range(VirtAddr(0));
+
     // map memory regions
     for region in context.mem_regions().iter() {
-        let start = region.start().0;
-        debug_assert!(start % 0x1000 == 0, "region start not page aligned");
+        let start = region.start();
+        debug_assert!(start.0 % 0x1000 == 0, "region start not page aligned");
         let end = start + region.size_pages() as u64 * 0x1000;
-        for _page_addr in (start..end).step_by(0x1000) {
-            // let _phys_addr_map = memory_tree.allocate_set_virtual(None, VirtAddr(page_addr));
-            todo!("move to new memory api");
-            // let page = memory_tree
-            //     .get_page_table_entry_mut(VirtAddr(page_addr))
-            //     .expect("page must exist after allocation");
-            // page.set_writeable(region.flags().is_writeable());
-            // page.set_user_accessible(true);
-            // page.set_no_execute(!region.flags.is_executable());
+        if end > proc_mem_range_bounds.end {
+            println!(
+                "region end {:#x?} exceeds process memory range bounds {:#x?}",
+                end, proc_mem_range_bounds.end.0
+            );
+            return Err(ErrorCode::InvalidProcessFile);
         }
+
+        let mut perms = VirtualMemoryRangePermissions(0); //allow writing
+        perms.set_write(true);
+
+        let page_start = start.0 / 0x1000;
+        let page_end = end.0 / 0x1000;
+
+        proc_mem_range.allocate_manual(page_start as u32..page_end as u32, perms)?;
     }
+
+    let mem_range = Arc::new(proc_mem_range);
+
+    mem_namespace
+        .add_mem_range(
+            mem_range.clone(),
+            context.path().to_string().into_boxed_str(),
+            MemoryRangeType::Code,
+            VirtAddr(0),
+        )
+        .expect("mapping process memory failed");
 
     for mem_init in context.mem_init() {
-        let first_page = mem_init.0.0 & (!0xfff);
-        let last_page = (mem_init.0.0 + mem_init.1.len() as u64) & (!0xfff); //inclusive
-        for _page_addr in (first_page..=last_page).step_by(0x1000) {
-            todo!("move to new mem api");
-            // let page = memory_tree
-            //     .get_page_table_entry_mut(VirtAddr(page_addr))
-            //     .expect("page must exist after allocation");
-            // let physical_addr = page.address();
-            // let physical_addr = PhysAddr(0);
-            //
-            // let start_mem_addr = page_addr.max(mem_init.0.0);
-            // let start_data_index = (start_mem_addr - mem_init.0.0) as usize;
-            // let mem_offset = start_mem_addr & 0xFFF;
-            // let end_data_index = mem_init.1.len().min(start_data_index + 0x1000 - mem_offset as usize);
-            //
-            // unsafe {
-            //     mem_utils::memcopy_physical_buffer(physical_addr + mem_offset, &mem_init.1[start_data_index..end_data_index])
-            // }
+        let dest_ptr = mem_init.0.0 as *mut u8;
+        let src_ptr = mem_init.1.as_ptr();
+        let len = mem_init.1.len();
+        unsafe {
+            core::ptr::copy_nonoverlapping(src_ptr, dest_ptr, len);
         }
     }
 
-    MemoryContext {
-        initialized: true,
-        is_32_bit: context.is_32_bit(),
-        page_tree_root: memory_namespace,
-        owned_memory_regions: context
-            .mem_regions()
-            .iter()
-            .map(|region| MappedMemoryRegion {
-                name: context.path().to_string().into_boxed_str(),
-                base: VirtAddr(region.start().0),
-                size_pages: region.size_pages() as u64,
-            })
-            .collect(),
+    //set prot
+    for region in context.mem_regions().iter() {
+        let start = region.start();
+        let end = start + region.size_pages() as u64 * 0x1000;
+
+        let mut perms = VirtualMemoryRangePermissions(0);
+        perms.set_write(region.flags().is_writeable());
+        perms.set_execute(region.flags().is_executable());
+
+        memory::set_prot(current_root(), start..end, perms, 4, VirtAddr(0));
     }
+
+    Ok(mem_namespace)
 }
 
 pub fn build_mem_namespace_for_new_proc(context: &ContextInfo) -> Result<MemoryNamespace, ErrorCode> {
-    let mut mem_namespace = build_empty_memory_namespace();
+    let mem_namespace = build_empty_memory_namespace();
 
     let current_root = memory::current_root();
     memory::set_cr3(mem_namespace.page_tree_root());
 
-    build_initialized_memory_namespace(context, &mut mem_namespace);
+    let mut mem_namespace = build_initialized_memory_namespace(context, mem_namespace)?;
     let stack_size_pages = DEFAULT_PROC_STACK_SIZE.div_ceil(0x1000) as u8; // convert to pages
 
     //add stack
@@ -142,12 +154,13 @@ pub fn add_stack(mem_namespace: &mut MemoryNamespace, stack_size_pages: u8) -> R
     let mut permissions = VirtualMemoryRangePermissions(0);
     permissions.set_write(true);
     permissions.set_execute(false);
-    let mut mem_range = VirtualMemoryRange::create(memory::VirtualMemoryRangeCapacity::_1GB, permissions);
-    mem_range.expand_to(stack_size_pages as u64);
+    let mem_range = VirtualMemoryRange::create(
+        memory::VirtualMemoryRangeCapacity::_1GB,
+        permissions,
+        VirtualMemoryRangeType::Managed(VirtualMemoryRangeGrowDirection::Down),
+    );
+    mem_range.expand_to(stack_size_pages as u32).expect("adding stack failed");
     let stack_highest_addr = mem_range.reserved_range(free_area).end;
-
-    unsafe { *((stack_highest_addr.0 - 0x08) as *mut u64) = 0 };
-    unsafe { *((stack_highest_addr.0 - 0x10) as *mut u64) = 0 };
 
     mem_namespace.add_mem_range(
         Arc::new(mem_range),
@@ -155,6 +168,10 @@ pub fn add_stack(mem_namespace: &mut MemoryNamespace, stack_size_pages: u8) -> R
         crate::proc::MemoryRangeType::Stack,
         free_area,
     )?;
+
+    unsafe { *((stack_highest_addr.0 - 0x08) as *mut u64) = 0 };
+    unsafe { *((stack_highest_addr.0 - 0x10) as *mut u64) = 0 };
+    println!("added stack mem range");
     Ok(())
 }
 

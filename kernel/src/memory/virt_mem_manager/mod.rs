@@ -1,5 +1,6 @@
 use core::ops::Range;
 use std::{
+    error::ErrorCode,
     lock_w_info,
     mem_utils::{PhysAddr, VirtAddr, get_at_physical_addr, translate_phys_virt_addr, translate_virt_phys_addr},
     println,
@@ -17,7 +18,6 @@ pub use page_table_entry::LiminePat;
 pub use page_table_entry::PageTableEntry;
 mod allocation_area;
 mod debug_printing;
-mod physical_memory_range;
 mod virtual_memory_range;
 pub(super) use debug_printing::print_mem_mapping;
 pub use virtual_memory_range::*;
@@ -147,6 +147,40 @@ pub unsafe fn kernel_manual_unmap(virt_addr: VirtAddr, pages: u64, page_tree_roo
     let page_table = unsafe { get_at_physical_addr::<PageTable>(page_table_root) };
     unsafe { page_table.kernel_manual_unmap(virt_addr, pages, VirtAddr(0), 4) };
     drop(_lock);
+}
+
+pub fn userspace_map(
+    page_range: Range<u32>,
+    permissions: VirtualMemoryRangePermissions,
+    table_phys: PhysAddr,
+    table_level: u8,
+    table_page_index: u32,
+) -> Result<(), ErrorCode> {
+    assert!((1..=3).contains(&table_level));
+
+    let table = unsafe { get_at_physical_addr::<PageTable>(table_phys) };
+    table.userspace_map(page_range, permissions, table_level, table_page_index);
+    Ok(())
+}
+
+pub fn userspace_unmap(pages: Range<u32>, table_phys: PhysAddr, table_level: u8, table_page_index: u32) -> Result<(), ErrorCode> {
+    assert!((1..=3).contains(&table_level));
+
+    let table = unsafe { get_at_physical_addr::<PageTable>(table_phys) };
+    table.userspace_unmap(pages, table_level, table_page_index);
+    Ok(())
+}
+
+pub fn set_prot(
+    table_phys: PhysAddr,
+    addr_range: Range<VirtAddr>,
+    permissions: VirtualMemoryRangePermissions,
+    table_level: u8,
+    table_addr: VirtAddr,
+) {
+    assert!((1..=4).contains(&table_level));
+    let page_table = unsafe { get_at_physical_addr::<PageTable>(table_phys) };
+    page_table.set_prot(addr_range, permissions, table_level, table_addr);
 }
 
 pub fn get_page_table_entry(virt_addr: VirtAddr, page_tree_root: Option<PhysAddr>) -> Option<&'static mut PageTableEntry> {

@@ -53,22 +53,22 @@ fn fatal_page_fault(proc_data: &InterruptProcessorState, page_fault_addr: u64) -
     println!("{}", proc_data as *const InterruptProcessorState as usize);
     printlnc!(level:error,
         (0, 0, 255),
-        "EXCEPTION: PAGE FAULT. error code: {:#X?}\nproc state: {:#X?}, rip: {:?}",
+        "EXCEPTION: PAGE FAULT at {:X}. error code: {:#X?}\nproc state: {:#X?}, rip: {:?}",
+        page_fault_addr,
         PageFaultErrorCode::from(proc_data.err_code),
         proc_data,
         proc_data.interrupt_frame.rip,
     );
 
-    memory::get_page_table_entry(VirtAddr(page_fault_addr & 0xFFFF_FFFF_FFFF_F000), None)
-        .map(|entry| {
-            println!(level:error,
-                "Page fault at {:#X?} with entry: {:#X?}",
-                proc_data.interrupt_frame.rip, entry
-            );
-        })
-        .unwrap_or_else(|| {
-            println!(level:error,"Page fault at {:#X?} with no entry", page_fault_addr);
-        });
+    for level in (1..=4).rev() {
+        let entry = memory::get_page_table_entry_at_level(memory::current_root(), VirtAddr(page_fault_addr), level, false);
+        if let Some(entry) = entry {
+            printlnc!(level:error, (255, 0, 0), "Level {} entry: {:#X?}", level, entry);
+        } else {
+            printlnc!(level:error, (255, 0, 0), "Level {} entry: None", level);
+            break;
+        }
+    }
     unsafe {
         loop {
             core::arch::asm!("hlt");

@@ -2,7 +2,7 @@ use core::arch::asm;
 
 use alloc::collections::btree_set::BTreeSet;
 
-use crate::{format, mem_utils::get_heap_initialized, println};
+use crate::mem_utils::get_heap_initialized;
 
 static mut GLOBAL_LOCK_INFO: LockInfo = LockInfo::new();
 

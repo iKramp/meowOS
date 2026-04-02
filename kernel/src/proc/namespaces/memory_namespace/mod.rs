@@ -85,9 +85,9 @@ impl MemoryNamespace {
 
         *entry = PageTableEntry::new(range.node_addr(), true);
 
-        let permissions = range.permissions();
-        entry.set_no_execute(!permissions.execute());
-        entry.set_writeable(permissions.write());
+        entry.set_no_execute(false);
+        entry.set_writeable(true);
+        //restrictions apply at lower levels
 
         self.memory_ranges.push(OwnedVirtualMemoryRange {
             shared_range: range,
@@ -98,6 +98,13 @@ impl MemoryNamespace {
         });
         self.range_counter += 1;
         Ok(())
+    }
+
+    pub fn get_by_containing_addr(&self, addr: VirtAddr) -> Option<&OwnedVirtualMemoryRange> {
+        self.memory_ranges.iter().find(|r| {
+            let r_range = r.shared_range.reserved_range(r.map_address);
+            r_range.start <= addr && addr < r_range.end
+        })
     }
 
     pub fn remove_mem_range_by_name(&mut self, name: &str) -> Result<(), ErrorCode> {
@@ -133,7 +140,7 @@ impl MemoryNamespace {
             return;
         }
 
-        table_entry.0 = 0;
+        *table_entry = PageTableEntry(0);
 
         let current_root = memory::current_root();
         if current_root == self.page_tree_root {
@@ -146,7 +153,7 @@ impl MemoryNamespace {
 
     pub fn find_hole(&mut self, size: VirtualMemoryRangeCapacity) -> Option<VirtAddr> {
         let mut current_addr = VirtAddr(1);
-        loop {
+        'repeat: loop {
             current_addr = size.align_up(current_addr);
             let curr_range = size.reserved_range(current_addr);
             if curr_range.end.0 >= (1 << 48) {
@@ -157,9 +164,10 @@ impl MemoryNamespace {
                 let r_range = range.shared_range.reserved_range(range.map_address);
                 if r_range.start < curr_range.end && curr_range.start < r_range.end {
                     current_addr = r_range.end;
-                    continue;
+                    continue 'repeat;
                 }
             }
+            return Some(current_addr);
         }
     }
 
