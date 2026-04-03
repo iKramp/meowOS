@@ -53,12 +53,21 @@ pub fn fwrite(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
 
         let write_result = crate::vfs::write_file(&mut f_handle, &buffers, size).await;
         let Some(proc) = crate::proc::get_proc(proc.pid()) else {
+            //free
+            for i in 0..pages {
+                unsafe { crate::memory::physical_allocator::deallocate_frame(buffer_alloc + (i * 4096)) };
+            }
             return; //proc was killed
         };
         if write_result.is_err() {
             println!("fwrite: write failed");
             let proc_lock = proc.get();
             proc_lock.set_syscall_return(u64::MAX, 1);
+
+            //free
+            for i in 0..pages {
+                unsafe { crate::memory::physical_allocator::deallocate_frame(buffer_alloc + (i * 4096)) };
+            }
             return;
         }
         let bytes_written = unsafe { write_result.unwrap_unchecked() };

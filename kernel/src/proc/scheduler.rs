@@ -52,8 +52,8 @@ impl Scheduler {
         let sleeping_pos = self.sleeping_tasks.iter().position(|(p, _)| *p == pid);
         if let Some(pos) = sleeping_pos {
             self.sleeping_tasks.swap_remove(pos);
+            self.ready_to_run.push(pid);
         }
-        self.ready_to_run.push(pid);
     }
 
     pub fn schedule(&mut self) -> Option<Arc<ProcessData>> {
