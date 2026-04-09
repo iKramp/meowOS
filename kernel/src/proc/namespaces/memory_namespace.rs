@@ -176,16 +176,10 @@ impl MemoryNamespace {
     }
 }
 
-impl Default for MemoryNamespace {
-    fn default() -> Self {
-        Self::new(PhysAddr(0))
-    }
-}
-
 impl Drop for MemoryNamespace {
     fn drop(&mut self) {
         if self.page_tree_root.0 == 0 {
-            return;
+            panic!("invalid page tree root");
         }
 
         for range in self.memory_ranges.iter() {

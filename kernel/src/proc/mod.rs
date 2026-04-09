@@ -182,7 +182,7 @@ pub fn switch_to_generic_mem_tree() {
     memory::set_cr3(unsafe { GENERIC_PAGE_TREE });
 }
 
-//set this AFTER the process with pid 1 is loaded (pid 0 is fallback, might be removed)
+//set this AFTER the process with pid 0
 pub fn set_proc_initialized() {
     unsafe {
         GENERIC_PAGE_TREE = memory::current_root();
@@ -196,16 +196,12 @@ pub fn get_proc(pid: Pid) -> Option<Arc<ProcessData>> {
     scheduler.get_proc(pid)
 }
 
-//for now this only marks the process as stopping. If it was in running state before, return,
-//otherwise clear resources
-//Also return if it was in stopping state. Reason: stopping means it's either running and has been
-//scheduled for stopping (case above), or its resources are actively being freed
 pub fn kill_process(pid: Pid, status: u64) {
+    println!("process with pid {:?} exited/killed with status code {}", pid, status);
     let Some(process) = (unsafe { lock_w_info!(SCHEDULER).assume_init_mut().remove_process(pid) }) else {
         return;
     };
     process.set_ret_status(status);
-    process.cleanup();
 }
 
 pub fn wake_process(pid: Pid) {

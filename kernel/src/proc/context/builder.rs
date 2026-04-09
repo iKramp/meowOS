@@ -9,6 +9,7 @@ use crate::proc::PROCESS_ID_COUNTER;
 use crate::proc::ProcNamespaces;
 use crate::proc::ProcessData;
 use crate::proc::SCHEDULER;
+use crate::proc::SyscallNamespace;
 use crate::proc::namespaces::MemoryNamespace;
 use crate::proc::process_data::CpuStateType;
 use std::error::ErrorCode;
@@ -43,13 +44,16 @@ pub fn create_process(context_info: &ContextInfo) -> Result<Pid, ErrorCode> {
         .expect("stack must exist for each proc");
     let rsp = stack.shared_range.reserved_range(stack.map_address).end.0 - 16;
 
+    let memory_namespace = Arc::new(NoIntSpinlock::new(memory_namespace));
+    let syscall_namespace = Arc::new(SyscallNamespace::default());
+
     let cpu_state = InterruptProcessorState::new(rip, rsp);
     let process_data = ProcessData::new(
         pid,
         is_32_bit,
         cmdline,
         CpuStateType::Interrupt(cpu_state),
-        ProcNamespaces::new(Arc::new(NoIntSpinlock::new(memory_namespace))),
+        ProcNamespaces::new(memory_namespace, syscall_namespace),
     );
 
     let mut scheduler_lock = lock_w_info!(SCHEDULER);

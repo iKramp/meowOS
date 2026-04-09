@@ -5,9 +5,17 @@ use super::{
     process_data::StackCpuStateData,
     scheduler::{SleepCondition, save_and_release_current},
 };
-use crate::{acpi::cpu_locals::PageFaultHandleMode, interrupts::enable_interrupts, memory, msr, proc::syscall};
+use crate::{
+    acpi::cpu_locals::PageFaultHandleMode,
+    interrupts::enable_interrupts,
+    memory, msr,
+    proc::syscall::{self, legacy_syscall_pack::init_legacy_syscalls},
+};
 
 mod handlers;
+mod legacy_syscall_pack;
+mod syscall_registry;
+pub use syscall_registry::*;
 
 const MSR_STAR: u32 = 0xC000_0081;
 const MSR_LSTAR: u32 = 0xC000_0082;
@@ -33,6 +41,9 @@ pub(super) fn init() {
     msr::set_msr(MSR_LSTAR, syscall_rip);
     msr::set_msr(MSR_CSTAR, compat_rip);
     msr::set_msr(MSR_SFMASK, syscall_flag_mask as u64);
+
+    init_legacy_syscalls();
+
     enable_syscall();
 }
 
@@ -158,22 +169,15 @@ extern "C" fn handler(args_rsp: u64) -> ! {
         args.syscall_number, args, state
     );
 
-    #[allow(clippy::single_match)]
-    let task_sleep = match args.syscall_number {
-        0 => syscall::handlers::illegal(args, &curr_proc),
-        1 => syscall::handlers::exit(args, &curr_proc),
-        2 => todo!("implement exec"),
-        3 => todo!("implement clone"),
-        4 => syscall::handlers::fopen(args, &curr_proc),
-        5 => syscall::handlers::fclose(args, &curr_proc),
-        6 => syscall::handlers::fread(args, &curr_proc),
-        7 => syscall::handlers::fwrite(args, &curr_proc),
-        8 => todo!("implement fseek"),
-        9 => todo!("implement mmap"),
-        10 => todo!("implement munmap"),
-        11 => todo!("implement sleep"),
-        12 => syscall::handlers::time(args, &curr_proc),
-        _ => false,
+    let syscall_namespace = curr_proc.get_mutable().get_namespaces().get_syscall_namespace();
+    let syscall_handler = syscall_namespace.get_syscall_handler(args.syscall_number as u32);
+    let task_sleep;
+    if let Some(syscall_handler) = syscall_handler {
+        task_sleep = syscall_handler(args, &curr_proc);
+    } else {
+        println!(level:warn, "Invalid syscall number: {}", args.syscall_number);
+        syscall::handlers::illegal(args, &curr_proc);
+        task_sleep = false;
     };
 
     let sleep_cond = if task_sleep { Some(SleepCondition::Event) } else { None };
@@ -199,7 +203,7 @@ pub struct SyscallCpuState {
 
 #[derive(Debug, Clone)]
 #[repr(C)]
-struct SyscallArgs {
+pub struct SyscallArgs {
     arg1: u64,
     arg2: u64,
     arg3: u64,

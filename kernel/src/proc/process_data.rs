@@ -28,12 +28,6 @@ pub struct ProcessData {
 }
 
 impl ProcessData {
-    pub fn cleanup(&self) {
-        let mut internal = lock_w_info!(self.internal);
-        internal.namespaces = ProcNamespaces::default();
-        internal.file_handles.clear();
-    }
-
     pub fn set_ret_status(&self, status: u64) {
         let internal = &mut lock_w_info!(self.internal);
         internal.return_status = Some(status);
@@ -47,6 +41,12 @@ pub struct ProcessDataMutable {
     file_handles: BTreeMap<u64, FileHandle>,
     file_handle_index: FileDescriptor,
     namespaces: ProcNamespaces,
+}
+
+impl ProcessDataMutable {
+    pub(in crate::proc) fn get_namespaces(&self) -> &ProcNamespaces {
+        &self.namespaces
+    }
 }
 
 #[derive(Debug)]

@@ -34,9 +34,14 @@ pub enum LogLevel {
 }
 
 #[macro_export]
+macro_rules! format_location_print {
+    ($($arg:tt)*) => (format_args!("[{}:{}]: {}", file!(), line!(), format_args!($($arg)*)));
+}
+
+#[macro_export]
 macro_rules! print {
-    (level:$lvl:ident, $($arg:tt)*) => ($crate::print::_print(format_args!($($arg)*), $crate::convert_level!($lvl)));
-    ($($arg:tt)*) => ($crate::print::_print(format_args!($($arg)*), $crate::convert_level!(default_log_level)));
+    (level:$lvl:ident, $($arg:tt)*) => ($crate::print::_print($crate::format_location_print!($($arg)*), $crate::convert_level!($lvl)));
+    ($($arg:tt)*) => ($crate::print::_print($crate::format_location_print!($($arg)*), $crate::convert_level!(default_log_level)));
 }
 
 #[macro_export]
@@ -48,8 +53,8 @@ macro_rules! println {
 
 #[macro_export]
 macro_rules! printc {
-    (level:$lvl:ident, $fg:expr, $($arg:tt)*) => ($crate::print::_print_colored($fg, format_args!($($arg)*), $crate::convert_level!($lvl)));
-    ($fg:expr, $($arg:tt)*) => ($crate::print::_print_colored($fg, format_args!($($arg)*), $crate::convert_level!(default_log_level)));
+    (level:$lvl:ident, $fg:expr, $($arg:tt)*) => ($crate::print::_print_colored($fg, $crate::format_location_print!($($arg)*), $crate::convert_level!($lvl)));
+    ($fg:expr, $($arg:tt)*) => ($crate::print::_print_colored($fg, $crate::format_location_print!($($arg)*), $crate::convert_level!(default_log_level)));
 }
 
 #[macro_export]

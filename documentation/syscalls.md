@@ -29,8 +29,8 @@ Errno value is 0 on success, otherwise it is the error code. Return value may st
 |----------------|------|-------------|
 | 0 | reserved | should not be used |
 | 1 | exit | terminates the calling process |
-| 2 | exec | spawns a *new* process |
-| 3 | clone | creates a new thread in the calling process |
+| 2 | exec | unused, legacy |
+| 3 | clone | unused, legacy |
 | 4 | fopen | opens a file and returns a file descriptor |
 | 5 | fclose | closes a file descriptor |
 | 6 | fread | reads data from a file descriptor |
@@ -73,40 +73,10 @@ will be split
  - Terminates the calling process with the given status code. Any children are also terminated (sub-threads)
 
 ### Syscall 2: exec
-#### Args:
-1. uint64 path_len - length of the path in bytes
-1. char*  path - path to the executable
-1. EnvData *env - pointer to struct describing the environment. Nullptr means default environment
-#### Return Value:
- - On success, returns the PID of the new process.
- - On failure, returns -1 and sets errno.
-### EnvData struct:
-```C
-struct EnvData {
-    Buffer<String> args; // list of arguments to pass to the new process
-    Buffer<String> env_vars; // list of environment variables in the form "KEY=VALUE"
-    bool copy_fd;
-    bool copy_stdio;
-    bool paused; //start the process paused. This allows the caller to modify its environment further
-};
-
-```
-#### Description:  
-Spawns a new process by loading and executing the binary at the given path with the provided environment.
-Returns the PID of the new process on success. Unlike linux fork + execve combo, this does NOT create a copy of the calling process.
+Does not exist in this form, leave gap for legacy program reasons
 
 ### Syscall 3: clone
-#### Args:
-1. uint64 flags - clone flags (idk yet, but it's here)
-#### Return value:
- - On success, PID of the new process in the existing process, 0 in the new process
- - On failure, -1 and sets errno
-#### Flags argument:
-1. bit 0: CLONE_MEM - if set, the new process has a clone of the memory space instead of sharing it
-1. bit 1: NO_FD - if set, the new process does not inherit open file descriptors (except for standard in/out/err)
-1. bit 2: NO_STDIO - if set, the new process does not inherit standard input/output/error
-#### Description:  
-Clones the current process. The new "environment" is identical to the old one, but flags dictates what should be shared and what separate
+Does not exist in this form, leave gap for legacy program reasons
 
 ### Syscall 4: fopen
 #### Args:

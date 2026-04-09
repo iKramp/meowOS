@@ -1,10 +1,5 @@
 use crate::{acpi::cpu_locals::CpuLocals, interrupts::InterruptProcessorState, proc::Pid};
-use std::{
-    collections::{btree_map::BTreeMap, btree_set::BTreeSet},
-    lock_w_info,
-    sync::arc::Arc,
-    vec::Vec,
-};
+use std::{collections::btree_map::BTreeMap, lock_w_info, sync::arc::Arc, vec::Vec};
 
 use super::{
     ProcessData,
@@ -25,8 +20,6 @@ pub struct Scheduler {
     ///tasks currently running on the CPU, along with cpu number
     active_tasks: Vec<(Pid, u32)>,
     ready_to_run: Vec<Pid>,
-    cleanup_set: BTreeSet<Pid>,
-    purge_set: BTreeSet<Pid>,
 }
 
 impl Scheduler {
@@ -36,8 +29,6 @@ impl Scheduler {
             sleeping_tasks: Vec::new(),
             active_tasks: Vec::new(),
             ready_to_run: Vec::new(),
-            cleanup_set: BTreeSet::new(),
-            purge_set: BTreeSet::new(),
         }
     }
 }
@@ -83,20 +74,7 @@ impl Scheduler {
         if let Some(pos) = ready_pos {
             self.ready_to_run.swap_remove(pos);
         }
-
-        if sleeping_pos.is_some() || ready_pos.is_some() {
-            let removing_task = self.tasks.get(&pid).cloned();
-            if removing_task.is_some() {
-                self.purge_set.insert(pid);
-            }
-            removing_task
-        } else {
-            let removing_task = self.tasks.get(&pid).cloned();
-            if removing_task.is_some() {
-                self.cleanup_set.insert(pid);
-            }
-            removing_task
-        }
+        self.tasks.remove(&pid)
     }
 
     ///Called after all the data has been saved
@@ -105,20 +83,17 @@ impl Scheduler {
         if let Some(pos) = active_pos {
             self.active_tasks.swap_remove(pos);
         } else {
-            //something went seriously wrong. Just in case purge the process. Might crash the pc
-            //idk, but this should be unreachable anyway
-            self.cleanup_set.insert(pid);
+            todo!("recover from inconsistent state");
         }
 
-        if self.cleanup_set.remove(&pid) {
-            self.purge_set.insert(pid);
-        } else {
+        if self.tasks.contains_key(&pid) {
             if let Some(cond) = sleep {
                 self.sleeping_tasks.push((pid, cond));
             } else {
                 self.ready_to_run.push(pid);
             }
         }
+
         switch_to_generic_mem_tree();
         CpuLocals::get_mut().current_process = None;
     }

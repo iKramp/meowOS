@@ -209,9 +209,8 @@ pub fn unmap_lower_half() {
         if entry.huge_page() {
             panic!("not dealing with huge pages at level 4");
         }
-        //don't dealloc, this map covers the whole ram + framebuffer, neither of which we want
-        //deallocated
-        PageTable::delete(entry.address(), 3, false);
+        //don't delete lower entries, limine shares them with HHDM
+        entry.set_present(false);
     }
 }
 
