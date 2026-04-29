@@ -25,6 +25,7 @@ pub use print::set_print;
 
 pub mod double_map;
 pub mod error;
+pub mod ffi_future;
 pub mod mem_utils;
 pub mod queue;
 

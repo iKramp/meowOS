@@ -1,5 +1,5 @@
 use std::{
-    boxed::Box,
+    ffi_future::future::into_ffi_future,
     mem_utils::{get_at_physical_addr, translate_phys_virt_addr},
     println, printlnc,
     string::String,
@@ -75,10 +75,18 @@ impl ReadDirOperation {
 
     fn execute(&self) {
         let path = vfs::resolve_path(self.folder_name);
-        let dir = block_task(Box::pin(open_file((&path).into(), None, FileFlags::new().with_read(true))))
-            .expect("fopen failed in debug function");
-        let entries = block_task(Box::pin(vfs::get_dir_entries(&dir))).expect("get dir entries failed in debug function");
-        block_task(Box::pin(vfs::close_file(dir)));
+
+        let open_file_future = open_file((&path).into(), None, FileFlags::new().with_read(true));
+        let ffi_open_file_future = into_ffi_future(open_file_future);
+        let dir = block_task(ffi_open_file_future).expect("fopen failed in debug function");
+
+        let get_entries_future = vfs::get_dir_entries(&dir);
+        let ffi_get_entries_future = into_ffi_future(get_entries_future);
+        let entries = block_task(ffi_get_entries_future).expect("get dir entries failed in debug function");
+
+        let close_future = vfs::close_file(dir);
+        let ffi_close_future = into_ffi_future(close_future);
+        block_task(ffi_close_future);
         println!(level:info, "Read dir: {}", self.folder_name);
         println!(level:info, "Dir entries: {:?}", entries);
     }
@@ -95,11 +103,17 @@ impl CreateFileOperation {
         println!(level:info, "Creating file: {}", self.file_name);
         let path = vfs::resolve_path(parent_path);
 
-        let mut parent = block_task(Box::pin(open_file((&path).into(), None, FileFlags::new().with_write(true))))
-            .expect("fopen failed in debug function");
+        let open_file_future = open_file((&path).into(), None, FileFlags::new().with_write(true));
+        let ffi_open_file_future = into_ffi_future(open_file_future);
+        let mut parent = block_task(ffi_open_file_future).expect("fopen failed in debug function");
 
-        let _ = block_task(Box::pin(vfs::create_file(&mut parent, file_name, InodeType::new_file(0))));
-        block_task(Box::pin(vfs::close_file(parent)));
+        let create_future = vfs::create_file(&mut parent, file_name, InodeType::new_file(0));
+        let ffi_create_future = into_ffi_future(create_future);
+        let _ = block_task(ffi_create_future);
+
+        let close_future = vfs::close_file(parent);
+        let ffi_close_future = into_ffi_future(close_future);
+        block_task(ffi_close_future);
     }
 }
 
@@ -143,13 +157,19 @@ impl WriteFileOperation {
         }
 
         let open_file_flags = FileFlags::new().with_write(true);
-        let mut file =
-            block_task(Box::pin(vfs::open_file((&path).into(), None, open_file_flags))).expect("fopen failed in debug function");
+
+        let open_file_future = vfs::open_file((&path).into(), None, open_file_flags);
+        let ffi_open_file_future = into_ffi_future(open_file_future);
+        let mut file = block_task(ffi_open_file_future).expect("fopen failed in debug function");
 
         println!(level:info, "Writing file: {} of size: {}", self.file_name, content.len());
-        block_task(Box::pin(vfs::write_file(&mut file, &frames, self.content.len() as u64)))
-            .expect("file write failed in debug function");
-        block_task(Box::pin(vfs::close_file(file)));
+        let write_future = vfs::write_file(&mut file, &frames, self.content.len() as u64);
+        let ffi_write_future = into_ffi_future(write_future);
+        block_task(ffi_write_future).expect("file write failed in debug function");
+
+        let close_future = vfs::close_file(file);
+        let ffi_close_future = into_ffi_future(close_future);
+        block_task(ffi_close_future);
 
         for frame in frames {
             unsafe { crate::memory::physical_allocator::deallocate_frame(frame) };
@@ -173,11 +193,17 @@ impl CreateFolderOperation {
         println!(level:info, "Creating folder: {}", self.folder_name);
         let path = vfs::resolve_path(parent_path);
 
-        let mut parent = block_task(Box::pin(open_file((&path).into(), None, FileFlags::new().with_write(true))))
-            .expect("fopen failed in debug function");
+        let open_file_future = open_file((&path).into(), None, FileFlags::new().with_write(true));
+        let ffi_open_file_future = into_ffi_future(open_file_future);
+        let mut parent = block_task(ffi_open_file_future).expect("fopen failed in debug function");
 
-        let _ = block_task(Box::pin(vfs::create_file(&mut parent, file_name, InodeType::new_dir(0))));
-        block_task(Box::pin(vfs::close_file(parent)));
+        let create_future = vfs::create_file(&mut parent, file_name, InodeType::new_dir(0));
+        let ffi_create_future = into_ffi_future(create_future);
+        let _ = block_task(ffi_create_future);
+
+        let close_future = vfs::close_file(parent);
+        let ffi_close_future = into_ffi_future(close_future);
+        block_task(ffi_close_future);
     }
 }
 
@@ -226,12 +252,17 @@ impl ReadFileOperation {
         }
 
         let open_file_flags = FileFlags::new().with_read(true);
-        let mut file =
-            block_task(Box::pin(vfs::open_file((&path).into(), None, open_file_flags))).expect("fopen failed in debug function");
+        let open_file_future = vfs::open_file((&path).into(), None, open_file_flags);
+        let ffi_open_file_future = into_ffi_future(open_file_future);
+        let mut file = block_task(ffi_open_file_future).expect("fopen failed in debug function");
 
-        block_task(Box::pin(vfs::read_file(&mut file, &buffer, real_length))).expect("file read failed in debug function");
+        let read_future = vfs::read_file(&mut file, &buffer, real_length);
+        let ffi_read_future = into_ffi_future(read_future);
+        block_task(ffi_read_future).expect("file read failed in debug function");
 
-        block_task(Box::pin(vfs::close_file(file)));
+        let close_future = vfs::close_file(file);
+        let ffi_close_future = into_ffi_future(close_future);
+        block_task(ffi_close_future);
 
         let mut final_data = Vec::with_capacity(length as usize);
         let mut frame_ptr = (offset as usize) & 0xFFF;

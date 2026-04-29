@@ -1,12 +1,12 @@
 use core::{slice, str};
-use std::{boxed::Box, println, sync::arc::Arc, vec::Vec};
+use std::{println, sync::arc::Arc, vec::Vec};
 
 use crate::{
     proc::{
         self, ProcessData,
         syscall::{self, SyscallArgs},
     },
-    task_runner,
+    task_runner::{self, PidOption},
     vfs::{self, InodeIdentifierChain, file::FileFlags},
 };
 
@@ -67,6 +67,8 @@ pub fn fopen(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
         proc::wake_process(pid)
     };
 
-    task_runner::add_task(Box::pin(task), Some(pid));
+    let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
+
+    task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
     true
 }

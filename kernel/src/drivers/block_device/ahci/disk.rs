@@ -5,7 +5,7 @@ use core::{array, fmt::Debug, mem::MaybeUninit, ops::DerefMut, sync::atomic::Ato
 use std::{
     boxed::Box,
     error::ErrorCode,
-    lock_w_info,
+    ffi_future, lock_w_info,
     mem_utils::{PhysAddr, VirtAddr, get_at_physical_addr, get_at_virtual_addr, memset_virtual_addr},
     println,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
@@ -58,7 +58,9 @@ impl LegacyPciDriver for AhciDriver {
         println!(level:info, "AHCI controller initialized");
         println!("Ahci controller: {:#X?}", controller);
         for port in controller.ports.iter() {
-            block_task(Box::pin(crate::vfs::add_disk(port.clone())));
+            let future = crate::vfs::add_disk(port.clone());
+            let ffi_future = ffi_future::future::into_ffi_future(future);
+            block_task(ffi_future);
         }
         self.controller = MaybeUninit::new(controller);
         Ok(())

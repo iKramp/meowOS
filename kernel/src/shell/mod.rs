@@ -2,11 +2,11 @@ use crate::{
     memory,
     proc::{self, Pid},
     shell::{cmd_cat::cmd_cat, cmd_ls::cmd_ls},
+    task_runner::PidOption,
     tty::TTY,
     vfs::{self, ResolvedPath, ResolvedPathBorrowed},
 };
 use std::{
-    boxed::Box,
     format, lock_w_info, println,
     string::{String, ToString},
     sync::no_int_spinlock::NoIntSpinlock,
@@ -64,7 +64,8 @@ impl ShellState {
                         }
                     }
                 };
-                crate::task_runner::add_task(Box::pin(task), None);
+                let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
+                crate::task_runner::add_task(ffi_safe_task, PidOption::None);
             }
             "cat" => {
                 println!("cat command executed");
@@ -80,7 +81,8 @@ impl ShellState {
                         }
                     }
                 };
-                crate::task_runner::add_task(Box::pin(task), None);
+                let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
+                crate::task_runner::add_task(ffi_safe_task, PidOption::None);
             }
             "mmap" => {
                 println!("mmap command executed");
@@ -96,7 +98,7 @@ impl ShellState {
 
                 self.started_proc = true;
 
-                let start_tty_proc_future = async move {
+                let task = async move {
                     let run_proc_future = proc::run_process_default_env((&resolved_path).into(), &cmd_cloned).await;
                     match run_proc_future {
                         Ok(pid) => {
@@ -110,7 +112,8 @@ impl ShellState {
                         }
                     }
                 };
-                crate::task_runner::add_task(Box::pin(start_tty_proc_future), None);
+                let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
+                crate::task_runner::add_task(ffi_safe_task, PidOption::None);
             }
             _ => {
                 lock_w_info!(TTY).print(&format!("Unknown command: {}\n", cmd_name));

@@ -7,7 +7,7 @@ pub struct DataQueueHead<T> {
     curr_nodes: usize,
 }
 
-pub struct DataQueueNode<T> {
+struct DataQueueNode<T> {
     next_node: Option<Box<DataQueueNode<T>>>,
     data: T,
 }

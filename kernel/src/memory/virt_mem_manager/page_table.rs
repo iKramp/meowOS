@@ -345,7 +345,7 @@ impl PageTable {
                 println!("setting prot at lowest level or huge page, entry before: {:?}", entry);
                 entry.set_writeable(permissions.write());
                 entry.set_no_execute(!permissions.execute());
-                flush_tlb(Some(table_addr + (i as u64) * pages_per_entry as u64 * 4096));
+                flush_tlb(Some(table_addr + i * pages_per_entry as u64 * 4096));
                 continue;
             }
 
@@ -356,7 +356,7 @@ impl PageTable {
 
             let lower_table_phys = entry.address();
             let lower_table = unsafe { get_at_physical_addr::<PageTable>(lower_table_phys) };
-            let lower_table_addr = table_addr + (i as u64) * pages_per_entry as u64 * 4096;
+            let lower_table_addr = table_addr + i * pages_per_entry as u64 * 4096;
             println!(
                 "recursively setting prot for lower table at level {}, page addr: {:?}",
                 table_level - 1,

@@ -38,6 +38,7 @@ pub static mut PROC_INITIALIZED: bool = false;
 static mut GENERIC_PAGE_TREE: PhysAddr = PhysAddr(0);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[repr(transparent)]
 pub struct Pid(pub u32);
 
 /// notes:

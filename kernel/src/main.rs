@@ -23,7 +23,7 @@
 extern crate static_cond;
 
 use core::ffi;
-use std::{boxed::Box, println, printlnc};
+use std::{println, printlnc};
 
 mod acpi;
 mod clocks;
@@ -50,8 +50,9 @@ mod utils;
 mod vfs;
 mod vga;
 use limine::LIMINE_BOOTLOADER_REQUESTS;
-use task_runner::block_task;
 use vfs::ResolvedPath;
+
+use crate::task_runner::block_task;
 
 const TIME_PRINTER: &[u8] = include_bytes!("../../assets/time_printer");
 
@@ -102,10 +103,9 @@ extern "C" fn _start() -> ! {
     vfs::init();
     net::init();
 
-    let res = block_task(Box::pin(vfs::mount_blkdev_partition(
-        cmd_args.root_partition,
-        ResolvedPath::root(),
-    )));
+    let future = vfs::mount_blkdev_partition(cmd_args.root_partition, ResolvedPath::root());
+    let ffi_future = std::ffi_future::future::into_ffi_future(future);
+    let res = block_task(ffi_future);
     if let Err(e) = res {
         println!(level:error, "{}", e);
         panic!("Failed to mount root partition");

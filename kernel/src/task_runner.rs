@@ -1,10 +1,8 @@
-use core::{
-    pin::Pin,
-    sync::atomic::AtomicU64,
-    task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
-};
+use core::{future::Future as StdFuture, pin::Pin, sync::atomic::AtomicU64, task::Context, task::Poll as StdPoll};
 use std::{
     boxed::Box,
+    ffi_future::future::{Future, Poll},
+    ffi_future::wake::*,
     lock_w_info, println,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
     vec::Vec,
@@ -14,7 +12,7 @@ use std::{
 use crate::{
     acpi::cpu_locals::CpuLocals,
     memory,
-    proc::{self, Pid, ProcessData, switch_to_generic_mem_tree},
+    proc::{self, Pid, ProcessData},
 };
 
 static REPEATING_TASKS: RWSpinlock<Vec<fn()>> = RWSpinlock::new(Vec::new());
@@ -31,24 +29,12 @@ pub fn run_repeating_tasks() {
     }
 }
 
-fn nop(_: *const ()) {}
-fn nop_clone(_: *const ()) -> RawWaker {
-    RawWaker::new(core::ptr::null(), &RawWakerVTable::new(nop_clone, nop, nop, nop))
-}
-fn nop_waker() -> Waker {
-    // SAFETY: VTABLE functions are no-ops, so this is safe
-    unsafe {
-        static VTABLE: RawWakerVTable = RawWakerVTable::new(nop_clone, nop, nop, nop);
-        Waker::from_raw(RawWaker::new(core::ptr::null(), &VTABLE))
-    }
-}
-
-pub fn block_task<'a, T>(mut task: Pin<Box<dyn Future<Output = T> + 'a>>) -> T {
+pub fn block_task<T>(task: Future<T>) -> T {
     let mut locals = CpuLocals::get_mut();
     let before_blocking = locals.lock_info.is_blocking_task();
     locals.lock_info.blocking_task();
     let data = loop {
-        match task.as_mut().poll(&mut Context::from_waker(&nop_waker())) {
+        match unsafe { (task.poll_fn)(task.data, Waker::noop()) } {
             Poll::Ready(data) => break data,
             Poll::Pending => {}
         }
@@ -61,39 +47,35 @@ pub fn block_task<'a, T>(mut task: Pin<Box<dyn Future<Output = T> + 'a>>) -> T {
 
 //probably won't change return type, tasks should modify process state or other things themselves (through
 //a pointer)
-pub type AsyncTask = Pin<Box<dyn Future<Output = ()>>>;
-struct AsyncTaskInternal {
+pub type AsyncTask = Future<()>;
+struct AsyncTaskWrapper {
     task: AsyncTask,
     proc_id: Option<Pid>,
     id: u64,
 }
-impl core::fmt::Debug for AsyncTaskInternal {
+
+impl core::fmt::Debug for AsyncTaskWrapper {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("AsyncTaskInternal")
+        f.debug_struct("FfiSafeAsyncTaskInternal")
             .field("proc_id", &self.proc_id)
             .field("id", &self.id)
             .finish()
     }
 }
 
-struct AsyncTaskHolder {
-    task: AsyncTaskInternal,
-    next_task: Option<Box<AsyncTaskHolder>>,
-}
-
 pub struct AsyncTaskData {
     task_id_counter: AtomicU64,
-    task_list: NoIntSpinlock<Option<Box<AsyncTaskHolder>>>,
+    task_list: NoIntSpinlock<std::queue::DataQueueHead<AsyncTaskWrapper>>,
     tasks_to_wake: NoIntSpinlock<Vec<u64>>,
     // waiting_tasks: NoIntSpinlock<BTreeMap<u64, AsyncTaskInternal>>,
-    waiting_tasks: NoIntSpinlock<Vec<(u64, AsyncTaskInternal)>>,
+    waiting_tasks: NoIntSpinlock<Vec<(u64, AsyncTaskWrapper)>>,
 }
 
 impl AsyncTaskData {
     pub const fn new() -> Self {
         Self {
             task_id_counter: AtomicU64::new(0),
-            task_list: NoIntSpinlock::new(None),
+            task_list: NoIntSpinlock::new(std::queue::DataQueueHead::new(100000)),
             tasks_to_wake: NoIntSpinlock::new(Vec::new()),
             // waiting_tasks: NoIntSpinlock::new(BTreeMap::new()),
             waiting_tasks: NoIntSpinlock::new(Vec::new()),
@@ -109,34 +91,43 @@ pub struct YieldOnce {
     yielded: bool,
 }
 
-impl Future for YieldOnce {
+impl StdFuture for YieldOnce {
     type Output = ();
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> StdPoll<Self::Output> {
         if self.yielded {
-            Poll::Ready(())
+            StdPoll::Ready(())
         } else {
             self.yielded = true;
             cx.waker().wake_by_ref();
-            Poll::Pending
+            StdPoll::Pending
         }
     }
 }
 
-pub fn add_task(task: AsyncTask, pid: Option<Pid>) {
+#[repr(C)]
+pub enum PidOption {
+    None,
+    Some(Pid),
+}
+
+pub extern "C" fn add_task(task: AsyncTask, pid: PidOption) {
     let locals = CpuLocals::get();
-    let mut task_list = lock_w_info!(locals.async_task_data.task_list);
 
     let id = locals
         .async_task_data
         .task_id_counter
         .fetch_add(1, core::sync::atomic::Ordering::AcqRel);
 
-    let task = AsyncTaskHolder {
-        task: AsyncTaskInternal { task, id, proc_id: pid },
-        next_task: task_list.take(),
+    let pid = match pid {
+        PidOption::None => None,
+        PidOption::Some(pid) => Some(pid),
     };
-    *task_list = Some(Box::new(task));
+
+    let internal = AsyncTaskWrapper { task, proc_id: pid, id };
+
+    let mut task_list = lock_w_info!(locals.async_task_data.task_list);
+    task_list.push(internal);
 }
 
 pub fn wake_task(task_id: u64, apic_id: u8) {
@@ -150,7 +141,7 @@ pub fn wake_task(task_id: u64, apic_id: u8) {
     to_wake.push(task_id);
 }
 
-fn sleep_task(task: AsyncTaskInternal) {
+fn sleep_task(task: AsyncTaskWrapper) {
     let locals = CpuLocals::get();
     let mut waiting_lock = lock_w_info!(locals.async_task_data.waiting_tasks);
     // waiting_lock.insert(task.id, task);
@@ -170,11 +161,7 @@ fn wake_tasks_in_list(locals: &mut CpuLocals) {
         for task_id in to_wake {
             if let Some(pos) = waiting_lock.iter().position(|(id, _)| *id == task_id) {
                 let (_, task) = waiting_lock.remove(pos);
-                let task = AsyncTaskHolder {
-                    task,
-                    next_task: task_list.take(),
-                };
-                *task_list = Some(Box::new(task));
+                task_list.push(task);
             } else {
                 println!("Tried to wake non-existing async task {}", task_id);
             }
@@ -188,16 +175,17 @@ pub fn process_tasks() {
     let mut locals = CpuLocals::get_mut();
     locals.lock_info.assert_no_locks();
     wake_tasks_in_list(&mut locals);
-    let mut task_list = lock_w_info!(locals.async_task_data.task_list);
-    let mut tasks_to_process = task_list.take();
-    drop(task_list);
     drop(locals);
 
-    let current_proc = None;
-
-    while let Some(mut task) = tasks_to_process {
-        tasks_to_process = task.next_task.take();
-        let new_pid = task.task.proc_id;
+    loop {
+        let locals = CpuLocals::get_mut();
+        let mut task_list = lock_w_info!(locals.async_task_data.task_list);
+        let Some(task) = task_list.get_first() else {
+            break;
+        };
+        drop(task_list);
+        drop(locals);
+        let new_pid = task.proc_id;
         let proc;
         if let Some(pid) = new_pid {
             let tmp_proc = proc::get_proc(pid);
@@ -208,13 +196,12 @@ pub fn process_tasks() {
         } else {
             proc = None;
         }
-        switch_mem_tree(&mut current_proc.as_ref(), proc.as_ref());
-        process_single_task(*task);
+        switch_mem_tree(&mut None, proc.as_ref());
+        process_single_task(task);
     }
-    switch_to_generic_mem_tree();
 }
 
-fn w_clone(this_data: *const ()) -> RawWaker {
+extern "C" fn w_clone(this_data: *const ()) -> RawWaker {
     let data = unsafe { &*(this_data as *mut WakerData) };
     let cloned = WakerData {
         apic_id: data.apic_id,
@@ -222,15 +209,15 @@ fn w_clone(this_data: *const ()) -> RawWaker {
     };
     ros_raw_waker(Box::new(cloned))
 }
-fn w_wake(this_data: *const ()) {
+extern "C" fn w_wake(this_data: *const ()) {
     let data = unsafe { Box::from_raw(this_data as *mut WakerData) };
     wake_task(data.task_id, data.apic_id);
 }
-fn w_wake_by_ref(this_data: *const ()) {
+extern "C" fn w_wake_by_ref(this_data: *const ()) {
     let data = unsafe { &*(this_data as *const WakerData) };
     wake_task(data.task_id, data.apic_id);
 }
-fn w_drop(this_data: *const ()) {
+extern "C" fn w_drop(this_data: *const ()) {
     let _data = unsafe { Box::from_raw(this_data as *mut WakerData) };
 }
 
@@ -248,16 +235,17 @@ fn ros_waker(data: Box<WakerData>) -> Waker {
     unsafe { Waker::from_raw(ros_raw_waker(data)) }
 }
 
-fn process_single_task(mut task: AsyncTaskHolder) {
+fn process_single_task(task: AsyncTaskWrapper) {
     let waker_data = Box::new(WakerData {
         apic_id: CpuLocals::get().apic_id,
-        task_id: task.task.id,
+        task_id: task.id,
     });
-    let result = task.task.task.as_mut().poll(&mut Context::from_waker(&ros_waker(waker_data)));
+    // let result = task.task.as_mut().poll(&mut Context::from_waker(&ros_waker(waker_data)));
+    let result = unsafe { (task.task.poll_fn)(task.task.data, &ros_waker(waker_data)) };
 
     match result {
         Poll::Pending => {
-            sleep_task(task.task);
+            sleep_task(task);
         }
         Poll::Ready(_) => {}
     }

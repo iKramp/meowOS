@@ -1,11 +1,11 @@
-use std::{boxed::Box, mem_utils::PhysAddr, sync::arc::Arc, vec::Vec};
+use std::{mem_utils::PhysAddr, sync::arc::Arc, vec::Vec};
 
 use crate::{
     proc::{
         ProcessData,
         syscall::{self, SyscallArgs},
     },
-    task_runner,
+    task_runner::{self, PidOption},
 };
 
 pub fn fread(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
@@ -69,6 +69,8 @@ pub fn fread(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
         crate::proc::wake_process(proc.pid())
     };
 
-    task_runner::add_task(Box::pin(task), Some(pid));
+    let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
+
+    task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
     true
 }
