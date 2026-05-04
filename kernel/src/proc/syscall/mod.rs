@@ -112,29 +112,48 @@ extern "C" fn handler_wrapper() -> ! {
             "mov gs:[16], rsp", //save user rsp to gsbase area
             "mov rsp, gs:[8]", //get kernel rsp from gsbase area
 
-            "sub rsp, 8*8",
-            "mov [rsp + 8*7], rbx",
-            "mov [rsp + 8*6], rbp",
-            "mov [rsp + 8*5], r12",
-            "mov [rsp + 8*4], r13",
-            "mov [rsp + 8*3], r14",
-            "mov [rsp + 8*2], r15",
-            "mov [rsp + 8*1], r11", //rflags is in r11
-            "mov [rsp + 8*0], rcx", //return rip
+            // "sub rsp, 8*8",
+            // "mov [rsp + 8*7], rbx",
+            // "mov [rsp + 8*6], rbp",
+            // "mov [rsp + 8*5], r12",
+            // "mov [rsp + 8*4], r13",
+            // "mov [rsp + 8*3], r14",
+            // "mov [rsp + 8*2], r15",
+            // "mov [rsp + 8*1], r11", //rflags is in r11
+            // "mov [rsp + 8*0], rcx", //return rip
+            //
+            // //push args too
+            // "sub rsp, 8*7",
+            // "mov [rsp + 8*6], rax", //syscall number
+            // "mov [rsp + 8*5], r9",
+            // "mov [rsp + 8*4], r8",
+            // "mov [rsp + 8*3], r10",
+            // "mov [rsp + 8*2], rdx",
+            // "mov [rsp + 8*1], rsi",
+            // "mov [rsp + 8*0], rdi",
+            //
+            // "mov rdi, rsp", //args rsp
 
-            //push args too
-            "sub rsp, 8*7",
-            "mov [rsp + 8*6], rax", //syscall number
-            "mov [rsp + 8*5], r9",
-            "mov [rsp + 8*4], r8",
-            "mov [rsp + 8*3], r10",
-            "mov [rsp + 8*2], rdx",
-            "mov [rsp + 8*1], rsi",
-            "mov [rsp + 8*0], rdi",
+            "sub rsp, 8*16", //space for 16 u64s
+            "mov [rsp + 0*8], rdi",
+            "mov [rsp + 1*8], rsi",
+            "mov [rsp + 2*8], rbp",
+            "mov rdi, gs:[16]", //user rsp
+            "mov [rsp + 3*8], rdi", //user rsp
+            "mov [rsp + 4*8], rax",
+            "mov [rsp + 5*8], rbx",
+            "mov [rsp + 6*8], rcx",
+            "mov [rsp + 7*8], rdx",
+            "mov [rsp + 8*8], r8",
+            "mov [rsp + 9*8], r9",
+            "mov [rsp + 10*8], r10",
+            "mov [rsp + 11*8], r11",
+            "mov [rsp + 12*8], r12",
+            "mov [rsp + 13*8], r13",
+            "mov [rsp + 14*8], r14",
+            "mov [rsp + 15*8], r15",
 
             "mov rdi, rsp", //args rsp
-
-
 
             "call {}",
             sym handler
@@ -211,4 +230,39 @@ pub struct SyscallArgs {
     arg5: u64,
     arg6: u64,
     syscall_number: u64,
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct NewSyscallCpuState {
+    pub rdi: u64,
+    pub rsi: u64,
+    pub rbp: u64,
+    pub rsp: u64,
+    pub rax: u64,
+    pub rbx: u64,
+    pub rcx: u64,
+    pub rdx: u64,
+    pub r8: u64,
+    pub r9: u64,
+    pub r10: u64,
+    pub r11: u64,
+    pub r12: u64,
+    pub r13: u64,
+    pub r14: u64,
+    pub r15: u64,
+}
+
+impl NewSyscallCpuState {
+    pub fn get_legacy_syscall_arg(&self, index: usize) -> Option<u64> {
+        match index {
+            0 => Some(self.rdi),
+            1 => Some(self.rsi),
+            2 => Some(self.rdx),
+            3 => Some(self.r10),
+            4 => Some(self.r8),
+            5 => Some(self.r9),
+            _ => None,
+        }
+    }
 }

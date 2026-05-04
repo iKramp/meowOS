@@ -1,9 +1,10 @@
 use std::{
     boxed::Box,
     error::ErrorCode,
+    lock_w_info,
     mem_utils::{PhysAddr, VirtAddr},
     println,
-    sync::arc::Arc,
+    sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
     vec::Vec,
 };
 
@@ -31,18 +32,31 @@ pub(in crate::proc) struct OwnedVirtualMemoryRange {
 
 #[derive(Debug)]
 pub(in crate::proc) struct MemoryNamespace {
+    id: u64,
     page_tree_root: PhysAddr,
+    pub dynamic_data: NoIntSpinlock<MemoryNamespaceDynamicData>,
+}
+#[derive(Debug)]
+pub(in crate::proc) struct MemoryNamespaceDynamicData {
     range_counter: u32,
     memory_ranges: Vec<OwnedVirtualMemoryRange>,
 }
-impl ProcNamespace for MemoryNamespace {}
+
+impl ProcNamespace for MemoryNamespace {
+    fn get_id(&self) -> u64 {
+        self.id
+    }
+}
 
 impl MemoryNamespace {
-    pub fn new(page_tree_root: PhysAddr) -> Self {
+    pub fn new(id: u64, page_tree_root: PhysAddr) -> Self {
         Self {
+            id,
             page_tree_root,
-            memory_ranges: Vec::new(),
-            range_counter: 0,
+            dynamic_data: NoIntSpinlock::new(MemoryNamespaceDynamicData {
+                memory_ranges: Vec::new(),
+                range_counter: 0,
+            }),
         }
     }
 
@@ -62,8 +76,9 @@ impl MemoryNamespace {
             //disallow mapping in kernel space
             return Err(ErrorCode::InvalidArgument);
         }
+        let mut dynamic = lock_w_info!(self.dynamic_data);
 
-        let illegal_map = self.memory_ranges.iter().any(|r| {
+        let illegal_map = dynamic.memory_ranges.iter().any(|r| {
             r.name == name || {
                 let r_range = r.shared_range.reserved_range(r.map_address);
                 r_range.start < new_range.end && new_range.start < r_range.end
@@ -89,26 +104,20 @@ impl MemoryNamespace {
         entry.set_writeable(true);
         //restrictions apply at lower levels
 
-        self.memory_ranges.push(OwnedVirtualMemoryRange {
+        let counter = dynamic.range_counter;
+        dynamic.memory_ranges.push(OwnedVirtualMemoryRange {
             shared_range: range,
             name,
             range_type,
             map_address,
-            range_id: self.range_counter,
+            range_id: counter,
         });
-        self.range_counter += 1;
+        dynamic.range_counter += 1;
         Ok(())
     }
 
-    pub fn get_by_containing_addr(&self, addr: VirtAddr) -> Option<&OwnedVirtualMemoryRange> {
-        self.memory_ranges.iter().find(|r| {
-            let r_range = r.shared_range.reserved_range(r.map_address);
-            r_range.start <= addr && addr < r_range.end
-        })
-    }
-
     pub fn remove_mem_range_by_name(&mut self, name: &str) -> Result<(), ErrorCode> {
-        let index = self
+        let index = lock_w_info!(self.dynamic_data)
             .memory_ranges
             .iter()
             .position(|r| *r.name == *name)
@@ -118,7 +127,7 @@ impl MemoryNamespace {
     }
 
     pub fn remove_mem_range_by_id(&mut self, id: u32) -> Result<(), ErrorCode> {
-        let index = self
+        let index = lock_w_info!(self.dynamic_data)
             .memory_ranges
             .iter()
             .position(|r| r.range_id == id)
@@ -128,7 +137,7 @@ impl MemoryNamespace {
     }
 
     pub fn remove_mem_range_by_index(&mut self, index: u32) {
-        let range = self.memory_ranges.swap_remove(index as usize);
+        let range = lock_w_info!(self.dynamic_data).memory_ranges.swap_remove(index as usize);
         let Some(table_entry) =
             memory::get_page_table_entry_at_level(self.page_tree_root, range.map_address, range.shared_range.level() + 1, false)
         else {
@@ -160,7 +169,7 @@ impl MemoryNamespace {
                 //disallow mapping in kernel space
                 return None;
             }
-            for range in self.memory_ranges.iter() {
+            for range in lock_w_info!(self.dynamic_data).memory_ranges.iter() {
                 let r_range = range.shared_range.reserved_range(range.map_address);
                 if r_range.start < curr_range.end && curr_range.start < r_range.end {
                     current_addr = r_range.end;
@@ -170,7 +179,9 @@ impl MemoryNamespace {
             return Some(current_addr);
         }
     }
+}
 
+impl MemoryNamespaceDynamicData {
     pub fn regions(&self) -> &Vec<OwnedVirtualMemoryRange> {
         &self.memory_ranges
     }
@@ -182,7 +193,7 @@ impl Drop for MemoryNamespace {
             panic!("invalid page tree root");
         }
 
-        for range in self.memory_ranges.iter() {
+        for range in lock_w_info!(self.dynamic_data).memory_ranges.iter() {
             let Some(table_entry) = memory::get_page_table_entry_at_level(
                 self.page_tree_root,
                 range.map_address,
@@ -199,6 +210,7 @@ impl Drop for MemoryNamespace {
 
             table_entry.0 = 0;
         }
+
         memory::delete_page_table(self.page_tree_root, 4, false);
     }
 }

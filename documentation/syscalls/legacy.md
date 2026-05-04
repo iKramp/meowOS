@@ -1,28 +1,5 @@
-# GENERAL SYSCALL DOCUMENTATION
-
-Syscalls in this kernel are made to be flexible. Ideally, there will be no duplicate syscalls (where one just accepts more parametyers)
-For example, linux has many syscall() and syscallat() pairs. This creates unnecessary bloat in the syscall table.
-
-## SYSCALL CONVENTIONS
-
-| Arg Number | Register (x86_64) |
-|------------|-------------------|
-| syscall index | rax |
-| 1 | rdi |
-| 2 | rsi |
-| 3 | rdx |
-| 4 | r10 |
-| 5 | r8 |
-| 6 | r9 |
-| Return Value | rax |
-| Errno Value | rdx |
-
-This table follows the linux x86_64 convention. 
-If there are too many parameters for 6 registers, an in process memory structure should be used.
-If there are too many return values, an in process memory structure should be used.
-
-## ERROR HANDLING
-Errno value is 0 on success, otherwise it is the error code. Return value may still be valid on error, depending on the syscall.
+# LEGACY SYSCALL DOCUMENTATION
+These syscalls are provided for old program compatibility
 
 ## SYSCALL LIST
 | Syscall Number | Name | Description |
@@ -41,28 +18,6 @@ Errno value is 0 on success, otherwise it is the error code. Return value may st
 | 11 | sleep | puts the calling process to sleep for a specified duration |
 | 12 | time | gets the current system time |
 
-This table will be expanded
-
-## STRINGS AND BUFFERS
-The kernel uses rust style strings and buffers. They are represented as:
-String -> struct where the first field is size (u64) and the second is a pointer to utf8 valid data
-String size does NOT include the null terminator, and is measured in bytes (not utf8 codepoints)
-```C
-struct String {
-    uint64_t str_size;
-    char *data_ptr;
-};
-```
-Buffer -> struct where the first field is size (u64) in count of elements and the second is a pointer to bytes of data
-```C
-//pretend rust style generics exist
-struct Buffer<T> {
-    uint64_t buf_size;
-    T *data_ptr;
-};
-```
-For clarity, whenever these values are passed via registers in syscall args (see exec path, arg list and env list) they
-will be split
 
 ## DETAILED SYSCALL DOCUMENTATION
 

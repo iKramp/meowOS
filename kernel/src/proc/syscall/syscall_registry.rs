@@ -60,6 +60,7 @@ impl SyscallRegistry {
 }
 
 pub fn register_syscall_pack(name: Box<str>, pack: Arc<SyscallPack>) {
+    assert!(pack.handlers.len() <= 32, "SyscallPack can have at most 32 handlers");
     SYSCALL_REGISTRY.register_syscall_pack(name, pack);
 }
 

@@ -69,7 +69,7 @@ impl ProcessData {
         cpu_state: CpuStateType,
         namespaces: ProcNamespaces,
     ) -> Self {
-        let root = lock_w_info!(namespaces.memory_namespace).page_tree_root();
+        let root = namespaces.memory_namespace.page_tree_root();
         Self {
             pid,
             is_32_bit,

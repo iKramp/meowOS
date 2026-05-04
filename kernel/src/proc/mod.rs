@@ -1,4 +1,7 @@
-use core::{mem::MaybeUninit, sync::atomic::AtomicU32};
+use core::{
+    mem::MaybeUninit,
+    sync::atomic::{AtomicU32, AtomicU64},
+};
 use scheduler::Scheduler;
 use std::{
     boxed::Box,
@@ -33,6 +36,7 @@ pub use scheduler::save_and_release_current;
 static SCHEDULER: NoIntSpinlock<MaybeUninit<Scheduler>> = NoIntSpinlock::new(MaybeUninit::uninit());
 
 static PROCESS_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
+static NAMESPACE_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub static mut PROC_INITIALIZED: bool = false;
 static mut GENERIC_PAGE_TREE: PhysAddr = PhysAddr(0);
@@ -41,32 +45,15 @@ static mut GENERIC_PAGE_TREE: PhysAddr = PhysAddr(0);
 #[repr(transparent)]
 pub struct Pid(pub u32);
 
-/// notes:
-/// page tree root should always be unique
-/// stack size pages should not be larger than [`context::info::MAX_PROC_STACK_SIZE_PAGES`]
-#[derive(Debug)]
-pub(super) struct MemoryContext {
-    initialized: bool,
-    is_32_bit: bool,
-    memory_namespace: MemoryNamespace,
-    //shared regions here?
-}
-
-impl Default for MemoryContext {
-    fn default() -> Self {
-        Self {
-            initialized: false,
-            is_32_bit: false,
-            memory_namespace: MemoryNamespace::new(PhysAddr(0)),
-        }
-    }
-}
-
 #[derive(Debug)]
 struct MappedMemoryRegion {
     name: Box<str>,
     base: VirtAddr,
     size_pages: u64,
+}
+
+pub fn get_namespace_id() -> u64 {
+    NAMESPACE_ID_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed)
 }
 
 pub fn init() {

@@ -36,16 +36,18 @@ pub fn create_process(context_info: &ContextInfo) -> Result<Pid, ErrorCode> {
     let rip = context_info.entry_point().0;
 
     let memory_namespace = build_mem_namespace_for_new_proc(context_info)?;
+    let dynamic_namespace_data = lock_w_info!(memory_namespace.dynamic_data);
 
-    let stack = memory_namespace
+    let stack = dynamic_namespace_data
         .regions()
         .iter()
         .find(|region| region.range_type == MemoryRangeType::Stack)
         .expect("stack must exist for each proc");
     let rsp = stack.shared_range.reserved_range(stack.map_address).end.0 - 16;
+    drop(dynamic_namespace_data);
 
-    let memory_namespace = Arc::new(NoIntSpinlock::new(memory_namespace));
-    let syscall_namespace = Arc::new(SyscallNamespace::default());
+    let memory_namespace = Arc::new(memory_namespace);
+    let syscall_namespace = Arc::new(SyscallNamespace::default(crate::proc::get_namespace_id()));
 
     let cpu_state = InterruptProcessorState::new(rip, rsp);
     let process_data = ProcessData::new(
@@ -183,7 +185,7 @@ pub fn build_empty_memory_namespace() -> MemoryNamespace {
     let new_page_tree_root = memory::physical_allocator::allocate_frame();
     unsafe { memset_physical_addr(new_page_tree_root, 0x0, 0x1000) };
 
-    let namespace = MemoryNamespace::new(new_page_tree_root);
+    let namespace = MemoryNamespace::new(crate::proc::get_namespace_id(), new_page_tree_root);
 
     let existing_page_tree_root = memory::current_root();
     memory::copy_higher_half(existing_page_tree_root, new_page_tree_root);

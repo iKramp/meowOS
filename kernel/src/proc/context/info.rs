@@ -2,8 +2,6 @@ use bitfield::bitfield;
 use core::{fmt::Debug, str::Chars};
 use std::{boxed::Box, mem_utils::VirtAddr, string::String, vec::Vec};
 
-use crate::proc::MemoryContext;
-
 pub const MAX_PROC_STACK_SIZE_PAGES: usize = 0x4; // 16KB
 
 bitfield! {
@@ -226,16 +224,6 @@ pub enum ContextInfoError {
     EntryPointNotMapped,
     InitRegionNotMapped,
     InvalidCmdLine,
-}
-
-impl Drop for MemoryContext {
-    fn drop(&mut self) {
-        if !self.initialized {
-            return; //dummy context
-        }
-        //unmap higher half and any shared regions
-        todo!("All processes running with this context have been dropped. Clean up")
-    }
 }
 
 pub struct CommandSplitter<'a> {
