@@ -11,22 +11,22 @@ pub fn init_namespace_management_syscalls() {
     syscall::register_syscall_pack("namespace_management".into(), Arc::new(namespace_management_syscalls));
 }
 
-pub fn mknamespace(_args: &mut syscall::NewSyscallCpuState, _proc: &Arc<crate::proc::ProcessData>) -> bool {
+pub fn mknamespace(_args: &mut syscall::SyscallCpuState, _proc: &Arc<crate::proc::ProcessData>) -> bool {
     //todo
     false
 }
 
-pub fn rmnamespace(_args: &mut syscall::NewSyscallCpuState, _proc: &Arc<crate::proc::ProcessData>) -> bool {
+pub fn rmnamespace(_args: &mut syscall::SyscallCpuState, _proc: &Arc<crate::proc::ProcessData>) -> bool {
     //todo
     false
 }
 
-pub fn chnamespace(_args: &mut syscall::NewSyscallCpuState, _proc: &Arc<crate::proc::ProcessData>) -> bool {
+pub fn chnamespace(_args: &mut syscall::SyscallCpuState, _proc: &Arc<crate::proc::ProcessData>) -> bool {
     //todo
     false
 }
 
-pub fn lsnamespace(_args: &mut syscall::NewSyscallCpuState, _proc: &Arc<crate::proc::ProcessData>) -> bool {
+pub fn lsnamespace(_args: &mut syscall::SyscallCpuState, _proc: &Arc<crate::proc::ProcessData>) -> bool {
     //todo
     false
 }

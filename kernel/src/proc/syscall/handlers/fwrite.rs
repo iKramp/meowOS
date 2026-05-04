@@ -3,12 +3,12 @@ use std::{mem_utils::PhysAddr, println, sync::arc::Arc, vec::Vec};
 use crate::{
     proc::{
         ProcessData,
-        syscall::{self, NewSyscallCpuState},
+        syscall::{self, SyscallCpuState},
     },
     task_runner::{self, PidOption},
 };
 
-pub fn fwrite(args: &mut NewSyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+pub fn fwrite(args: &mut SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let fd = args.get_legacy_syscall_arg(1);
     let size = args.get_legacy_syscall_arg(2);
     let buffer_ptr = args.get_legacy_syscall_arg(3) as *const u8;

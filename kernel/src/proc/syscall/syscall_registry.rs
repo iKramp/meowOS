@@ -5,9 +5,9 @@ use std::{
     vec::Vec,
 };
 
-use crate::proc::{ProcessData, syscall::NewSyscallCpuState};
+use crate::proc::{ProcessData, syscall::SyscallCpuState};
 
-pub type SyscallHandler = fn(&mut NewSyscallCpuState, &Arc<ProcessData>) -> bool;
+pub type SyscallHandler = fn(&mut SyscallCpuState, &Arc<ProcessData>) -> bool;
 
 #[derive(Debug)]
 pub struct SyscallPack {

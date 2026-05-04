@@ -6,7 +6,7 @@ use crate::{
     memory,
 };
 
-use super::{ProcessData, process_data::CpuStateType, syscall::NewSyscallCpuState};
+use super::{ProcessData, process_data::CpuStateType, syscall::SyscallCpuState};
 
 /*
  * Things that need to be done: (Intel SDM, Vol 3, chapter 8.1.2
@@ -84,7 +84,7 @@ fn return_interrupted(interrupt_frame: &InterruptProcessorState) -> ! {
 }
 
 #[naked]
-extern "C" fn return_syscalled(cpu_state: &NewSyscallCpuState) -> ! {
+extern "C" fn return_syscalled(cpu_state: &SyscallCpuState) -> ! {
     //INFO: any kind of change here should be matched with the one in syscall.rs
     unsafe {
         core::arch::naked_asm!(

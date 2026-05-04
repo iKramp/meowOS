@@ -8,7 +8,7 @@ use std::{
 
 use crate::{
     interrupts::InterruptProcessorState,
-    proc::{ProcNamespaces, syscall::NewSyscallCpuState},
+    proc::{ProcNamespaces, syscall::SyscallCpuState},
     vfs::{
         InodeIdentifier,
         file::{FileDescriptor, FileHandle},
@@ -52,13 +52,13 @@ impl ProcessDataMutable {
 #[derive(Debug)]
 pub enum CpuStateType {
     Interrupt(InterruptProcessorState),
-    Syscall(NewSyscallCpuState),
+    Syscall(SyscallCpuState),
     None, //is currently running, was taken
 }
 
 pub enum StackCpuStateData<'a> {
     Interrupt(&'a InterruptProcessorState),
-    Syscall(&'a NewSyscallCpuState),
+    Syscall(&'a SyscallCpuState),
 }
 
 impl ProcessData {

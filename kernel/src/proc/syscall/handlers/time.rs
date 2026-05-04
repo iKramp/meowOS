@@ -6,10 +6,10 @@ use std::{
 
 use crate::proc::{
     ProcessData,
-    syscall::{self, NewSyscallCpuState},
+    syscall::{self, SyscallCpuState},
 };
 
-pub fn time(args: &mut NewSyscallCpuState, _proc: &Arc<ProcessData>) -> bool {
+pub fn time(args: &mut SyscallCpuState, _proc: &Arc<ProcessData>) -> bool {
     let time = unsafe { GET_TIME() };
     let duration = time.duration_since(UNIX_EPOCH);
 

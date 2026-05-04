@@ -168,7 +168,7 @@ extern "C" fn handler(saved_regs_ptr: u64) -> ! {
 
     let saved_regs_ptr = saved_regs_ptr as *mut u64;
 
-    let saved_regs = unsafe { &mut *(saved_regs_ptr as *mut NewSyscallCpuState) };
+    let saved_regs = unsafe { &mut *(saved_regs_ptr as *mut SyscallCpuState) };
 
     let mut locals = crate::acpi::cpu_locals::CpuLocals::get_mut();
     unsafe { core::ptr::addr_of_mut!(locals.int_depth).write_volatile(1) };
@@ -203,7 +203,7 @@ extern "C" fn handler(saved_regs_ptr: u64) -> ! {
 
 #[derive(Debug, Clone)]
 #[repr(C)]
-pub struct NewSyscallCpuState {
+pub struct SyscallCpuState {
     pub rdi: u64,
     pub rsi: u64,
     pub rbp: u64,
@@ -222,7 +222,7 @@ pub struct NewSyscallCpuState {
     pub r15: u64,
 }
 
-impl NewSyscallCpuState {
+impl SyscallCpuState {
     pub fn get_legacy_syscall_arg(&self, index: usize) -> u64 {
         match index {
             1 => self.rdi,

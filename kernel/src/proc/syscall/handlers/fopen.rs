@@ -4,13 +4,13 @@ use std::{println, sync::arc::Arc, vec::Vec};
 use crate::{
     proc::{
         self, ProcessData,
-        syscall::{self, NewSyscallCpuState},
+        syscall::{self, SyscallCpuState},
     },
     task_runner::{self, PidOption},
     vfs::{self, InodeIdentifierChain, file::FileFlags},
 };
 
-pub fn fopen(args: &mut NewSyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+pub fn fopen(args: &mut SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let pid = proc.pid();
     let path_len = args.get_legacy_syscall_arg(1);
     let path_ptr = args.get_legacy_syscall_arg(2);

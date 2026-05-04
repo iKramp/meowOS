@@ -5,7 +5,7 @@ use super::{
     ProcessData,
     process_data::{CpuStateType, StackCpuStateData},
     switch_to_generic_mem_tree,
-    syscall::NewSyscallCpuState,
+    syscall::SyscallCpuState,
 };
 
 pub enum SleepCondition {
@@ -110,7 +110,7 @@ impl Scheduler {
         old_proc.set_cpu_data(CpuStateType::Interrupt(interrupt_frame.clone()));
     }
 
-    fn save_syscalled(old_proc: &ProcessData, syscall_data: &NewSyscallCpuState) {
+    fn save_syscalled(old_proc: &ProcessData, syscall_data: &SyscallCpuState) {
         old_proc.set_cpu_data(CpuStateType::Syscall(syscall_data.clone()));
     }
 
