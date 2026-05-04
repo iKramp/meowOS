@@ -31,7 +31,7 @@ mod syscall;
 pub use context::CommandSplitter;
 pub use context_switch::{context_switch, interrupt_context_switch};
 pub use process_data::{ProcessData, StackCpuStateData};
-pub use scheduler::save_and_release_current;
+pub use scheduler::{release_current_proc, save_cpu_state};
 
 static SCHEDULER: NoIntSpinlock<MaybeUninit<Scheduler>> = NoIntSpinlock::new(MaybeUninit::uninit());
 

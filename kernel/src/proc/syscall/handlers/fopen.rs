@@ -10,7 +10,7 @@ use crate::{
     vfs::{self, InodeIdentifierChain, file::FileFlags},
 };
 
-pub fn fopen(args: &mut SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+pub fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let pid = proc.pid();
     let path_len = args.get_legacy_syscall_arg(1);
     let path_ptr = args.get_legacy_syscall_arg(2);
@@ -20,13 +20,13 @@ pub fn fopen(args: &mut SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
 
     let res = syscall::verify_memory_range(path_ptr, path_ptr + path_len);
     if !res {
-        args.set_legacy_syscall_ret(u64::MAX, 1);
+        proc.set_syscall_return(u64::MAX, 1);
         return false;
     }
 
     let Ok(path) = (unsafe { str::from_utf8(slice::from_raw_parts(path_ptr as *const u8, path_len as usize)) }) else {
         println!("fopen: invalid path string (not utf8)");
-        args.set_legacy_syscall_ret(u64::MAX, 1);
+        proc.set_syscall_return(u64::MAX, 1);
         return false;
     };
 
@@ -36,7 +36,7 @@ pub fn fopen(args: &mut SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         let proc_mut = proc.get_mutable();
         let Some(f_handle) = proc_mut.get_file_handle(fd) else {
             println!("fopen: invalid fd {fd}");
-            args.set_legacy_syscall_ret(u64::MAX, 1);
+            proc.set_syscall_return(u64::MAX, 1);
             return false;
         };
         let mut new_chain = Vec::from(f_handle.parent_chain.as_ref());

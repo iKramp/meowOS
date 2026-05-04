@@ -98,7 +98,7 @@ impl Scheduler {
         CpuLocals::get_mut().current_process = None;
     }
 
-    fn save_current_proc(&mut self, old_proc: &Arc<ProcessData>, on_stack_data: &StackCpuStateData) {
+    fn save_current_proc(old_proc: &Arc<ProcessData>, on_stack_data: &StackCpuStateData) {
         let old_proc = &mut old_proc.get();
         match on_stack_data {
             StackCpuStateData::Interrupt(interrupt_frame) => Self::save_interrupted(old_proc, interrupt_frame),
@@ -119,9 +119,12 @@ impl Scheduler {
     }
 }
 
-pub fn save_and_release_current(old_proc: &Arc<ProcessData>, on_stack_data: &StackCpuStateData, sleep: Option<SleepCondition>) {
+pub fn release_current_proc(old_proc: &Arc<ProcessData>, sleep: Option<SleepCondition>) {
     let scheduler_lock = &mut lock_w_info!(super::SCHEDULER);
     let scheduler = unsafe { scheduler_lock.assume_init_mut() };
-    scheduler.save_current_proc(old_proc, on_stack_data);
     scheduler.release_process(old_proc.get().pid(), sleep);
+}
+
+pub fn save_cpu_state(on_stack_data: &StackCpuStateData, proc: &Arc<ProcessData>) {
+    Scheduler::save_current_proc(proc, on_stack_data);
 }

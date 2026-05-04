@@ -8,7 +8,7 @@ use crate::{
     task_runner::{self, PidOption},
 };
 
-pub fn fread(args: &mut SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let fd = args.get_legacy_syscall_arg(1);
     let size = args.get_legacy_syscall_arg(2);
     let buffer_ptr = args.get_legacy_syscall_arg(3) as *mut u8;
@@ -16,12 +16,12 @@ pub fn fread(args: &mut SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let pid = proc.pid();
 
     if !syscall::verify_memory_range(buffer_ptr as u64, buffer_ptr as u64 + size) {
-        args.set_legacy_syscall_ret(u64::MAX, 1);
+        proc.set_syscall_return(u64::MAX, 1);
         return false;
     }
 
     if size == 0 {
-        args.set_legacy_syscall_ret(0, 0);
+        proc.set_syscall_return(0, 0);
         return true;
     }
 
@@ -30,7 +30,7 @@ pub fn fread(args: &mut SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         if let Some(f_handle) = proc_mut.take_file_handle(fd) {
             f_handle
         } else {
-            args.set_legacy_syscall_ret(u64::MAX, 1);
+            proc.set_syscall_return(u64::MAX, 1);
             return false;
         }
     };

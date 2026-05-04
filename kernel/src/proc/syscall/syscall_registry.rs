@@ -7,7 +7,7 @@ use std::{
 
 use crate::proc::{ProcessData, syscall::SyscallCpuState};
 
-pub type SyscallHandler = fn(&mut SyscallCpuState, &Arc<ProcessData>) -> bool;
+pub type SyscallHandler = fn(&SyscallCpuState, &Arc<ProcessData>) -> bool;
 
 #[derive(Debug)]
 pub struct SyscallPack {

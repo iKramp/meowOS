@@ -3,7 +3,7 @@ use std::println;
 use super::{
     context_switch::no_ret_context_switch,
     process_data::StackCpuStateData,
-    scheduler::{SleepCondition, save_and_release_current},
+    scheduler::{SleepCondition, release_current_proc, save_cpu_state},
 };
 use crate::{
     acpi::cpu_locals::PageFaultHandleMode,
@@ -181,6 +181,8 @@ extern "C" fn handler(saved_regs_ptr: u64) -> ! {
     drop(locals);
     enable_interrupts();
 
+    save_cpu_state(&StackCpuStateData::Syscall(saved_regs), &curr_proc);
+
     let syscall_number = saved_regs.rax;
     println!("Syscall number: {}, state: {:#X?}", syscall_number, saved_regs);
 
@@ -197,7 +199,7 @@ extern "C" fn handler(saved_regs_ptr: u64) -> ! {
 
     let sleep_cond = if task_sleep { Some(SleepCondition::Event) } else { None };
 
-    save_and_release_current(&curr_proc, &StackCpuStateData::Syscall(saved_regs), sleep_cond);
+    release_current_proc(&curr_proc, sleep_cond);
     no_ret_context_switch();
 }
 
@@ -233,10 +235,5 @@ impl SyscallCpuState {
             6 => self.r9,
             _ => panic!("Invalid legacy syscall argument index: {}", index),
         }
-    }
-
-    pub fn set_legacy_syscall_ret(&mut self, val: u64, err: u64) {
-        self.rax = val;
-        self.rdx = err;
     }
 }

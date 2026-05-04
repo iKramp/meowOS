@@ -1,6 +1,6 @@
 use crate::{
     acpi::cpu_locals::{CpuLocals, PageFaultHandleMode},
-    proc::{StackCpuStateData, interrupt_context_switch, save_and_release_current},
+    proc::{StackCpuStateData, interrupt_context_switch, release_current_proc, save_cpu_state},
 };
 
 use super::{disable_interrupts, enable_interrupts};
@@ -217,7 +217,8 @@ pub extern "C" fn general_interrupt_handler(
     }
     if let Some(curr_proc) = locals.current_process.as_mut() {
         //save current process state
-        save_and_release_current(curr_proc, &StackCpuStateData::Interrupt(proc_data), None);
+        save_cpu_state(&StackCpuStateData::Interrupt(proc_data), curr_proc);
+        release_current_proc(curr_proc, None);
     }
     drop(locals);
     interrupt_context_switch();

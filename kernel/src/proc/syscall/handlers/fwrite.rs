@@ -8,7 +8,7 @@ use crate::{
     task_runner::{self, PidOption},
 };
 
-pub fn fwrite(args: &mut SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+pub fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let fd = args.get_legacy_syscall_arg(1);
     let size = args.get_legacy_syscall_arg(2);
     let buffer_ptr = args.get_legacy_syscall_arg(3) as *const u8;
@@ -19,12 +19,12 @@ pub fn fwrite(args: &mut SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
 
     if !syscall::verify_memory_range(buffer_ptr as u64, buffer_ptr as u64 + size) {
         println!("fwrite: invalid buffer pointer or size");
-        args.set_legacy_syscall_ret(u64::MAX, 1);
+        proc.set_syscall_return(u64::MAX, 1);
         return false;
     }
 
     if size == 0 {
-        args.set_legacy_syscall_ret(0, 0);
+        proc.set_syscall_return(0, 0);
         return true;
     }
 
@@ -34,7 +34,7 @@ pub fn fwrite(args: &mut SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
             f_handle
         } else {
             println!("fwrite: invalid fd {fd}");
-            args.set_legacy_syscall_ret(u64::MAX, 1);
+            proc.set_syscall_return(u64::MAX, 1);
             return false;
         }
     };
