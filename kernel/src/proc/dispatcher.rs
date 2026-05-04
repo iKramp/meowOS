@@ -6,7 +6,7 @@ use crate::{
     memory,
 };
 
-use super::{ProcessData, process_data::CpuStateType, syscall::SyscallCpuState};
+use super::{ProcessData, process_data::CpuStateType, syscall::NewSyscallCpuState};
 
 /*
  * Things that need to be done: (Intel SDM, Vol 3, chapter 8.1.2
@@ -32,14 +32,6 @@ pub(super) fn dispatch(new_proc: &ProcessData) -> ! {
     disable_interrupts();
     let cpu_state = new_proc.take_cpu_state();
     println!("Dispatching process with state: {:x?}", cpu_state);
-    unsafe {
-        core::arch::asm!(
-            //this is a bit tricky. We can do this because context switch is only called on
-            //syscalls (they did swapgs) and non-async interrupts, and those interrupts can check
-            //(and did do so) if they are the root interrupt, meaning they did swapgs
-            "swapgs"
-        );
-    }
 
     locals.int_depth -= 1;
     locals.lock_info.assert_no_locks();
@@ -50,7 +42,7 @@ pub(super) fn dispatch(new_proc: &ProcessData) -> ! {
 
     match cpu_state {
         CpuStateType::Interrupt(interrupt_frame) => return_interrupted(&interrupt_frame),
-        CpuStateType::Syscall((state, rsp)) => return_syscalled(&state, rsp),
+        CpuStateType::Syscall(state) => return_syscalled(&state),
         CpuStateType::None => panic!("Process with no CPU state dispatched (currently running)"),
     }
 }
@@ -80,6 +72,9 @@ fn return_interrupted(interrupt_frame: &InterruptProcessorState) -> ! {
             "mov rax, [rsp + 8 * 14]",
             //rsp + 8 * 15 is error code
             "add rsp, 8 * 16",
+
+            "swapgs", //restore gs for user code
+
             "iretq",
 
             in(reg) interrupt_frame_addr
@@ -89,22 +84,39 @@ fn return_interrupted(interrupt_frame: &InterruptProcessorState) -> ! {
 }
 
 #[naked]
-extern "C" fn return_syscalled(cpu_state: &SyscallCpuState, userspace_stack: u64) -> ! {
+extern "C" fn return_syscalled(cpu_state: &NewSyscallCpuState) -> ! {
     //INFO: any kind of change here should be matched with the one in syscall.rs
     unsafe {
         core::arch::naked_asm!(
             //cpu_state in rdi
-            "mov rdx, [rdi + 8 * 0]",
-            "mov rax, [rdi + 8 * 1]",
-            "mov rcx, [rdi + 8 * 2]",
-            "mov r11, [rdi + 8 * 3]",
-            "mov r15, [rdi + 8 * 4]",
-            "mov r14, [rdi + 8 * 5]",
-            "mov r13, [rdi + 8 * 6]",
-            "mov r12, [rdi + 8 * 7]",
-            "mov rbp, [rdi + 8 * 8]",
-            "mov rbx, [rdi + 8 * 9]",
-            "mov rsp, rsi",
+            // "mov rdx, [rdi + 8 * 0]",
+            // "mov rax, [rdi + 8 * 1]",
+            // "mov rcx, [rdi + 8 * 2]",
+            // "mov r11, [rdi + 8 * 3]",
+            // "mov r15, [rdi + 8 * 4]",
+            // "mov r14, [rdi + 8 * 5]",
+            // "mov r13, [rdi + 8 * 6]",
+            // "mov r12, [rdi + 8 * 7]",
+            // "mov rbp, [rdi + 8 * 8]",
+            // "mov rbx, [rdi + 8 * 9]",
+            // "mov rsp, rsi",
+            "mov rsi, [rdi + 8 * 1]",
+            "mov rbp, [rdi + 8 * 2]",
+            "mov rsp, [rdi + 8 * 3]",
+            "mov rax, [rdi + 8 * 4]",
+            "mov rbx, [rdi + 8 * 5]",
+            "mov rcx, [rdi + 8 * 6]",
+            "mov rdx, [rdi + 8 * 7]",
+            "mov r8,  [rdi + 8 * 8]",
+            "mov r9,  [rdi + 8 * 9]",
+            "mov r10, [rdi + 8 * 10]",
+            "mov r11, [rdi + 8 * 11]",
+            "mov r12, [rdi + 8 * 12]",
+            "mov r13, [rdi + 8 * 13]",
+            "mov r14, [rdi + 8 * 14]",
+            "mov r15, [rdi + 8 * 15]",
+            "mov rdi, [rdi]",
+            "swapgs", //restore gs for user code
             "sysretq",
         )
     }

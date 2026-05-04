@@ -8,14 +8,14 @@ use std::{
 
 use crate::{
     interrupts::InterruptProcessorState,
-    proc::ProcNamespaces,
+    proc::{ProcNamespaces, syscall::NewSyscallCpuState},
     vfs::{
         InodeIdentifier,
         file::{FileDescriptor, FileHandle},
     },
 };
 
-use super::{Pid, syscall::SyscallCpuState};
+use super::Pid;
 
 ///Describes the process metadata like memory mapping, open files, etc.
 #[derive(Debug)]
@@ -52,13 +52,13 @@ impl ProcessDataMutable {
 #[derive(Debug)]
 pub enum CpuStateType {
     Interrupt(InterruptProcessorState),
-    Syscall((SyscallCpuState, u64)), //cpu state + userspace stack pointer
-    None,                            //is currently running, was taken
+    Syscall(NewSyscallCpuState),
+    None, //is currently running, was taken
 }
 
 pub enum StackCpuStateData<'a> {
     Interrupt(&'a InterruptProcessorState),
-    Syscall(&'a SyscallCpuState),
+    Syscall(&'a NewSyscallCpuState),
 }
 
 impl ProcessData {
@@ -104,7 +104,7 @@ impl ProcessData {
 
     pub fn set_syscall_return(&self, val: u64, err: u64) {
         let internal = &mut lock_w_info!(self.internal);
-        if let CpuStateType::Syscall((syscall_state, _)) = &mut internal.cpu_state {
+        if let CpuStateType::Syscall(syscall_state) = &mut internal.cpu_state {
             syscall_state.rax = val;
             syscall_state.rdx = err;
         } else {

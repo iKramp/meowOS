@@ -1,16 +1,14 @@
 use std::sync::arc::Arc;
 
-use crate::proc::{ProcessData, syscall::SyscallArgs};
+use crate::proc::{ProcessData, syscall::NewSyscallCpuState};
 
-pub fn fclose(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
-    let fd = args.arg1;
+pub fn fclose(args: &mut NewSyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+    let fd = args.get_legacy_syscall_arg(1);
     let mut proc_mut = proc.get_mutable();
     if proc_mut.take_file_handle(fd).is_some() {
-        args.arg1 = 0;
-        args.arg2 = 0;
+        args.set_legacy_syscall_ret(0, 0);
     } else {
-        args.arg1 = u64::MAX;
-        args.arg2 = 1;
+        args.set_legacy_syscall_ret(u64::MAX, 1);
     }
     false
 }

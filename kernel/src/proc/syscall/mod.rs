@@ -162,15 +162,13 @@ extern "C" fn handler_wrapper() -> ! {
 }
 
 #[allow(unused_variables)]
-extern "C" fn handler(args_rsp: u64) -> ! {
+extern "C" fn handler(saved_regs_ptr: u64) -> ! {
     //handle here
     // println!("Syscall called with args: {}, {}, {}, {}", arg1, arg2, arg3, arg4);
 
-    let args_ptr = args_rsp as *mut u64;
-    let state_ptr = unsafe { args_ptr.byte_add(core::mem::size_of::<SyscallArgs>()).sub(2) }; //2 regs overlap
+    let saved_regs_ptr = saved_regs_ptr as *mut u64;
 
-    let args = unsafe { &mut *(args_ptr as *mut SyscallArgs) };
-    let state = unsafe { &*(state_ptr as *const SyscallCpuState) };
+    let saved_regs = unsafe { &mut *(saved_regs_ptr as *mut NewSyscallCpuState) };
 
     let mut locals = crate::acpi::cpu_locals::CpuLocals::get_mut();
     unsafe { core::ptr::addr_of_mut!(locals.int_depth).write_volatile(1) };
@@ -183,53 +181,24 @@ extern "C" fn handler(args_rsp: u64) -> ! {
     drop(locals);
     enable_interrupts();
 
-    println!(
-        "Syscall number: {}, args: {:#X?}, state: {:#X?}",
-        args.syscall_number, args, state
-    );
+    let syscall_number = saved_regs.rax;
+    println!("Syscall number: {}, state: {:#X?}", syscall_number, saved_regs);
 
     let syscall_namespace = curr_proc.get_mutable().get_namespaces().get_syscall_namespace();
-    let syscall_handler = syscall_namespace.get_syscall_handler(args.syscall_number as u32);
+    let syscall_handler = syscall_namespace.get_syscall_handler(syscall_number as u32);
     let task_sleep;
     if let Some(syscall_handler) = syscall_handler {
-        task_sleep = syscall_handler(args, &curr_proc);
+        task_sleep = syscall_handler(saved_regs, &curr_proc);
     } else {
-        println!(level:warn, "Invalid syscall number: {}", args.syscall_number);
-        syscall::handlers::illegal(args, &curr_proc);
+        println!(level:warn, "Invalid syscall number: {}", syscall_number);
+        syscall::handlers::illegal(saved_regs, &curr_proc);
         task_sleep = false;
     };
 
     let sleep_cond = if task_sleep { Some(SleepCondition::Event) } else { None };
 
-    save_and_release_current(&curr_proc, &StackCpuStateData::Syscall(state), sleep_cond);
+    save_and_release_current(&curr_proc, &StackCpuStateData::Syscall(saved_regs), sleep_cond);
     no_ret_context_switch();
-}
-
-#[derive(Debug, Clone)]
-#[repr(C)]
-pub struct SyscallCpuState {
-    pub rdx: u64,
-    pub rax: u64,
-    pub rcx: u64,
-    pub r11: u64,
-    pub r15: u64,
-    pub r14: u64,
-    pub r13: u64,
-    pub r12: u64,
-    pub rbp: u64,
-    pub rbx: u64,
-}
-
-#[derive(Debug, Clone)]
-#[repr(C)]
-pub struct SyscallArgs {
-    arg1: u64,
-    arg2: u64,
-    arg3: u64,
-    arg4: u64,
-    arg5: u64,
-    arg6: u64,
-    syscall_number: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -254,15 +223,20 @@ pub struct NewSyscallCpuState {
 }
 
 impl NewSyscallCpuState {
-    pub fn get_legacy_syscall_arg(&self, index: usize) -> Option<u64> {
+    pub fn get_legacy_syscall_arg(&self, index: usize) -> u64 {
         match index {
-            0 => Some(self.rdi),
-            1 => Some(self.rsi),
-            2 => Some(self.rdx),
-            3 => Some(self.r10),
-            4 => Some(self.r8),
-            5 => Some(self.r9),
-            _ => None,
+            1 => self.rdi,
+            2 => self.rsi,
+            3 => self.rdx,
+            4 => self.r10,
+            5 => self.r8,
+            6 => self.r9,
+            _ => panic!("Invalid legacy syscall argument index: {}", index),
         }
+    }
+
+    pub fn set_legacy_syscall_ret(&mut self, val: u64, err: u64) {
+        self.rax = val;
+        self.rdx = err;
     }
 }

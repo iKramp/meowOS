@@ -3,26 +3,25 @@ use std::{mem_utils::PhysAddr, sync::arc::Arc, vec::Vec};
 use crate::{
     proc::{
         ProcessData,
-        syscall::{self, SyscallArgs},
+        syscall::{self, NewSyscallCpuState},
     },
     task_runner::{self, PidOption},
 };
 
-pub fn fread(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
-    let fd = args.arg1;
-    let size = args.arg2;
-    let buffer_ptr = args.arg3 as *mut u8;
+pub fn fread(args: &mut NewSyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+    let fd = args.get_legacy_syscall_arg(1);
+    let size = args.get_legacy_syscall_arg(2);
+    let buffer_ptr = args.get_legacy_syscall_arg(3) as *mut u8;
     let proc = proc.clone();
     let pid = proc.pid();
 
     if !syscall::verify_memory_range(buffer_ptr as u64, buffer_ptr as u64 + size) {
-        args.syscall_number = u64::MAX;
+        args.set_legacy_syscall_ret(u64::MAX, 1);
         return false;
     }
 
     if size == 0 {
-        args.arg1 = 0;
-        args.arg2 = 0;
+        args.set_legacy_syscall_ret(0, 0);
         return true;
     }
 
@@ -31,7 +30,7 @@ pub fn fread(args: &mut SyscallArgs, proc: &Arc<ProcessData>) -> bool {
         if let Some(f_handle) = proc_mut.take_file_handle(fd) {
             f_handle
         } else {
-            args.syscall_number = u64::MAX;
+            args.set_legacy_syscall_ret(u64::MAX, 1);
             return false;
         }
     };
