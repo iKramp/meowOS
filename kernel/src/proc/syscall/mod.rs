@@ -3,7 +3,7 @@ use std::println;
 use super::{
     context_switch::no_ret_context_switch,
     process_data::StackCpuStateData,
-    scheduler::{SleepCondition, release_current_proc, save_cpu_state},
+    scheduler::{release_current_proc, save_cpu_state},
 };
 use crate::{
     acpi::cpu_locals::PageFaultHandleMode,
@@ -54,7 +54,7 @@ fn enable_syscall() {
 }
 
 ///performs an exclusive range check if the pointers are valid in userspace
-fn verify_memory_range(mem_start: u64, mem_end: u64) -> bool {
+pub fn verify_memory_range(mem_start: u64, mem_end: u64) -> bool {
     if mem_start > mem_end || mem_end > 0x0000_8000_0000_0000 {
         println!(level:warn, "Invalid memory range: {:#X} - {:#X}", mem_start, mem_end);
         return false;
@@ -67,7 +67,7 @@ fn verify_memory_range(mem_start: u64, mem_end: u64) -> bool {
     valid
 }
 
-fn verify_memory_ptr(mut ptr: u64) -> bool {
+pub fn verify_memory_ptr(mut ptr: u64) -> bool {
     ptr &= !0xFFF; //page align, ptr can't overlap pages because of alignment
     if ptr > 0x0000_8000_0000_0000 {
         println!(level:warn, "Invalid memory pointer: {:#X}", ptr);
@@ -112,42 +112,20 @@ extern "C" fn handler_wrapper() -> ! {
             "mov gs:[16], rsp", //save user rsp to gsbase area
             "mov rsp, gs:[8]", //get kernel rsp from gsbase area
 
-            // "sub rsp, 8*8",
-            // "mov [rsp + 8*7], rbx",
-            // "mov [rsp + 8*6], rbp",
-            // "mov [rsp + 8*5], r12",
-            // "mov [rsp + 8*4], r13",
-            // "mov [rsp + 8*3], r14",
-            // "mov [rsp + 8*2], r15",
-            // "mov [rsp + 8*1], r11", //rflags is in r11
-            // "mov [rsp + 8*0], rcx", //return rip
-            //
-            // //push args too
-            // "sub rsp, 8*7",
-            // "mov [rsp + 8*6], rax", //syscall number
-            // "mov [rsp + 8*5], r9",
-            // "mov [rsp + 8*4], r8",
-            // "mov [rsp + 8*3], r10",
-            // "mov [rsp + 8*2], rdx",
-            // "mov [rsp + 8*1], rsi",
-            // "mov [rsp + 8*0], rdi",
-            //
-            // "mov rdi, rsp", //args rsp
-
             "sub rsp, 8*16", //space for 16 u64s
-            "mov [rsp + 0*8], rdi",
-            "mov [rsp + 1*8], rsi",
-            "mov [rsp + 2*8], rbp",
-            "mov rdi, gs:[16]", //user rsp
-            "mov [rsp + 3*8], rdi", //user rsp
+            "mov [rsp + 0*8], rcx",
+            "mov [rsp + 1*8], rbp",
+            "mov rcx, gs:[16]", //user rsp
+            "mov [rsp + 2*8], rcx", //user rsp
+            "mov [rsp + 3*8], r11",
             "mov [rsp + 4*8], rax",
             "mov [rsp + 5*8], rbx",
-            "mov [rsp + 6*8], rcx",
-            "mov [rsp + 7*8], rdx",
-            "mov [rsp + 8*8], r8",
-            "mov [rsp + 9*8], r9",
-            "mov [rsp + 10*8], r10",
-            "mov [rsp + 11*8], r11",
+            "mov [rsp + 6*8], rdx",
+            "mov [rsp + 7*8], rdi",
+            "mov [rsp + 8*8], rsi",
+            "mov [rsp + 9*8], r8",
+            "mov [rsp + 10*8], r9",
+            "mov [rsp + 11*8], r10",
             "mov [rsp + 12*8], r12",
             "mov [rsp + 13*8], r13",
             "mov [rsp + 14*8], r14",
@@ -183,7 +161,7 @@ extern "C" fn handler(saved_regs_ptr: u64) -> ! {
 
     save_cpu_state(&StackCpuStateData::Syscall(saved_regs), &curr_proc);
 
-    let syscall_number = saved_regs.rax;
+    let syscall_number = saved_regs.get_syscall_number();
     println!("Syscall number: {}, state: {:#X?}", syscall_number, saved_regs);
 
     let syscall_namespace = curr_proc.get_mutable().get_namespaces().get_syscall_namespace();
@@ -197,27 +175,25 @@ extern "C" fn handler(saved_regs_ptr: u64) -> ! {
         task_sleep = false;
     };
 
-    let sleep_cond = if task_sleep { Some(SleepCondition::Event) } else { None };
-
-    release_current_proc(&curr_proc, sleep_cond);
+    release_current_proc(&curr_proc, task_sleep);
     no_ret_context_switch();
 }
 
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub struct SyscallCpuState {
-    pub rdi: u64,
-    pub rsi: u64,
+    pub rcx: u64,
     pub rbp: u64,
     pub rsp: u64,
-    pub rax: u64,
-    pub rbx: u64,
-    pub rcx: u64,
-    pub rdx: u64,
+    pub r11: u64,
+    pub rax: u64, //syscall number
+    pub rbx: u64, //namespace id
+    pub rdx: u64, //args start here
+    pub rdi: u64,
+    pub rsi: u64,
     pub r8: u64,
     pub r9: u64,
     pub r10: u64,
-    pub r11: u64,
     pub r12: u64,
     pub r13: u64,
     pub r14: u64,
@@ -235,5 +211,29 @@ impl SyscallCpuState {
             6 => self.r9,
             _ => panic!("Invalid legacy syscall argument index: {}", index),
         }
+    }
+
+    pub fn get_arg(&self, index: usize) -> u64 {
+        match index {
+            0 => self.rdx,
+            1 => self.rdi,
+            2 => self.rsi,
+            3 => self.r8,
+            4 => self.r9,
+            5 => self.r10,
+            6 => self.r12,
+            7 => self.r13,
+            8 => self.r14,
+            9 => self.r15,
+            _ => panic!("Invalid syscall argument index: {}", index),
+        }
+    }
+
+    pub fn get_syscall_number(&self) -> u64 {
+        self.rax
+    }
+
+    pub fn get_namespace_id(&self) -> u64 {
+        self.rbx
     }
 }

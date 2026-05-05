@@ -19,12 +19,12 @@ pub fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
 
     if !syscall::verify_memory_range(buffer_ptr as u64, buffer_ptr as u64 + size) {
         println!("fwrite: invalid buffer pointer or size");
-        proc.set_syscall_return(u64::MAX, 1);
+        proc.set_legacy_syscall_return(u64::MAX, 1);
         return false;
     }
 
     if size == 0 {
-        proc.set_syscall_return(0, 0);
+        proc.set_legacy_syscall_return(0, 0);
         return true;
     }
 
@@ -34,7 +34,7 @@ pub fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
             f_handle
         } else {
             println!("fwrite: invalid fd {fd}");
-            proc.set_syscall_return(u64::MAX, 1);
+            proc.set_legacy_syscall_return(u64::MAX, 1);
             return false;
         }
     };
@@ -61,7 +61,7 @@ pub fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         if write_result.is_err() {
             println!("fwrite: write failed");
             let proc_lock = proc.get();
-            proc_lock.set_syscall_return(u64::MAX, 1);
+            proc_lock.set_legacy_syscall_return(u64::MAX, 1);
 
             //free
             for i in 0..pages {
@@ -80,7 +80,7 @@ pub fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         proc.get_mutable().insert_file_handle(fd, f_handle);
 
         //return
-        proc.set_syscall_return(bytes_written, 0);
+        proc.set_legacy_syscall_return(bytes_written, 0);
         println!("fwrite: finished processing fwrite for pid {pid:?}, bytes_written: {bytes_written}");
         crate::proc::wake_process(proc.pid())
     };

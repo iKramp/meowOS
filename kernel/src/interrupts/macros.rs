@@ -1,3 +1,5 @@
+use std::println;
+
 use crate::{
     acpi::cpu_locals::{CpuLocals, PageFaultHandleMode},
     proc::{StackCpuStateData, interrupt_context_switch, release_current_proc, save_cpu_state},
@@ -204,6 +206,11 @@ pub extern "C" fn general_interrupt_handler(
         enable_interrupts();
     }
 
+    println!(
+        "Interrupt received for handler at addr {:x}, atomic: {}",
+        main_handler as u64, atomic_context
+    );
+
     main_handler(proc_data);
 
     //proc is depth 0, root int is depth 1
@@ -218,7 +225,7 @@ pub extern "C" fn general_interrupt_handler(
     if let Some(curr_proc) = locals.current_process.as_mut() {
         //save current process state
         save_cpu_state(&StackCpuStateData::Interrupt(proc_data), curr_proc);
-        release_current_proc(curr_proc, None);
+        release_current_proc(curr_proc, false);
     }
     drop(locals);
     interrupt_context_switch();

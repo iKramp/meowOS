@@ -27,13 +27,6 @@ pub struct ProcessData {
     internal: NoIntSpinlock<ProcessDataMutable>,
 }
 
-impl ProcessData {
-    pub fn set_ret_status(&self, status: u64) {
-        let internal = &mut lock_w_info!(self.internal);
-        internal.return_status = Some(status);
-    }
-}
-
 #[derive(Debug)]
 pub struct ProcessDataMutable {
     cpu_state: CpuStateType,
@@ -46,6 +39,10 @@ pub struct ProcessDataMutable {
 impl ProcessDataMutable {
     pub(in crate::proc) fn get_namespaces(&self) -> &ProcNamespaces {
         &self.namespaces
+    }
+
+    pub(in crate::proc) fn get_namespaces_mut(&mut self) -> &mut ProcNamespaces {
+        &mut self.namespaces
     }
 }
 
@@ -102,7 +99,7 @@ impl ProcessData {
         lock_w_info!(self.internal)
     }
 
-    pub fn set_syscall_return(&self, val: u64, err: u64) {
+    pub fn set_legacy_syscall_return(&self, val: u64, err: u64) {
         let internal = &mut lock_w_info!(self.internal);
         if let CpuStateType::Syscall(syscall_state) = &mut internal.cpu_state {
             syscall_state.rax = val;
@@ -112,9 +109,32 @@ impl ProcessData {
         }
     }
 
+    pub fn set_syscall_return(&self, values: &[u64]) {
+        let internal = &mut lock_w_info!(self.internal);
+        if let CpuStateType::Syscall(syscall_state) = &mut internal.cpu_state {
+            if values.len() > 10 {
+                panic!("too many return values for syscall");
+            }
+
+            let args_ptr = &raw mut syscall_state.rdx;
+            for (i, &val) in values.iter().enumerate() {
+                unsafe {
+                    core::ptr::write_volatile(args_ptr.add(i), val);
+                }
+            }
+        } else {
+            panic!("set syscall return from non-syscall context: kill process");
+        }
+    }
+
     pub fn set_cpu_data(&self, cpu_state: CpuStateType) {
         let internal = &mut lock_w_info!(self.internal);
         internal.cpu_state = cpu_state;
+    }
+
+    pub fn set_exit_status(&self, status: u64) {
+        let internal = &mut lock_w_info!(self.internal);
+        internal.return_status = Some(status);
     }
 
     pub fn pid(&self) -> Pid {

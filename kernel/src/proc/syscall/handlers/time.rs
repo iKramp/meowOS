@@ -18,7 +18,7 @@ pub fn time(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
 
     let valid_ptrs = syscall::verify_memory_ptr(ptr_seconds) && syscall::verify_memory_ptr(ptr_nanos);
     if !valid_ptrs {
-        proc.set_syscall_return(u64::MAX, 0);
+        proc.set_legacy_syscall_return(u64::MAX, 0);
         return false;
     }
 

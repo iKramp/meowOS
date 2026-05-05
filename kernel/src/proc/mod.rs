@@ -189,7 +189,7 @@ pub fn kill_process(pid: Pid, status: u64) {
     let Some(process) = (unsafe { lock_w_info!(SCHEDULER).assume_init_mut().remove_process(pid) }) else {
         return;
     };
-    process.set_ret_status(status);
+    process.set_exit_status(status);
 }
 
 pub fn wake_process(pid: Pid) {

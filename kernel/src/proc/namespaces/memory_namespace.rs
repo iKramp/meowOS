@@ -2,14 +2,14 @@ use std::{
     boxed::Box,
     error::ErrorCode,
     lock_w_info,
-    mem_utils::{PhysAddr, VirtAddr},
+    mem_utils::{PhysAddr, VirtAddr, memset_physical_addr},
     println,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
     vec::Vec,
 };
 
 use crate::{
-    memory::{self, PageTableEntry, VirtualMemoryRange, VirtualMemoryRangeCapacity},
+    memory::{self, PageTableEntry, VirtualMemoryRange, VirtualMemoryRangeCapacity, physical_allocator},
     proc::namespaces::ProcNamespace,
 };
 
@@ -49,7 +49,9 @@ impl ProcNamespace for MemoryNamespace {
 }
 
 impl MemoryNamespace {
-    pub fn new(id: u64, page_tree_root: PhysAddr) -> Self {
+    pub fn new(id: u64) -> Self {
+        let page_tree_root = physical_allocator::allocate_frame();
+        unsafe { memset_physical_addr(page_tree_root, 0, 0x1000) };
         Self {
             id,
             page_tree_root,

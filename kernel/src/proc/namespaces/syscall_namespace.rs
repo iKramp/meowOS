@@ -72,7 +72,7 @@ impl SyscallNamespace {
         pack.pack.get_handler(in_pack_index as usize)
     }
 
-    fn get_pack<'a>(syscall_number: u32, mapped_syscalls: &'a Vec<MappedSyscallPack>) -> Option<&'a MappedSyscallPack> {
+    fn get_pack(syscall_number: u32, mapped_syscalls: &[MappedSyscallPack]) -> Option<&MappedSyscallPack> {
         let pos = mapped_syscalls.binary_search_by(|e| e.base.cmp(&syscall_number));
         let pos = match pos {
             Ok(pos) => pos,
@@ -81,10 +81,7 @@ impl SyscallNamespace {
         mapped_syscalls.get(pos)
     }
 
-    fn get_pack_mut<'a>(
-        syscall_number: u32,
-        mapped_syscalls: &'a mut Vec<MappedSyscallPack>,
-    ) -> Option<&'a mut MappedSyscallPack> {
+    fn get_pack_mut(syscall_number: u32, mapped_syscalls: &mut [MappedSyscallPack]) -> Option<&mut MappedSyscallPack> {
         let pos = mapped_syscalls.binary_search_by(|e| e.base.cmp(&syscall_number));
         let pos = match pos {
             Ok(pos) => pos,

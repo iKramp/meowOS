@@ -16,12 +16,12 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let pid = proc.pid();
 
     if !syscall::verify_memory_range(buffer_ptr as u64, buffer_ptr as u64 + size) {
-        proc.set_syscall_return(u64::MAX, 1);
+        proc.set_legacy_syscall_return(u64::MAX, 1);
         return false;
     }
 
     if size == 0 {
-        proc.set_syscall_return(0, 0);
+        proc.set_legacy_syscall_return(0, 0);
         return true;
     }
 
@@ -30,7 +30,7 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         if let Some(f_handle) = proc_mut.take_file_handle(fd) {
             f_handle
         } else {
-            proc.set_syscall_return(u64::MAX, 1);
+            proc.set_legacy_syscall_return(u64::MAX, 1);
             return false;
         }
     };
@@ -47,7 +47,7 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         };
         let Ok(bytes_read) = read_result else {
             let proc_lock = proc.get();
-            proc_lock.set_syscall_return(u64::MAX, 1);
+            proc_lock.set_legacy_syscall_return(u64::MAX, 1);
             return;
         };
         //copy to user buffer
@@ -64,7 +64,7 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         proc.get_mutable().insert_file_handle(fd, f_handle);
 
         //return
-        proc.set_syscall_return(bytes_read, 0);
+        proc.set_legacy_syscall_return(bytes_read, 0);
         crate::proc::wake_process(proc.pid())
     };
 

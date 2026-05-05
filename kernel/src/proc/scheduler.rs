@@ -8,15 +8,9 @@ use super::{
     syscall::SyscallCpuState,
 };
 
-pub enum SleepCondition {
-    Time(u64),
-    ///event will have to wake the process by itself
-    Event,
-}
-
 pub struct Scheduler {
     tasks: BTreeMap<Pid, Arc<ProcessData>>,
-    sleeping_tasks: Vec<(Pid, SleepCondition)>,
+    sleeping_tasks: Vec<Pid>,
     ///tasks currently running on the CPU, along with cpu number
     active_tasks: Vec<(Pid, u32)>,
     ready_to_run: Vec<Pid>,
@@ -40,7 +34,7 @@ impl Scheduler {
     }
 
     pub fn wake_proc(&mut self, pid: Pid) {
-        let sleeping_pos = self.sleeping_tasks.iter().position(|(p, _)| *p == pid);
+        let sleeping_pos = self.sleeping_tasks.iter().position(|p| *p == pid);
         if let Some(pos) = sleeping_pos {
             self.sleeping_tasks.swap_remove(pos);
             self.ready_to_run.push(pid);
@@ -66,7 +60,7 @@ impl Scheduler {
     }
 
     pub fn remove_process(&mut self, pid: Pid) -> Option<Arc<ProcessData>> {
-        let sleeping_pos = self.sleeping_tasks.iter().position(|(p, _)| *p == pid);
+        let sleeping_pos = self.sleeping_tasks.iter().position(|p| *p == pid);
         if let Some(pos) = sleeping_pos {
             self.sleeping_tasks.swap_remove(pos);
         }
@@ -78,7 +72,7 @@ impl Scheduler {
     }
 
     ///Called after all the data has been saved
-    fn release_process(&mut self, pid: Pid, sleep: Option<SleepCondition>) {
+    fn release_process(&mut self, pid: Pid, sleep: bool) {
         let active_pos = self.active_tasks.iter().position(|(p, _)| *p == pid);
         if let Some(pos) = active_pos {
             self.active_tasks.swap_remove(pos);
@@ -87,8 +81,8 @@ impl Scheduler {
         }
 
         if self.tasks.contains_key(&pid) {
-            if let Some(cond) = sleep {
-                self.sleeping_tasks.push((pid, cond));
+            if sleep {
+                self.sleeping_tasks.push(pid);
             } else {
                 self.ready_to_run.push(pid);
             }
@@ -119,7 +113,7 @@ impl Scheduler {
     }
 }
 
-pub fn release_current_proc(old_proc: &Arc<ProcessData>, sleep: Option<SleepCondition>) {
+pub fn release_current_proc(old_proc: &Arc<ProcessData>, sleep: bool) {
     let scheduler_lock = &mut lock_w_info!(super::SCHEDULER);
     let scheduler = unsafe { scheduler_lock.assume_init_mut() };
     scheduler.release_process(old_proc.get().pid(), sleep);

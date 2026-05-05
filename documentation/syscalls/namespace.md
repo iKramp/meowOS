@@ -49,7 +49,7 @@ Sets the process's current namespace of the same type as id to the namespace ide
 1. buf: u64 - pointer to a buffer of namespace_info structures to be filled by the kernel
 2. buf_size: u64 - size of the buffer in count of elements
 #### Return Value:
- - On success, returns the number of namespaces filled into the buffer
+ - On success, returns the number of namespaces filled into the buffer in the first return arg and total number of namespaces in the second.
  - On failure, returns -1
 #### Description:
 Fills the provided buffer with information about the namespaces owned by the process. Each entry is:
@@ -58,6 +58,6 @@ Fills the provided buffer with information about the namespaces owned by the pro
 struct NamespaceInfo {
     id: u64,
     type: NamespaceType, //32 bit
-    bool: currently_used;
+    currently_used: bool;
 }
 ```

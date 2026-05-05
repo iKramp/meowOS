@@ -16,11 +16,7 @@ use std::error::ErrorCode;
 use std::lock_w_info;
 use std::string::ToString;
 use std::sync::arc::Arc;
-use std::sync::no_int_spinlock::NoIntSpinlock;
-use std::{
-    mem_utils::{VirtAddr, memset_physical_addr},
-    println,
-};
+use std::{mem_utils::VirtAddr, println};
 
 use crate::{memory, proc::Pid};
 
@@ -182,11 +178,9 @@ pub fn add_stack(mem_namespace: &mut MemoryNamespace, stack_size_pages: u8) -> R
 }
 
 pub fn build_empty_memory_namespace() -> MemoryNamespace {
-    let new_page_tree_root = memory::physical_allocator::allocate_frame();
-    unsafe { memset_physical_addr(new_page_tree_root, 0x0, 0x1000) };
+    let namespace = MemoryNamespace::new(crate::proc::get_namespace_id());
 
-    let namespace = MemoryNamespace::new(crate::proc::get_namespace_id(), new_page_tree_root);
-
+    let new_page_tree_root = namespace.page_tree_root();
     let existing_page_tree_root = memory::current_root();
     memory::copy_higher_half(existing_page_tree_root, new_page_tree_root);
 
