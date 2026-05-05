@@ -1,4 +1,5 @@
 use std::{
+    boxed::Box,
     error::ErrorCode,
     lock_w_info,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
@@ -14,6 +15,7 @@ use crate::proc::{
 struct MappedSyscallPack {
     base: u32,
     mask: u32,
+    pack_id: u64,
     pack: Arc<SyscallPack>,
 }
 
@@ -39,22 +41,24 @@ impl SyscallNamespace {
     }
 
     pub fn default(id: u64) -> Self {
-        let legacy_pack = syscall::get_syscall_pack("legacy").expect("legacy syscall pack not found");
-        let mut ns = Self::new(id);
-        ns.map_syscall_pack(0, legacy_pack);
+        let (legacy_pack, pack_id) = syscall::get_syscall_pack("legacy").expect("legacy syscall pack not found");
+        let ns = Self::new(id);
+        ns.map_syscall_pack(0, legacy_pack, pack_id);
         ns
     }
 
-    pub fn map_syscall_pack(&mut self, base_index: u32, pack: Arc<SyscallPack>) {
+    pub fn map_syscall_pack(&self, base_index: u32, pack: Arc<SyscallPack>, pack_id: u64) {
         let mut mapped_syscalls = lock_w_info!(self.mapped_syscalls);
+
         mapped_syscalls.push(MappedSyscallPack {
             base: base_index,
             mask: u32::MAX,
             pack,
+            pack_id,
         });
     }
 
-    pub fn disable_syscall(&mut self, syscall_number: u32) -> Result<(), ErrorCode> {
+    pub fn disable_syscall(&self, syscall_number: u32) -> Result<(), ErrorCode> {
         let mut mapped_syscalls = lock_w_info!(self.mapped_syscalls);
         let pack = Self::get_pack_mut(syscall_number, &mut mapped_syscalls).ok_or(ErrorCode::InvalidArgument)?;
         let in_pack_index = syscall_number.checked_sub(pack.base).ok_or(ErrorCode::InvalidArgument)?;
@@ -88,5 +92,11 @@ impl SyscallNamespace {
             Err(pos) => pos.saturating_sub(1), //err returns pos where it could be inserted
         };
         mapped_syscalls.get_mut(pos)
+    }
+
+    /// Returns a list of (base, mask, pack_id) for all mapped syscall packs
+    pub fn get_mapped_syscalls(&self) -> Box<[(u32, u32, u64)]> {
+        let mapped_syscalls = lock_w_info!(self.mapped_syscalls);
+        mapped_syscalls.iter().map(|m| (m.base, m.mask, m.pack_id)).collect()
     }
 }

@@ -52,8 +52,19 @@ impl ProcNamespaces {
         }
     }
 
-    pub fn get_syscall_namespace(&self) -> Arc<SyscallNamespace> {
-        self.syscall_namespace.clone()
+    pub fn get_syscall_namespace(&self, id: u64) -> Option<Arc<SyscallNamespace>> {
+        if id == 0 {
+            Some(self.syscall_namespace.clone())
+        } else {
+            let index = self
+                .owned_namespaces
+                .binary_search_by_key(&id, |ns| ns.get_id())
+                .expect("namespace id not found");
+            match &self.owned_namespaces[index] {
+                NamespaceHolder::Syscall(ns) => Some(ns.clone()),
+                _ => None,
+            }
+        }
     }
 
     pub fn change_namespace(&mut self, namespace_id: u64) -> Result<(), ()> {

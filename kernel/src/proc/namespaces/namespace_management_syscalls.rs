@@ -7,15 +7,13 @@ use crate::proc::{
 };
 
 pub fn init_namespace_management_syscalls() {
-    let handlers = [
-        //todo
-    ];
+    let handlers = [mknamespace, rmnamespace, chnamespace, lsnamespace];
 
     let namespace_management_syscalls = SyscallPack::new(Box::new(handlers));
     syscall::register_syscall_pack("namespace_management".into(), Arc::new(namespace_management_syscalls));
 }
 
-pub fn mknamespace(args: &mut SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn mknamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let namespace_type = args.get_arg(0);
     let Some(namespace_type) = NamespaceType::from_id(namespace_type) else {
         proc.set_syscall_return(&[u64::MAX]);
@@ -27,7 +25,7 @@ pub fn mknamespace(args: &mut SyscallCpuState, proc: &Arc<ProcessData>) -> bool 
     false
 }
 
-pub fn rmnamespace(args: &mut SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn rmnamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let namespace_id = args.get_arg(0);
     if proc.get_mutable().get_namespaces_mut().remove_namespace(namespace_id).is_ok() {
         proc.set_syscall_return(&[0]);
@@ -37,7 +35,7 @@ pub fn rmnamespace(args: &mut SyscallCpuState, proc: &Arc<ProcessData>) -> bool 
     false
 }
 
-pub fn chnamespace(args: &mut SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn chnamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let namespace_id = args.get_arg(0);
     if proc.get_mutable().get_namespaces_mut().change_namespace(namespace_id).is_ok() {
         proc.set_syscall_return(&[0]);
@@ -54,7 +52,7 @@ struct NamespaceInfo {
     currently_used: bool,
 }
 
-pub fn lsnamespace(args: &mut SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn lsnamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let namespace_buf_ptr = args.get_arg(0);
     let namespace_buf_size = args.get_arg(1);
 

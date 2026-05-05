@@ -1,6 +1,7 @@
+use core::sync::atomic::AtomicU64;
 use std::{
     boxed::Box,
-    lock_w_info,
+    format, lock_w_info,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
     vec::Vec,
 };
@@ -14,9 +15,10 @@ pub struct SyscallPack {
     handlers: Box<[SyscallHandler]>,
 }
 
-type SyscallPackEntry = (Box<str>, Arc<SyscallPack>);
+type SyscallPackEntry = (Box<str>, u64, Arc<SyscallPack>);
 
 static SYSCALL_REGISTRY: SyscallRegistry = SyscallRegistry::new();
+static SYSCALL_PACK_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 struct SyscallRegistry {
     registered_packs: NoIntSpinlock<Vec<SyscallPackEntry>>,
@@ -45,14 +47,15 @@ impl SyscallRegistry {
 
     pub fn register_syscall_pack(&self, name: Box<str>, pack: Arc<SyscallPack>) {
         let mut packs = lock_w_info!(self.registered_packs);
-        packs.push((name, pack));
+        let id = SYSCALL_PACK_ID_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        packs.push((name, id, pack));
     }
 
-    pub fn get_syscall_pack(&self, name: &str) -> Option<Arc<SyscallPack>> {
+    pub fn get_syscall_pack(&self, name: &str) -> Option<(Arc<SyscallPack>, u64)> {
         let packs = lock_w_info!(self.registered_packs);
-        for (pack_name, pack) in packs.iter() {
+        for (pack_name, pack_id, pack) in packs.iter() {
             if pack_name.as_ref() == name {
-                return Some(pack.clone());
+                return Some((pack.clone(), *pack_id));
             }
         }
         None
@@ -60,10 +63,33 @@ impl SyscallRegistry {
 }
 
 pub fn register_syscall_pack(name: Box<str>, pack: Arc<SyscallPack>) {
-    assert!(pack.handlers.len() <= 32, "SyscallPack can have at most 32 handlers");
+    assert!(pack.handlers.len() < 32, "SyscallPack can have at most 31 handlers");
     SYSCALL_REGISTRY.register_syscall_pack(name, pack);
 }
 
-pub fn get_syscall_pack(name: &str) -> Option<Arc<SyscallPack>> {
+pub fn get_syscall_pack(name: &str) -> Option<(Arc<SyscallPack>, u64)> {
     SYSCALL_REGISTRY.get_syscall_pack(name)
+}
+
+pub fn get_names(ids: impl Iterator<Item = u64>) -> Vec<Box<str>> {
+    let packs = lock_w_info!(SYSCALL_REGISTRY.registered_packs);
+    let mut names = Vec::new();
+    'id_loop: for id in ids {
+        for (pack_name, pack_id, _) in packs.iter() {
+            if *pack_id == id {
+                names.push(pack_name.clone());
+                continue 'id_loop;
+            }
+        }
+        names.push(format!("unknown({})", id).into_boxed_str());
+    }
+    names
+}
+
+pub fn get_all_pack_info() -> Vec<(Box<str>, u8)> {
+    let packs = lock_w_info!(SYSCALL_REGISTRY.registered_packs);
+    packs
+        .iter()
+        .map(|(name, _, syscalls)| (name.clone(), syscalls.handlers.len() as u8))
+        .collect()
 }

@@ -9,11 +9,15 @@ use crate::{
     acpi::cpu_locals::PageFaultHandleMode,
     interrupts::enable_interrupts,
     memory, msr,
-    proc::syscall::{self, legacy_syscall_pack::init_legacy_syscalls},
+    proc::{
+        self,
+        syscall::{self, legacy_syscall_pack::init_legacy_syscalls},
+    },
 };
 
 mod handlers;
 mod legacy_syscall_pack;
+mod syscall_management_pack;
 mod syscall_registry;
 pub use syscall_registry::*;
 
@@ -164,8 +168,13 @@ extern "C" fn handler(saved_regs_ptr: u64) -> ! {
     let syscall_number = saved_regs.get_syscall_number();
     println!("Syscall number: {}, state: {:#X?}", syscall_number, saved_regs);
 
-    let syscall_namespace = curr_proc.get_mutable().get_namespaces().get_syscall_namespace();
+    let Some(syscall_namespace) = curr_proc.get_mutable().get_namespaces().get_syscall_namespace(0) else {
+        proc::kill_process(curr_proc.pid(), u64::MAX);
+        release_current_proc(&curr_proc, false);
+        no_ret_context_switch();
+    };
     let syscall_handler = syscall_namespace.get_syscall_handler(syscall_number as u32);
+
     let task_sleep;
     if let Some(syscall_handler) = syscall_handler {
         task_sleep = syscall_handler(saved_regs, &curr_proc);
