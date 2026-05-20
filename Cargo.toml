@@ -29,9 +29,14 @@ lto = false
 
 
 [profile.release]
-panic = "abort"
-opt-level = 2
-lto = false
+opt-level = 3          # regular speed optimizations
+debug = false          # remove debug info
+strip = "symbols"      # strip symbol table + debug symbols
+lto = true             # link-time optimization
+codegen-units = 1      # better optimization + dead code elimination
+panic = "abort"        # no unwinding machinery
+incremental = false    # smaller/final optimized build
+overflow-checks = false
 
 [profile.dev.package.std]
 debug = true

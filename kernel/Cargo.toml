@@ -33,3 +33,13 @@ uuid = {version = "1.16.0", default-features = false }
 reg-map = { git = "https://github.com/iKramp/reg-map.git" }
 static-cond = "0.3.0"
 async-trait = "0.1.89"
+
+[profile.release]
+opt-level = 3          # regular speed optimizations
+debug = false          # remove debug info
+strip = "symbols"      # strip symbol table + debug symbols
+lto = true             # link-time optimization
+codegen-units = 1      # better optimization + dead code elimination
+panic = "abort"        # no unwinding machinery
+incremental = false    # smaller/final optimized build
+overflow-checks = false
