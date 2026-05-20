@@ -16,13 +16,14 @@ use std::{
 
 use crate::{
     memory::{self, physical_allocator},
-    proc::{context::builder::create_process, namespaces::*},
+    proc::{context::builder::create_process_from_context, namespaces::*},
     vfs::{self, ResolvedPathBorrowed, file::FileFlags},
 };
 
 mod context;
 mod context_switch;
 mod dispatcher;
+mod exec_syscall;
 mod loaders;
 mod namespaces;
 mod process_data;
@@ -36,7 +37,7 @@ pub use scheduler::{release_current_proc, save_cpu_state};
 static SCHEDULER: NoIntSpinlock<MaybeUninit<Scheduler>> = NoIntSpinlock::new(MaybeUninit::uninit());
 
 static PROCESS_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
-static NAMESPACE_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+static NAMESPACE_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 pub static mut PROC_INITIALIZED: bool = false;
 static mut GENERIC_PAGE_TREE: PhysAddr = PhysAddr(0);
@@ -149,7 +150,7 @@ pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &s
         }
     };
 
-    let new_pid = match create_process(&context) {
+    let new_pid = match create_process_from_context(&context) {
         Ok(pid) => pid,
         Err(e) => {
             println!(level:error, "Failed to create process from file: {}, error: {:?}", path.to_string(), e);

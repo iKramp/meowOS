@@ -19,6 +19,7 @@ Some namespaces may be shared between processes
 ### Syscall 0: mknamespace
 #### Args:
 1. type: u64 - type of the namespace to create (defined in documentation/namespaces/general.md)
+1. existing_id: u64 - if 0, an empty namespace is created. If non-zero, the new namespace is initialized as a copy of the existing namespace with the given ID. The process must be an owner of the existing namespace.
 #### Return Value:
  - On success, returns the ID of the created namespace
  - On failure, returns -1

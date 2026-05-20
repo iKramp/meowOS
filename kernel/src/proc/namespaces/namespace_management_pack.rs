@@ -15,11 +15,26 @@ pub fn init_namespace_management_syscalls() {
 
 fn mknamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let namespace_type = args.get_arg(0);
+    let existing_namespace = args.get_arg(1);
     let Some(namespace_type) = NamespaceType::from_id(namespace_type) else {
         proc.set_syscall_return(&[u64::MAX]);
         return false;
     };
     let namespace = namespace_type.create_empty_namespace(get_namespace_id());
+
+    if existing_namespace != 0 {
+        let mutable = proc.get_mutable();
+        let namespaces = mutable.get_namespaces();
+        let Some(existing_namespace) = namespaces.get_namespace(existing_namespace) else {
+            proc.set_syscall_return(&[u64::MAX]);
+            return false;
+        };
+        if namespace.init_from(existing_namespace).is_err() {
+            proc.set_syscall_return(&[u64::MAX]);
+            return false;
+        }
+    }
+
     proc.get_mutable().get_namespaces_mut().add_namespace(namespace);
     proc.set_syscall_return(&[0]);
     false

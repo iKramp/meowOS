@@ -301,4 +301,51 @@ impl InterruptProcessorState {
             },
         }
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_full(
+        r15: u64,
+        r14: u64,
+        r13: u64,
+        r12: u64,
+        r11: u64,
+        r10: u64,
+        r9: u64,
+        r8: u64,
+        rbp: u64,
+        rsp: u64,
+        rdi: u64,
+        rsi: u64,
+        rdx: u64,
+        rcx: u64,
+        rbx: u64,
+        rax: u64,
+        rip: u64,
+    ) -> Self {
+        Self {
+            r15,
+            r14,
+            r13,
+            r12,
+            r11,
+            r10,
+            r9,
+            r8,
+            rbp,
+            rdi,
+            rsi,
+            rdx,
+            rcx,
+            rbx,
+            rax,
+            err_code: 0,
+            interrupt_frame: InterruptFrame {
+                rip,
+                cs: 0x23,      //user code segment
+                rflags: 0x202, //default flags with interrupts enabled
+                rsp,
+                ss: 0x1B, //user data segment
+            },
+        }
+    }
 }

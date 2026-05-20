@@ -21,9 +21,8 @@
 Fills the provided buffer with information about the groups currently mapped to the process. 
 Each entry is: 
 ```rust
-struct GroupInfo {
-    name_len: u8,
-    name: [u8, 31], //utf8 valid
+struct MappedGroupInfo {
+    group_info: GroupInfo,
     offset: u32,
     mask: u32,
 }
@@ -42,8 +41,6 @@ Each entry is:
 struct GroupInfo {
     name_len: u8,
     name: [u8, 31], //utf8 valid
-    offset: u32,
-    mask: u32,
 }
 ```
 

@@ -13,7 +13,7 @@ use crate::{
     proc::namespaces::ProcNamespace,
 };
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub(in crate::proc) enum MemoryRangeType {
     Stack,
     Code,
@@ -46,6 +46,26 @@ impl ProcNamespace for MemoryNamespace {
     fn get_id(&self) -> u64 {
         self.id
     }
+
+    fn init_from(&self, other: &Self) -> Result<(), ErrorCode> {
+        //drop current ranges
+        lock_w_info!(self.dynamic_data).memory_ranges.clear();
+
+        let other_dynamic = lock_w_info!(other.dynamic_data);
+        for range in other_dynamic.memory_ranges.iter() {
+            let res = self.add_mem_range(
+                range.shared_range.clone(),
+                range.name.clone(),
+                range.range_type,
+                range.map_address,
+            );
+            if res.is_err() {
+                lock_w_info!(self.dynamic_data).memory_ranges.clear();
+                return res;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl MemoryNamespace {
@@ -67,7 +87,7 @@ impl MemoryNamespace {
     }
 
     pub fn add_mem_range(
-        &mut self,
+        &self,
         range: Arc<VirtualMemoryRange>,
         name: Box<str>,
         range_type: MemoryRangeType,

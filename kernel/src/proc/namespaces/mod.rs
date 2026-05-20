@@ -1,17 +1,17 @@
 use core::fmt::Debug;
-use std::{sync::arc::Arc, vec::Vec};
+use std::{error::ErrorCode, sync::arc::Arc, vec::Vec};
 
 pub(in crate::proc) use memory_namespace::*;
 
 pub(in crate::proc) use syscall_namespace::*;
 
 mod memory_namespace;
-mod namespace_management_syscalls;
+mod namespace_management_pack;
 mod syscall_namespace;
 
-//not sync, each namespace has 1 owner process
 trait ProcNamespace: Debug + Send + Sync {
     fn get_id(&self) -> u64;
+    fn init_from(&self, other: &Self) -> Result<(), ErrorCode>;
 }
 
 //update in documentation
@@ -34,22 +34,44 @@ pub(in crate::proc) struct ProcNamespaces {
     syscall_namespace: Arc<SyscallNamespace>,
 }
 
+#[derive(Clone)]
+#[repr(C)]
+pub(in crate::proc) struct NamespaceIds {
+    memory_namespace: u64,
+    syscall_namespace: u64,
+}
+
 impl ProcNamespaces {
     pub fn new(memory_namespace: Arc<MemoryNamespace>, syscall_namespace: Arc<SyscallNamespace>) -> Self {
         let mut owned_namespaces = Vec::new();
         owned_namespaces.push(NamespaceHolder::Mem(memory_namespace.clone()));
         owned_namespaces.push(NamespaceHolder::Syscall(syscall_namespace.clone()));
 
-        owned_namespaces.sort_by_key(|ns| match ns {
-            NamespaceHolder::Syscall(ns) => ns.get_id(),
-            NamespaceHolder::Mem(ns) => ns.get_id(),
-        });
+        owned_namespaces.sort_by_key(|ns| ns.get_id());
 
         Self {
             owned_namespaces,
             memory_namespace,
             syscall_namespace,
         }
+    }
+
+    pub fn clone_from_ids(&self, mut ids: NamespaceIds) -> Result<Self, ErrorCode> {
+        //defaults
+        if ids.memory_namespace == 0 {
+            ids.memory_namespace = self.memory_namespace.get_id();
+        }
+        if ids.syscall_namespace == 0 {
+            ids.syscall_namespace = self.syscall_namespace.get_id();
+        }
+
+        let Some(NamespaceHolder::Mem(memory_namespace)) = self.get_namespace(ids.memory_namespace) else {
+            return Err(ErrorCode::InvalidArgument);
+        };
+        let Some(NamespaceHolder::Syscall(syscall_namespace)) = self.get_namespace(ids.syscall_namespace) else {
+            return Err(ErrorCode::InvalidArgument);
+        };
+        Ok(Self::new(memory_namespace.clone(), syscall_namespace.clone()))
     }
 
     pub fn get_syscall_namespace(&self, id: u64) -> Option<Arc<SyscallNamespace>> {
@@ -91,6 +113,14 @@ impl ProcNamespaces {
         self.owned_namespaces.insert(index, namespace);
     }
 
+    pub fn get_namespace(&self, namespace_id: u64) -> Option<&NamespaceHolder> {
+        let index = self
+            .owned_namespaces
+            .binary_search_by_key(&namespace_id, |ns| ns.get_id())
+            .ok()?;
+        Some(&self.owned_namespaces[index])
+    }
+
     pub fn remove_namespace(&mut self, namespace_id: u64) -> Result<(), ()> {
         let index = self
             .owned_namespaces
@@ -120,6 +150,25 @@ impl NamespaceHolder {
         match self {
             NamespaceHolder::Syscall(_) => NamespaceType::Syscall,
             NamespaceHolder::Mem(_) => NamespaceType::Mem,
+        }
+    }
+
+    pub fn init_from(&self, other: &Self) -> Result<(), ErrorCode> {
+        match self {
+            NamespaceHolder::Syscall(curr_ns) => {
+                let other_ns = match other {
+                    NamespaceHolder::Syscall(ns) => ns,
+                    _ => return Err(ErrorCode::InvalidArgument),
+                };
+                curr_ns.init_from(other_ns)
+            }
+            NamespaceHolder::Mem(curr_ns) => {
+                let other_ns = match other {
+                    NamespaceHolder::Mem(ns) => ns,
+                    _ => return Err(ErrorCode::InvalidArgument),
+                };
+                curr_ns.init_from(other_ns)
+            }
         }
     }
 }

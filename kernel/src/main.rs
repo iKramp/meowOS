@@ -17,6 +17,7 @@
 #![feature(downcast_unchecked)]
 #![feature(map_try_insert)]
 #![feature(string_into_chars)]
+#![feature(generic_arg_infer)]
 #![allow(internal_features)]
 #![allow(clippy::fn_to_numeric_cast)]
 

@@ -10,6 +10,7 @@ use crate::proc::ProcNamespaces;
 use crate::proc::ProcessData;
 use crate::proc::SCHEDULER;
 use crate::proc::SyscallNamespace;
+use crate::proc::context::parts::X86RegisterState;
 use crate::proc::namespaces::MemoryNamespace;
 use crate::proc::process_data::CpuStateType;
 use std::error::ErrorCode;
@@ -24,7 +25,7 @@ use super::info::ContextInfo;
 
 const DEFAULT_PROC_STACK_SIZE: usize = 0x1000; // 1kB initial stack
 
-pub fn create_process(context_info: &ContextInfo) -> Result<Pid, ErrorCode> {
+pub fn create_process_from_context(context_info: &ContextInfo) -> Result<Pid, ErrorCode> {
     println!("creating process with context: {:#?}", context_info);
     let pid = Pid(PROCESS_ID_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed));
     let is_32_bit = context_info.is_32_bit();
@@ -61,9 +62,51 @@ pub fn create_process(context_info: &ContextInfo) -> Result<Pid, ErrorCode> {
     Ok(pid)
 }
 
+pub fn create_process_from_parts(
+    register_states: X86RegisterState,
+    start_ptr: u64,
+    namespaces: ProcNamespaces,
+    name: &str,
+) -> Result<Pid, ErrorCode> {
+    let cpu_state = InterruptProcessorState::new_full(
+        register_states.r15,
+        register_states.r14,
+        register_states.r13,
+        register_states.r12,
+        register_states.r11,
+        register_states.r10,
+        register_states.r9,
+        register_states.r8,
+        register_states.rbp,
+        register_states.rsp,
+        register_states.rdi,
+        register_states.rsi,
+        register_states.rdx,
+        register_states.rcx,
+        register_states.rbx,
+        register_states.rax,
+        start_ptr,
+    );
+
+    let pid = Pid(PROCESS_ID_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed));
+    let process_data = ProcessData::new(
+        pid,
+        false,
+        name.to_string().into_boxed_str(),
+        CpuStateType::Interrupt(cpu_state),
+        namespaces,
+    );
+
+    let mut scheduler_lock = lock_w_info!(SCHEDULER);
+    let scheduler = unsafe { scheduler_lock.assume_init_mut() };
+    scheduler.accept_new_process(pid, process_data);
+
+    Ok(pid)
+}
+
 pub fn build_initialized_memory_namespace(
     context: &ContextInfo,
-    mut mem_namespace: MemoryNamespace,
+    mem_namespace: MemoryNamespace,
 ) -> Result<MemoryNamespace, ErrorCode> {
     let proc_mem_range = VirtualMemoryRange::create(
         memory::VirtualMemoryRangeCapacity::_05TB,

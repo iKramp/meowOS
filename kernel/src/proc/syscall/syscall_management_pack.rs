@@ -6,16 +6,21 @@ use crate::proc::{
 };
 
 pub fn init_syscall_management_syscalls() {
-    let handlers = [lsgroups, lsallgroups];
+    let handlers = [lsgroups, lsallgroups, mapgroup, unmap_group, restrict];
 
     let syscall_management_syscalls = SyscallPack::new(Box::new(handlers));
     syscall::register_syscall_pack("syscall_management".into(), Arc::new(syscall_management_syscalls));
 }
 
 #[repr(C)]
-struct MappedGroupInfo {
+struct GroupInfo {
     name_len: u8,
     name: [u8; 31],
+}
+
+#[repr(C)]
+struct MappedGroupInfo {
+    group_info: GroupInfo,
     offset: u32,
     mask: u32,
 }
@@ -49,13 +54,15 @@ fn lsgroups(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         }
 
         let group_info = MappedGroupInfo {
-            name_len: name.len() as u8,
-            name: {
-                let mut name_arr = [0u8; 31];
-                let bytes = name.as_bytes();
-                let copy_len = bytes.len().min(31);
-                name_arr[..copy_len].copy_from_slice(&bytes[..copy_len]);
-                name_arr
+            group_info: GroupInfo {
+                name_len: name.len() as u8,
+                name: {
+                    let mut name_arr = [0u8; 31];
+                    let bytes = name.as_bytes();
+                    let copy_len = bytes.len().min(31);
+                    name_arr[..copy_len].copy_from_slice(&bytes[..copy_len]);
+                    name_arr
+                },
             },
             offset: *mapped_base,
             mask: *mapped_mask,
@@ -74,13 +81,6 @@ fn lsgroups(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     false
 }
 
-#[repr(C)]
-struct GroupInfo {
-    name_len: u8,
-    name: [u8; 31],
-    syscall_count: u8,
-}
-
 fn lsallgroups(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let groups_buf_ptr = args.get_arg(0);
     let groups_buf_size = args.get_arg(1);
@@ -96,7 +96,7 @@ fn lsallgroups(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
 
     let all_packs = syscall_registry::get_all_pack_info();
     let to_write = all_packs.iter().enumerate();
-    for (i, (name, syscall_count)) in to_write {
+    for (i, (name, _)) in to_write {
         if i as u64 >= groups_buf_size {
             break;
         }
@@ -110,7 +110,6 @@ fn lsallgroups(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
                 name_arr[..copy_len].copy_from_slice(&bytes[..copy_len]);
                 name_arr
             },
-            syscall_count: *syscall_count,
         };
 
         unsafe {
@@ -163,3 +162,43 @@ fn mapgroup(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     false
 }
 
+fn unmap_group(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+    let namespace_id = args.get_namespace_id();
+    let offset = args.get_arg(0);
+
+    let proc_mutable = proc.get_mutable();
+    let Some(syscall_namespace) = proc_mutable.get_namespaces().get_syscall_namespace(namespace_id) else {
+        proc.set_syscall_return(&[u64::MAX]);
+        return false;
+    };
+
+    let res = syscall_namespace.unmap_syscall_pack_by_offset(offset);
+    if res.is_err() {
+        proc.set_syscall_return(&[u64::MAX]);
+        return false;
+    }
+
+    proc.set_syscall_return(&[0]);
+    false
+}
+
+fn restrict(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+    let namespace_id = args.get_namespace_id();
+    let offset = args.get_arg(0);
+    let mask = args.get_arg(1);
+
+    let proc_mutable = proc.get_mutable();
+    let Some(syscall_namespace) = proc_mutable.get_namespaces().get_syscall_namespace(namespace_id) else {
+        proc.set_syscall_return(&[u64::MAX]);
+        return false;
+    };
+
+    let res = syscall_namespace.disable_syscall_by_mask(offset as u32, mask as u32);
+    if res.is_err() {
+        proc.set_syscall_return(&[u64::MAX]);
+        return false;
+    };
+
+    proc.set_syscall_return(&[0]);
+    false
+}
