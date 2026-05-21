@@ -9,13 +9,7 @@ use crate::{
 pub(super) async fn cmd_cat(path: &str) -> Result<(), ErrorCode> {
     let resolved_path = vfs::resolve_path(path);
     let mut file_handle = vfs::open_file((&resolved_path).into(), None, FileFlags::new().with_read(true)).await?;
-    let file_info = match vfs::stat_file(&file_handle).await {
-        Ok(f) => f,
-        Err(e) => {
-            vfs::close_file(file_handle).await;
-            return Err(e);
-        }
-    };
+    let file_info = vfs::stat_file(&file_handle).await;
 
     let file_size = file_info.size;
     let mut buffer = Vec::with_capacity(file_size.div_ceil(4096) as usize);
@@ -25,11 +19,9 @@ pub(super) async fn cmd_cat(path: &str) -> Result<(), ErrorCode> {
     }
 
     if let Err(e) = vfs::read_file(&mut file_handle, &buffer, file_size).await {
-        vfs::close_file(file_handle).await;
         return Err(e);
     }
 
-    vfs::close_file(file_handle).await;
     let mut read_data = 0;
 
     let tty = lock_w_info!(TTY);

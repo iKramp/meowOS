@@ -83,30 +83,28 @@ fn return_interrupted(interrupt_frame: &InterruptProcessorState) -> ! {
     unreachable!();
 }
 
-#[naked]
+#[unsafe(naked)]
 extern "C" fn return_syscalled(cpu_state: &SyscallCpuState) -> ! {
     //INFO: any kind of change here should be matched with the one in syscall.rs
-    unsafe {
-        core::arch::naked_asm!(
-            //cpu_state in rdi
-            "mov rcx, [rdi + 8 * 0]",
-            "mov rbp, [rdi + 8 * 1]",
-            "mov rsp, [rdi + 8 * 2]",
-            "mov r11, [rdi + 8 * 3]",
-            "mov rax, [rdi + 8 * 4]",
-            "mov rbx, [rdi + 8 * 5]",
-            "mov rdx, [rdi + 8 * 6]", //user rsp
-            "mov rsi,  [rdi + 8 * 8]",
-            "mov r8,  [rdi + 8 * 9]",
-            "mov r9, [rdi + 8 * 10]",
-            "mov r10, [rdi + 8 * 11]",
-            "mov r12, [rdi + 8 * 12]",
-            "mov r13, [rdi + 8 * 13]",
-            "mov r14, [rdi + 8 * 14]",
-            "mov r15, [rdi + 8 * 15]",
-            "mov rdi, [rdi + 8 * 7]",
-            "swapgs", //restore gs for user code
-            "sysretq",
-        )
-    }
+    core::arch::naked_asm!(
+        //cpu_state in rdi
+        "mov rcx, [rdi + 8 * 0]",
+        "mov rbp, [rdi + 8 * 1]",
+        "mov rsp, [rdi + 8 * 2]",
+        "mov r11, [rdi + 8 * 3]",
+        "mov rax, [rdi + 8 * 4]",
+        "mov rbx, [rdi + 8 * 5]",
+        "mov rdx, [rdi + 8 * 6]", //user rsp
+        "mov rsi,  [rdi + 8 * 8]",
+        "mov r8,  [rdi + 8 * 9]",
+        "mov r9, [rdi + 8 * 10]",
+        "mov r10, [rdi + 8 * 11]",
+        "mov r12, [rdi + 8 * 12]",
+        "mov r13, [rdi + 8 * 13]",
+        "mov r14, [rdi + 8 * 14]",
+        "mov r15, [rdi + 8 * 15]",
+        "mov rdi, [rdi + 8 * 7]",
+        "swapgs", //restore gs for user code
+        "sysretq",
+    )
 }

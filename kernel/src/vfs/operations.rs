@@ -16,7 +16,7 @@ use crate::{
         block_device::disk::{BlockDevice, DirEntry, MountedPartition, PartitionSchemeDriver},
         gpt::GPTDriver,
     },
-    vfs::Inode,
+    vfs::{Inode, InodeIdentifier, file::get_file},
 };
 
 use super::{
@@ -154,11 +154,12 @@ async fn mount_filesystem(mountpoint: ResolvedPath, fs: Arc<dyn FileSystem + Sen
         mount_vfs_adapters(vfs).await;
     } else {
         println!("Mounting filesystem at {:?}", mountpoint.inner());
-        let fs_root_inode = fs.stat(ROOT_INODE_INDEX).await?;
-        println!("Mounting filesystem with root inode: {:X?}", fs_root_inode);
-        let (inode, _parent_inode_chain) = fs_tree::get_inode_chain((&mountpoint).into(), None).await?;
-        println!("mountpoint inode: {:X?}", inode);
-        fs_tree::mount_inode(inode, fs_root_inode);
+        let (parent_inode, _parent_inode_chain) = fs_tree::get_inode_chain((&mountpoint).into(), None).await?;
+        let inode_id = InodeIdentifier {
+            device_id: fs.device_id(),
+            index: ROOT_INODE_INDEX,
+        };
+        fs_tree::mount_inode(parent_inode, inode_id);
         let fs: Arc<dyn FileSystem + Send> = fs;
         let mut vfs = lock_w_info!(VFS);
         vfs.mounted_filesystems.insert(part_id, fs);
@@ -168,13 +169,17 @@ async fn mount_filesystem(mountpoint: ResolvedPath, fs: Arc<dyn FileSystem + Sen
 }
 
 async fn mount_new_root(fs: &Arc<dyn FileSystem + Send>) -> Result<(), ErrorCode> {
-    let inode = fs.stat(ROOT_INODE_INDEX).await?;
-    println!("Mounted root filesystem with root inode: {:X?}", inode);
-    let inode_index = inode.index;
-    fs_tree::init(inode);
+    // let inode = fs.stat(ROOT_INODE_INDEX).await?;
+    // println!("Mounted root filesystem with root inode: {:X?}", inode);
+    // let inode_index = inode.index;
+    let inode_id = InodeIdentifier {
+        device_id: fs.device_id(),
+        index: ROOT_INODE_INDEX,
+    };
+    fs_tree::init(inode_id);
 
     //root checks
-    let root_dirs = fs.read_dir(inode_index).await?;
+    let root_dirs = fs.read_dir(ROOT_INODE_INDEX).await?;
     let required_dirs = ["tty", "proc", "net"];
     #[allow(clippy::never_loop)]
     for required_dir in required_dirs.iter() {
@@ -226,23 +231,20 @@ pub async fn open_file(
     mut open_mode: FileFlags,
 ) -> Result<FileHandle, ErrorCode> {
     let (inode_index, inode_chain) = fs_tree::get_inode_chain(path, from).await?;
-    let inode = fs_tree::get_inode(inode_index).ok_or(ErrorCode::InodeNotPresent)?;
-    open_mode.set_dir(inode.type_mode.is_dir());
+    let open_file = get_file(inode_index).await?;
+    open_mode.set_dir(unsafe { open_file.inode.get_read_ptr().type_mode.is_dir() });
     //TODO: check permissions
     Ok(FileHandle {
         inode: inode_index,
         parent_chain: inode_chain,
         position: 0,
         file_flags: open_mode,
+        open_file,
     })
 }
 
-pub async fn close_file(_file_handle: FileHandle) {
-    //does nothing for now
-}
-
 pub async fn get_dir_entries(file_handle: &FileHandle) -> Result<Box<[DirEntry]>, ErrorCode> {
-    let inode = fs_tree::get_inode(file_handle.inode).ok_or(ErrorCode::InodeNotPresent)?;
+    let inode = unsafe { file_handle.open_file.inode.get_read_ptr() };
 
     if !inode.type_mode.is_dir() {
         return Err(ErrorCode::UnsupportedOperation);
@@ -265,7 +267,7 @@ pub async fn create_file(parent_dir: &mut FileHandle, name: &str, inode_type: In
         return Err(ErrorCode::UnsupportedOperation);
     }
 
-    let parent_inode = fs_tree::get_inode(parent_dir.inode).ok_or(ErrorCode::InodeNotPresent)?;
+    let parent_inode = unsafe { parent_dir.open_file.inode.get_read_ptr() };
     let mut vfs = lock_w_info!(VFS);
     let device_details = vfs.devices.get(&parent_inode.device).ok_or(ErrorCode::InodeNotPresent)?;
     let partition_id = device_details.partition;
@@ -280,14 +282,20 @@ pub async fn create_file(parent_dir: &mut FileHandle, name: &str, inode_type: In
         "create file returned file and parent inodes: {:X?}, {:X?}",
         file_inode, parent_inode
     );
-    fs_tree::update_inode(parent_dir.inode, parent_inode)?;
-    fs_tree::insert_inode(parent_dir.inode, name.to_string().into_boxed_str(), file_inode)?;
+    let child_id = InodeIdentifier {
+        device_id: parent_inode.device,
+        index: file_inode.index,
+    };
+    // fs_tree::update_inode(parent_dir.inode, parent_inode)?;
+    fs_tree::insert_inode(parent_dir.inode, name.to_string().into_boxed_str(), child_id)?;
+    parent_dir.open_file.inode.lock().await.update_from(&parent_inode);
 
     Ok(())
 }
 
 pub async fn write_file(file_handle: &mut FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, ErrorCode> {
-    let inode = fs_tree::get_inode(file_handle.inode).ok_or(ErrorCode::InodeNotPresent)?;
+    // let inode = fs_tree::get_inode(file_handle.inode).ok_or(ErrorCode::InodeNotPresent)?;
+    let mut inode = file_handle.open_file.inode.lock().await;
 
     let desired_offset = if file_handle.file_flags.append() {
         inode.size
@@ -316,13 +324,13 @@ pub async fn write_file(file_handle: &mut FileHandle, buffer: &[PhysAddr], size:
 
     file_handle.position += res.1.min(size);
 
-    fs_tree::update_inode(file_handle.inode, res.0)?;
+    inode.update_from(&res.0);
 
     Ok(res.1)
 }
 
-pub async fn stat_file(file_handle: &FileHandle) -> Result<Inode, ErrorCode> {
-    fs_tree::get_inode(file_handle.inode).ok_or(ErrorCode::InodeNotPresent)
+pub async fn stat_file(file_handle: &FileHandle) -> Inode {
+    file_handle.open_file.inode.lock().await.clone()
 }
 
 pub async fn read_file(file_handle: &mut FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, ErrorCode> {
@@ -332,7 +340,7 @@ pub async fn read_file(file_handle: &mut FileHandle, buffer: &[PhysAddr], size: 
 
     let offset = file_handle.position;
 
-    let inode = fs_tree::get_inode(file_handle.inode).ok_or(ErrorCode::InodeNotPresent)?;
+    let inode = unsafe { file_handle.open_file.inode.get_read_ptr() };
 
     if inode.type_mode.is_dir() {
         return Err(ErrorCode::UnsupportedOperation);

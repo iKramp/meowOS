@@ -34,14 +34,16 @@ impl TtyAdapter {
             access_time: 0,
             modification_time: 0,
             stat_change_time: 0,
-            preferred_block_size: 512,
-            blocks: u32::MAX,
         }
     }
 }
 
 #[async_trait::async_trait]
 impl VfsAdapterTrait for TtyAdapter {
+    fn device_id(&self) -> DeviceId {
+        self.device_id
+    }
+
     async fn read(
         &self,
         _inode: crate::vfs::InodeIndex,

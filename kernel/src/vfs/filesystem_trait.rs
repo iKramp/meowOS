@@ -1,7 +1,10 @@
 use core::fmt::Debug;
 use std::{boxed::Box, error::ErrorCode, mem_utils::PhysAddr, sync::arc::Arc};
 
-use crate::drivers::block_device::disk::{DirEntry, MountedPartition};
+use crate::{
+    drivers::block_device::disk::{DirEntry, MountedPartition},
+    vfs::DeviceId,
+};
 
 use super::{Inode, InodeIndex, InodeType};
 
@@ -12,6 +15,7 @@ pub trait FileSystemFactory: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait FileSystem: Debug + Send + Sync {
+    fn device_id(&self) -> DeviceId;
     async fn unmount(&self) -> Result<(), ErrorCode>;
     ///Offset must be page aligned
     async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, ErrorCode>;

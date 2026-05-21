@@ -9,41 +9,15 @@ hbreak $arg0
 end
 
 python
-import sys
-import gdb
-import os
 import subprocess
+import os
 
-cargo_path = subprocess.check_output(['which', 'cargo'], text=True).strip()
-rustlib_path = os.path.join(os.path.dirname(cargo_path), '..', 'lib', 'rustlib', 'etc')
-rustlib_path = os.path.realpath(rustlib_path)
-sys.path.append(rustlib_path)
+cargo = subprocess.check_output(["which", "cargo"], text=True).strip()
+rustlib = os.path.realpath(
+    os.path.join(os.path.dirname(cargo), "..", "lib", "rustlib", "etc")
+)
 
-import gdb_lookup
-import rust_types
-printer = gdb_lookup.RustPrettyPrinter("rust")
-gdb.pretty_printers.append(printer)
-printer.add(rust_types.RustType.ENUM,          gdb_lookup.enum_provider)
-printer.add(rust_types.RustType.STD_STRING,    gdb_lookup.StdStringProvider)
-printer.add(rust_types.RustType.STD_OS_STRING, gdb_lookup.StdOsStringProvider)
-printer.add(rust_types.RustType.STD_STR,       gdb_lookup.StdStrProvider)
-printer.add(rust_types.RustType.STD_SLICE,     gdb_lookup.StdSliceProvider)
-printer.add(rust_types.RustType.STD_VEC,       gdb_lookup.StdVecProvider)
-printer.add(rust_types.RustType.STD_VEC_DEQUE, gdb_lookup.StdVecDequeProvider)
-printer.add(rust_types.RustType.STD_BTREE_SET, gdb_lookup.StdBTreeSetProvider)
-printer.add(rust_types.RustType.STD_BTREE_MAP, gdb_lookup.StdBTreeMapProvider)
-printer.add(rust_types.RustType.STD_HASH_MAP,  gdb_lookup.hashmap_provider)
-printer.add(rust_types.RustType.STD_HASH_SET,  gdb_lookup.hashset_provider)
-printer.add(rust_types.RustType.STD_RC,        gdb_lookup.StdRcProvider)
-printer.add(rust_types.RustType.STD_ARC, lambda valobj: gdb_lookup.StdRcProvider(valobj, is_atomic=True))
-
-printer.add(rust_types.RustType.STD_CELL,      gdb_lookup.StdCellProvider)
-printer.add(rust_types.RustType.STD_REF,       gdb_lookup.StdRefProvider)
-printer.add(rust_types.RustType.STD_REF_MUT,   gdb_lookup.StdRefProvider)
-printer.add(rust_types.RustType.STD_REF_CELL,  gdb_lookup.StdRefCellProvider)
-
-printer.add(rust_types.RustType.STD_NONZERO_NUMBER, gdb_lookup.StdNonZeroNumberProvider)
-
+gdb.execute(f"source {rustlib}/gdb_load_rust_pretty_printers.py")
 end
 
 define p_locals

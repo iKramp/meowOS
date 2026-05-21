@@ -99,48 +99,46 @@ pub fn verify_memory_ptr(mut ptr: u64) -> bool {
 
 //syscalls are limited to 5 64bit parameters. If more data is needed, set up a structure and pass a
 //pointer to it
-#[naked]
+#[unsafe(naked)]
 extern "C" fn handler_wrapper() -> ! {
     //INFO: any kind of change here should be matched with the one in dispatcher.rs
-    unsafe {
-        core::arch::naked_asm!(
-            //push preserved regs, get kernel stack from gsbase
-            //stack is aligned to 16 here
-            "swapgs",
+    core::arch::naked_asm!(
+        //push preserved regs, get kernel stack from gsbase
+        //stack is aligned to 16 here
+        "swapgs",
 
-            "mov gs:[16], rcx", //save user rip to gsbase area
-            "mov cx, 0",
-            "mov ss, cx",
-            "mov rcx, gs:[16]", //get user rip from gsbase area
+        "mov gs:[16], rcx", //save user rip to gsbase area
+        "mov cx, 0",
+        "mov ss, cx",
+        "mov rcx, gs:[16]", //get user rip from gsbase area
 
-            "mov gs:[16], rsp", //save user rsp to gsbase area
-            "mov rsp, gs:[8]", //get kernel rsp from gsbase area
+        "mov gs:[16], rsp", //save user rsp to gsbase area
+        "mov rsp, gs:[8]", //get kernel rsp from gsbase area
 
-            "sub rsp, 8*16", //space for 16 u64s
-            "mov [rsp + 0*8], rcx",
-            "mov [rsp + 1*8], rbp",
-            "mov rcx, gs:[16]", //user rsp
-            "mov [rsp + 2*8], rcx", //user rsp
-            "mov [rsp + 3*8], r11",
-            "mov [rsp + 4*8], rax",
-            "mov [rsp + 5*8], rbx",
-            "mov [rsp + 6*8], rdx",
-            "mov [rsp + 7*8], rdi",
-            "mov [rsp + 8*8], rsi",
-            "mov [rsp + 9*8], r8",
-            "mov [rsp + 10*8], r9",
-            "mov [rsp + 11*8], r10",
-            "mov [rsp + 12*8], r12",
-            "mov [rsp + 13*8], r13",
-            "mov [rsp + 14*8], r14",
-            "mov [rsp + 15*8], r15",
+        "sub rsp, 8*16", //space for 16 u64s
+        "mov [rsp + 0*8], rcx",
+        "mov [rsp + 1*8], rbp",
+        "mov rcx, gs:[16]", //user rsp
+        "mov [rsp + 2*8], rcx", //user rsp
+        "mov [rsp + 3*8], r11",
+        "mov [rsp + 4*8], rax",
+        "mov [rsp + 5*8], rbx",
+        "mov [rsp + 6*8], rdx",
+        "mov [rsp + 7*8], rdi",
+        "mov [rsp + 8*8], rsi",
+        "mov [rsp + 9*8], r8",
+        "mov [rsp + 10*8], r9",
+        "mov [rsp + 11*8], r10",
+        "mov [rsp + 12*8], r12",
+        "mov [rsp + 13*8], r13",
+        "mov [rsp + 14*8], r14",
+        "mov [rsp + 15*8], r15",
 
-            "mov rdi, rsp", //args rsp
+        "mov rdi, rsp", //args rsp
 
-            "call {}",
-            sym handler
-        )
-    }
+        "call {}",
+        sym handler
+    )
 }
 
 #[allow(unused_variables)]

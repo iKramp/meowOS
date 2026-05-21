@@ -55,6 +55,10 @@ impl NetAdapter {
 
 #[async_trait::async_trait]
 impl VfsAdapterTrait for NetAdapter {
+    fn device_id(&self) -> DeviceId {
+        self.device_id
+    }
+
     async fn read(
         &self,
         _inode: crate::vfs::InodeIndex,
@@ -188,8 +192,6 @@ impl VfsAdapterTrait for NetAdapter {
                 access_time: 0,
                 modification_time: 0,
                 stat_change_time: 0,
-                preferred_block_size: 0,
-                blocks: 0,
             },
             NICEntryType::MacAddress | NICEntryType::Mtu => inode::Inode {
                 index: inode,
@@ -202,8 +204,6 @@ impl VfsAdapterTrait for NetAdapter {
                 access_time: 0,
                 modification_time: 0,
                 stat_change_time: 0,
-                preferred_block_size: 0,
-                blocks: 0,
             },
             NICEntryType::Data => inode::Inode {
                 index: inode,
@@ -216,8 +216,6 @@ impl VfsAdapterTrait for NetAdapter {
                 access_time: 0,
                 modification_time: 0,
                 stat_change_time: 0,
-                preferred_block_size: 0,
-                blocks: 0,
             },
         };
         Ok(stat)

@@ -27,7 +27,7 @@ impl<T: Clone> Acow<T> {
     }
 
     pub fn get_mut(&mut self) -> &mut T {
-        if self.data.ref_count() == 1 {
+        if self.data.strong_ref_count() == 1 {
             unsafe { &mut *self.data.get().get() }
         } else {
             self.data = Arc::new(UnsafeCell::new(self.get().clone()));

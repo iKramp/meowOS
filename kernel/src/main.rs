@@ -1,23 +1,14 @@
 #![no_std]
 #![no_main]
-#![feature(naked_functions)]
-#![feature(abi_x86_interrupt)]
 #![feature(stmt_expr_attributes)]
-#![feature(box_into_inner)]
 #![feature(string_remove_matches)]
 #![feature(arbitrary_self_types)]
 #![feature(arbitrary_self_types_pointers)]
-#![feature(c_str_module)]
 #![feature(str_from_raw_parts)]
-#![feature(slice_index_methods)]
-#![feature(new_range_api)]
 #![feature(rustc_attrs)]
-#![feature(unsafe_cell_access)]
-#![feature(let_chains)]
-#![feature(downcast_unchecked)]
 #![feature(map_try_insert)]
-#![feature(string_into_chars)]
-#![feature(generic_arg_infer)]
+#![allow(incomplete_features)]
+#![feature(async_drop)]
 #![allow(internal_features)]
 #![allow(clippy::fn_to_numeric_cast)]
 
@@ -85,7 +76,7 @@ extern "C" fn _start() -> ! {
     let cmd_args = cmd_args::CmdArgs::new(str.to_str().expect("Invalid UTF-8 in cmdline"));
     println!(level:info, "cmd_args: {:?}", cmd_args);
 
-    let test_ptr = acpi::read_tables as u64;
+    let test_ptr = acpi::read_tables as *const () as u64;
     let probe_res = memory::probe_ptr_u64(test_ptr);
     println!(level:info, "probe read_tables pointer: {:#x} - result: {:?}", test_ptr, probe_res);
 

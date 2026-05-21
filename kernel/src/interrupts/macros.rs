@@ -13,10 +13,10 @@ macro_rules! handler {
         $name:ident $(, $flag:ident )* $(,)?
     ) => {{
         use $crate::interrupts::general_interrupt_handler;
-        #[naked]
+        #[unsafe(naked)]
         extern "C" fn wrapper() -> ! {
             //TODO: any kind of change here should be matched with the one in dispatcher.rs
-            unsafe { core::arch::naked_asm!(
+            core::arch::naked_asm!(
                 //potentially padding, but we always start with a clean stack if we're the first
                 //level. IS aligned to 16 bytes
                 //
@@ -137,7 +137,6 @@ macro_rules! handler {
                 sym $name,
                 sym general_interrupt_handler,
             )}
-        }
         wrapper
     }};
 

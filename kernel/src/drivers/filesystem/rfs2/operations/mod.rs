@@ -9,8 +9,8 @@ use std::{
 };
 
 use super::InodeIndex;
-use crate::vfs::Inode as VfsInode;
 use crate::vfs::InodeIndex as VfsInodeIndex;
+use crate::vfs::{DeviceId, Inode as VfsInode};
 use crate::{
     drivers::{
         block_device::disk::DirEntry as VfsDirEntry,
@@ -98,8 +98,6 @@ impl InodeInfo {
             access_time: 0,
             modification_time: self.modification_seconds_since_epoch,
             stat_change_time: self.stat_change_seconds_since_epoch,
-            preferred_block_size: 4096,
-            blocks: self.size.div_ceil(4096) as u32,
         }
     }
 
@@ -157,6 +155,10 @@ impl Rfs2 {
 
 #[async_trait::async_trait]
 impl FileSystem for Rfs2 {
+    fn device_id(&self) -> DeviceId {
+        self.partition.partition.device
+    }
+
     async fn unmount(&self) -> Result<(), ErrorCode> {
         //nothing to do rn
         Ok(())

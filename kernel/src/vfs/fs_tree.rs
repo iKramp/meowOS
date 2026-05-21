@@ -8,7 +8,7 @@ use std::{
 };
 use std::{println, vec};
 
-use super::{DeviceId, Inode, InodeIdentifier, InodeIdentifierChain, ResolvedPathBorrowed, VFS};
+use super::{DeviceId, InodeIdentifier, InodeIdentifierChain, ResolvedPathBorrowed, VFS};
 
 pub(super) static INODE_CACHE: NoIntSpinlock<InodeCache> = NoIntSpinlock::new(InodeCache::new());
 
@@ -18,7 +18,7 @@ struct FsTreeNode {
 }
 
 pub(super) struct InodeCache {
-    inodes: BTreeMap<InodeIdentifier, (Inode, FsTreeNode)>,
+    inodes: BTreeMap<InodeIdentifier, FsTreeNode>,
     root: InodeIdentifier,
     ///maps from parent inode in mount point to child inode in mount point
     mount_points: BTreeMap<InodeIdentifier, InodeIdentifier>,
@@ -38,21 +38,12 @@ impl InodeCache {
 }
 
 ///Should be called when mounting a new fs as root
-pub fn init(root: Inode) {
+pub fn init(root: InodeIdentifier) {
     let mut cache = lock_w_info!(INODE_CACHE);
 
-    let inode_index = InodeIdentifier {
-        device_id: root.device,
-        index: root.index,
-    };
     cache.inodes.clear();
-    cache.inodes.insert(inode_index, (root, FsTreeNode { children: Vec::new() }));
-    cache.root = inode_index;
-}
-
-pub fn get_inode(inode_index: InodeIdentifier) -> Option<Inode> {
-    let cache = &mut lock_w_info!(INODE_CACHE);
-    cache.inodes.get(&inode_index).map(|(inode, _)| inode).cloned()
+    cache.inodes.insert(root, FsTreeNode { children: Vec::new() });
+    cache.root = root;
 }
 
 pub async fn get_unmount_inodes(
@@ -157,7 +148,7 @@ async fn find_child_no_mounts(
         current, f_name
     );
 
-    let child = current_node.1.children.iter().find(|(name, _)| **name == *f_name);
+    let child = current_node.children.iter().find(|(name, _)| **name == *f_name);
     if let Some(child) = child {
         println!(
             "find_child_no_mounts: found child in cache: {:?} for name: {}",
@@ -178,7 +169,7 @@ async fn find_child_no_mounts(
         .inodes
         .get(&current)
         .ok_or(ErrorCode::InodeNotPresent)?;
-    let child = current_node.1.children.iter().find(|(name, _)| **name == *f_name);
+    let child = current_node.children.iter().find(|(name, _)| **name == *f_name);
     if let Some(child) = child {
         println!(
             "find_child_no_mounts: found child after loading directory: {:?} for name: {}",
@@ -192,7 +183,7 @@ async fn find_child_no_mounts(
     );
     //print dir children
 
-    for child in &current_node.1.children {
+    for child in &current_node.children {
         println!("find_child_no_mounts: directory entry: {} with inode: {:?}", child.0, child.1);
     }
 
@@ -200,14 +191,8 @@ async fn find_child_no_mounts(
 }
 
 async fn load_dir(current: InodeIdentifier, cache: &mut Option<NoIntSpinlockGuard<'_, InodeCache>>) -> Result<(), ErrorCode> {
-    let inode = cache
-        .as_ref()
-        .expect("is some")
-        .inodes
-        .get(&current)
-        .ok_or(ErrorCode::InodeNotPresent)?;
     let mut vfs = lock_w_info!(VFS);
-    let device_details = vfs.devices.get(&inode.0.device).ok_or(ErrorCode::NoEntry)?;
+    let device_details = vfs.devices.get(&current.device_id).ok_or(ErrorCode::NoEntry)?;
     let partition_id = device_details.partition;
     let fs = vfs
         .mounted_filesystems
@@ -245,7 +230,7 @@ async fn load_dir(current: InodeIdentifier, cache: &mut Option<NoIntSpinlockGuar
             .as_mut()
             .expect("is some")
             .inodes
-            .insert(inode_index, (inode, FsTreeNode { children: Vec::new() }));
+            .insert(inode_index, FsTreeNode { children: Vec::new() });
         println!(
             "load_dir: added inode {:?} to cache for directory entry: {}",
             inode_index, dir_entry.name
@@ -265,45 +250,29 @@ async fn load_dir(current: InodeIdentifier, cache: &mut Option<NoIntSpinlockGuar
         .inodes
         .get_mut(&current)
         .ok_or(ErrorCode::InodeNotPresent)?
-        .1
         .children = children;
 
     Ok(())
 }
 
-pub fn update_inode(cache_num: InodeIdentifier, inode: Inode) -> Result<(), ErrorCode> {
+pub fn insert_inode(parent_cache_num: InodeIdentifier, name: Box<str>, inode_index: InodeIdentifier) -> Result<(), ErrorCode> {
     let mut cache = lock_w_info!(INODE_CACHE);
-    cache.inodes.get_mut(&cache_num).ok_or(ErrorCode::InodeNotPresent)?.0 = inode;
-    Ok(())
-}
-
-pub fn insert_inode(parent_cache_num: InodeIdentifier, name: Box<str>, inode: Inode) -> Result<(), ErrorCode> {
-    let mut cache = lock_w_info!(INODE_CACHE);
-    let inode_index = InodeIdentifier {
-        device_id: inode.device,
-        index: inode.index,
-    };
-    cache.inodes.insert(inode_index, (inode, FsTreeNode { children: Vec::new() }));
+    cache.inodes.insert(inode_index, FsTreeNode { children: Vec::new() });
     let parent_res = cache.inodes.get_mut(&parent_cache_num);
     match parent_res {
         None => {
             cache.inodes.remove(&inode_index);
             return Err(ErrorCode::InodeNotPresent);
         }
-        Some(parent) => parent.1.children.push((name, inode_index)),
+        Some(parent) => parent.children.push((name, inode_index)),
     }
     Ok(())
 }
 
 ///parent_cache_num refers to the mountpoint itself, on top of which the new inode will be mounted
-pub fn mount_inode(parent_cache_num: InodeIdentifier, inode: Inode) {
+pub fn mount_inode(parent_cache_num: InodeIdentifier, target_inode: InodeIdentifier) {
     let mut cache = lock_w_info!(INODE_CACHE);
-    let inode_index = InodeIdentifier {
-        device_id: inode.device,
-        index: inode.index,
-    };
-    cache.inodes.insert(inode_index, (inode, FsTreeNode { children: Vec::new() }));
-    cache.mount_points.insert(parent_cache_num, inode_index);
+    cache.mount_points.insert(parent_cache_num, target_inode);
 }
 
 ///parent_cache_num refers to the parent directory, NOT the mountpoint itself
@@ -330,7 +299,7 @@ pub fn unmount_inode(parent_cache_num: InodeIdentifier) -> bool {
 /// Removes all inodes associated with a specific device ID. Called when device is fully unmounted
 pub fn remove_device(device_id: DeviceId) {
     let mut cache = lock_w_info!(INODE_CACHE);
-    cache.inodes.retain(|_, (inode, _)| inode.device != device_id);
+    cache.inodes.retain(|inode, _| inode.device_id != device_id);
     if cache.root.device_id == device_id {
         cache.root = InodeIdentifier {
             device_id: DeviceId::new(0),

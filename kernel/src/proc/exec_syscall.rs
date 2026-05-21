@@ -1,9 +1,12 @@
-use std::{boxed::Box, sync::arc::Arc};
+use std::{boxed::Box, error::ErrorCode, lock_w_info, string::ToString, sync::arc::Arc};
 
-use crate::proc::{
-    NamespaceIds, ProcessData,
-    context::{builder::create_process_from_parts, parts::X86RegisterState},
-    syscall::{SyscallCpuState, SyscallHandler, SyscallPack},
+use crate::{
+    interrupts::InterruptProcessorState,
+    proc::{
+        NamespaceIds, PROCESS_ID_COUNTER, Pid, ProcNamespaces, ProcessData, SCHEDULER,
+        process_data::CpuStateType,
+        syscall::{SyscallCpuState, SyscallHandler, SyscallPack},
+    },
 };
 
 pub fn init_exec_syscall() {
@@ -11,6 +14,27 @@ pub fn init_exec_syscall() {
 
     let exec_syscall_pack = SyscallPack::new(Box::new(handlers));
     crate::proc::syscall::register_syscall_pack("exec".into(), Arc::new(exec_syscall_pack));
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct X86RegisterState {
+    pub rax: u64,
+    pub rbx: u64,
+    pub rcx: u64,
+    pub rdx: u64,
+    pub rsi: u64,
+    pub rdi: u64,
+    pub rsp: u64,
+    pub rbp: u64,
+    pub r8: u64,
+    pub r9: u64,
+    pub r10: u64,
+    pub r11: u64,
+    pub r12: u64,
+    pub r13: u64,
+    pub r14: u64,
+    pub r15: u64,
 }
 
 #[repr(C)]
@@ -66,4 +90,46 @@ fn exec(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
 
     proc.set_syscall_return(&[pid.0 as u64]);
     false
+}
+
+pub fn create_process_from_parts(
+    register_states: X86RegisterState,
+    start_ptr: u64,
+    namespaces: ProcNamespaces,
+    name: &str,
+) -> Result<Pid, ErrorCode> {
+    let cpu_state = InterruptProcessorState::new_full(
+        register_states.r15,
+        register_states.r14,
+        register_states.r13,
+        register_states.r12,
+        register_states.r11,
+        register_states.r10,
+        register_states.r9,
+        register_states.r8,
+        register_states.rbp,
+        register_states.rsp,
+        register_states.rdi,
+        register_states.rsi,
+        register_states.rdx,
+        register_states.rcx,
+        register_states.rbx,
+        register_states.rax,
+        start_ptr,
+    );
+
+    let pid = Pid(PROCESS_ID_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed));
+    let process_data = ProcessData::new(
+        pid,
+        false,
+        name.to_string().into_boxed_str(),
+        CpuStateType::Interrupt(cpu_state),
+        namespaces,
+    );
+
+    let mut scheduler_lock = lock_w_info!(SCHEDULER);
+    let scheduler = unsafe { scheduler_lock.assume_init_mut() };
+    scheduler.accept_new_process(pid, process_data);
+
+    Ok(pid)
 }

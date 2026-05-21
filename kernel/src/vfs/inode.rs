@@ -6,21 +6,39 @@ use super::{DeviceId, InodeIndex};
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub struct Inode {
+    //RO
     pub index: InodeIndex,
+    //RO
     pub device: DeviceId, //some map to major/minor (minor are partitions)
+    //type RO, permissions RW
     pub type_mode: InodeType,
+    //RW
     pub link_cnt: u16,
+    //RW
     pub uid: u16,
+    //RW
     pub gid: u16,
-    ///len of a symlink is the length of the pathname
+    //RW
     pub size: u64,
+    //RW
     pub access_time: u64,
+    //RW
     pub modification_time: u64,
+    //RW
     pub stat_change_time: u64,
-    //available if this represents a device, otherwise inherits from device
-    pub preferred_block_size: u16,
-    ///number of blocks used by this inode, in 512 byte units!!!!!
-    pub blocks: u32,
+}
+
+impl Inode {
+    pub fn update_from(&mut self, other: &Inode) {
+        self.type_mode = other.type_mode.clone();
+        self.link_cnt = other.link_cnt;
+        self.uid = other.uid;
+        self.gid = other.gid;
+        self.size = other.size;
+        self.access_time = other.access_time;
+        self.modification_time = other.modification_time;
+        self.stat_change_time = other.stat_change_time;
+    }
 }
 
 const FILE_MODE_MASK: u32 = 0xFFF00000;

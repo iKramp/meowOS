@@ -1,10 +1,9 @@
 #![allow(incomplete_features)]
 #![no_std]
-#![feature(ptr_metadata)]
 #![feature(specialization)]
-#![feature(negative_impls)]
 #![feature(coerce_unsized)]
 #![feature(unsize)]
+#![feature(async_drop)]
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {

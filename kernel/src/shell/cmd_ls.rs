@@ -10,7 +10,6 @@ pub(super) async fn cmd_ls(path: &str) -> Result<(), ErrorCode> {
     let file_handle = vfs::open_file((&resolved_path).into(), None, FileFlags::new().with_read(true)).await?;
 
     let res = vfs::get_dir_entries(&file_handle).await;
-    vfs::close_file(file_handle).await;
 
     match res {
         Ok(entries) => {

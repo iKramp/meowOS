@@ -80,6 +80,14 @@ impl<T: ?Sized> NoIntSpinlock<T> {
         info.inc_spinlocks((prev_rflags & (1 << 9)) != 0, location.clone());
         NoIntSpinlockGuard { location, lock: self }
     }
+
+    ///function to get a poitner to read only data in T
+    /// # Safety
+    ///
+    /// This is unsafe as the caller must ensure that data is never modified
+    pub unsafe fn get_read_ptr(&self) -> &T {
+        unsafe { &*self.data.get() }
+    }
 }
 
 impl<T: ?Sized> Drop for NoIntSpinlockGuard<'_, T> {

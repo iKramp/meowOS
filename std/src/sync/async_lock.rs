@@ -46,11 +46,17 @@ impl<T> AsyncSpinlock<T> {
             wakers: NoIntSpinlock::new(None),
         }
     }
-}
 
-impl<T> AsyncSpinlock<T> {
     pub async fn lock(&self) -> AsyncSpinlockGuard<'_, T> {
         AsyncSpinLockFuture { lock: self }.await
+    }
+
+    ///function to get a poitner to read only data in T
+    /// # Safety
+    ///
+    /// This is unsafe as the caller must ensure that data is never modified
+    pub unsafe fn get_read_ptr(&self) -> &T {
+        unsafe { &*self.data.get() }
     }
 }
 

@@ -62,6 +62,10 @@ impl FileSystemFactory for DtmpfsFactory {
 
 #[async_trait::async_trait]
 impl FileSystem for Dtmpfs {
+    fn device_id(&self) -> DeviceId {
+        unsafe { DeviceId(0) }
+    }
+
     async fn unmount(&self) -> Result<(), ErrorCode> {
         Ok(())
     }
@@ -102,22 +106,18 @@ impl FileSystem for Dtmpfs {
     }
 
     async fn stat(&self, inode: InodeIndex) -> Result<super::Inode, ErrorCode> {
-        unsafe {
-            Ok(super::Inode {
-                index: inode,
-                device: DeviceId(0),
-                type_mode: InodeType::new_dir(0o755), //rwxr-xr-x
-                link_cnt: 0,
-                uid: 0,
-                gid: 0,
-                size: 0,
-                preferred_block_size: 0,
-                blocks: 0,
-                access_time: 0,
-                modification_time: 0,
-                stat_change_time: 0,
-            })
-        }
+        Ok(super::Inode {
+            index: inode,
+            device: self.device_id(),
+            type_mode: InodeType::new_dir(0o755), //rwxr-xr-x
+            link_cnt: 0,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            access_time: 0,
+            modification_time: 0,
+            stat_change_time: 0,
+        })
     }
 
     async fn set_stat(&self, _inode_index: InodeIndex, _inode_data: super::Inode) -> Result<(), ErrorCode> {

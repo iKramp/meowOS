@@ -21,7 +21,13 @@ fn print_range(
     level: u64,
     mut self_virt_addr: VirtAddr,
 ) -> Option<MapRange> {
-    for entry in table.entries {
+    println!(
+        "entered print_range with params: level: {}, self_virt_addr: {:016x}, current_range: {:?}",
+        level, self_virt_addr.0, current_range
+    );
+    println!("table addr: {:016x?}", table as *const PageTable as u64);
+
+    for entry in &table.entries {
         if !entry.present() {
             if let Some(range) = &current_range {
                 println!("{range}");
@@ -31,6 +37,7 @@ fn print_range(
             continue;
         }
         if level == 1 || entry.huge_page() {
+            #[allow(clippy::collapsible_if)] //is clearer
             if let Some(curr_range) = current_range.clone() {
                 if curr_range.pat != entry.pat()
                     || curr_range.write != entry.writeable()

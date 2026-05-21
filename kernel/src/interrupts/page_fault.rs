@@ -37,7 +37,7 @@ pub extern "C" fn page_fault(proc_data: &mut InterruptProcessorState) {
     if proc_data.interrupt_frame.rip >= core::ptr::addr_of!(crate::memory::probe_functions_start) as u64
         && proc_data.interrupt_frame.rip < core::ptr::addr_of!(crate::memory::probe_functions_end) as u64 + 0x1000
     {
-        proc_data.interrupt_frame.rip = crate::memory::probe_fail as u64;
+        proc_data.interrupt_frame.rip = crate::memory::probe_fail as *const () as u64;
         return;
     }
 
