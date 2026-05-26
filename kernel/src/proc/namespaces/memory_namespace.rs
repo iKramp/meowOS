@@ -15,10 +15,10 @@ use crate::{
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub(in crate::proc) enum MemoryRangeType {
-    Stack,
-    Code,
-    Data,
-    Shared,
+    Stack = 0,
+    Code = 1,
+    Data = 2,
+    Shared = 3,
 }
 
 #[derive(Debug)]
@@ -86,13 +86,14 @@ impl MemoryNamespace {
         self.page_tree_root
     }
 
+    ///returns ID
     pub fn add_mem_range(
         &self,
         range: Arc<VirtualMemoryRange>,
         name: Box<str>,
         range_type: MemoryRangeType,
         map_address: VirtAddr,
-    ) -> Result<(), ErrorCode> {
+    ) -> Result<u32, ErrorCode> {
         let new_range = range.reserved_range(map_address);
         if new_range.end.0 >= (1 << 48) {
             //disallow mapping in kernel space
@@ -135,7 +136,7 @@ impl MemoryNamespace {
             range_id: counter,
         });
         dynamic.range_counter += 1;
-        Ok(())
+        Ok(counter)
     }
 
     pub fn remove_mem_range_by_name(&mut self, name: &str) -> Result<(), ErrorCode> {

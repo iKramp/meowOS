@@ -1,8 +1,8 @@
 use crate::interrupts::InterruptProcessorState;
 use crate::memory::VirtualMemoryRange;
 use crate::memory::VirtualMemoryRangeGrowDirection;
+use crate::memory::VirtualMemoryRangeManagementMode;
 use crate::memory::VirtualMemoryRangePermissions;
-use crate::memory::VirtualMemoryRangeType;
 use crate::memory::current_root;
 use crate::proc::MemoryRangeType;
 use crate::proc::PROCESS_ID_COUNTER;
@@ -67,7 +67,7 @@ pub fn build_initialized_memory_namespace(
     let proc_mem_range = VirtualMemoryRange::create(
         memory::VirtualMemoryRangeCapacity::_05TB,
         VirtualMemoryRangePermissions(0),
-        VirtualMemoryRangeType::Manual,
+        VirtualMemoryRangeManagementMode::Manual,
     );
     let proc_mem_range_bounds = proc_mem_range.reserved_range(VirtAddr(0));
 
@@ -158,7 +158,7 @@ pub fn add_stack(mem_namespace: &mut MemoryNamespace, stack_size_pages: u8) -> R
     let mem_range = VirtualMemoryRange::create(
         memory::VirtualMemoryRangeCapacity::_1GB,
         permissions,
-        VirtualMemoryRangeType::Managed(VirtualMemoryRangeGrowDirection::Down),
+        VirtualMemoryRangeManagementMode::Managed(VirtualMemoryRangeGrowDirection::Down),
     );
     mem_range.expand_to(stack_size_pages as u32).expect("adding stack failed");
     let stack_highest_addr = mem_range.reserved_range(free_area).end;

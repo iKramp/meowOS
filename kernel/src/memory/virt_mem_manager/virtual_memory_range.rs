@@ -11,10 +11,10 @@ use crate::memory::{self, physical_allocator, virt_mem_manager::page_table::Page
 
 #[derive(Debug, Clone, Copy)]
 pub enum VirtualMemoryRangeCapacity {
-    _4KB,
-    _2MB,
-    _1GB,
-    _05TB,
+    _4KB = 0,
+    _2MB = 1,
+    _1GB = 2,
+    _05TB = 3,
 }
 
 impl VirtualMemoryRangeCapacity {
@@ -69,7 +69,7 @@ bitfield! {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VirtualMemoryRangeType {
+pub enum VirtualMemoryRangeManagementMode {
     Managed(VirtualMemoryRangeGrowDirection),
     Manual,
 }
@@ -84,7 +84,7 @@ pub enum VirtualMemoryRangeGrowDirection {
 pub struct VirtualMemoryRange {
     virt_tree_node: PhysAddr,
     virt_tree_level: u8, //0 means just 1 page, 1 means page tree node with allocated pages below
-    mem_range_type: VirtualMemoryRangeType,
+    mem_range_type: VirtualMemoryRangeManagementMode,
     perms: VirtualMemoryRangePermissions,
     allocated_pages: AtomicU32,
     alloc_lock: NoIntSpinlock<()>,
@@ -122,7 +122,7 @@ impl VirtualMemoryRange {
     pub fn create(
         capacity: VirtualMemoryRangeCapacity,
         perms: VirtualMemoryRangePermissions,
-        mem_range_type: VirtualMemoryRangeType,
+        mem_range_type: VirtualMemoryRangeManagementMode,
     ) -> Self {
         let table_addr = physical_allocator::allocate_frame();
         let table = unsafe { get_at_physical_addr::<PageTable>(table_addr) };
@@ -145,7 +145,7 @@ impl VirtualMemoryRange {
     }
 
     pub fn expand_to(&self, n_pages: u32) -> Result<(), ErrorCode> {
-        let VirtualMemoryRangeType::Managed(grow_direction) = self.mem_range_type else {
+        let VirtualMemoryRangeManagementMode::Managed(grow_direction) = self.mem_range_type else {
             return Err(ErrorCode::InvalidOperation);
         };
         if n_pages > self.max_size().pages() {
@@ -175,7 +175,7 @@ impl VirtualMemoryRange {
     }
 
     pub fn shrink_to(&self, n_pages: u32) -> Result<(), ErrorCode> {
-        let VirtualMemoryRangeType::Managed(grow_direction) = self.mem_range_type else {
+        let VirtualMemoryRangeManagementMode::Managed(grow_direction) = self.mem_range_type else {
             return Err(ErrorCode::InvalidOperation);
         };
 
@@ -196,7 +196,7 @@ impl VirtualMemoryRange {
         pages_to_map: Range<u32>,
         perms: VirtualMemoryRangePermissions,
     ) -> Result<(), ErrorCode> {
-        if self.mem_range_type != VirtualMemoryRangeType::Manual {
+        if self.mem_range_type != VirtualMemoryRangeManagementMode::Manual {
             return Err(ErrorCode::InvalidOperation);
         }
         self.allocate_manual(pages_to_map, perms)?;
@@ -217,7 +217,7 @@ impl VirtualMemoryRange {
     }
 
     pub fn free_manual_external(&self, pages_to_free: Range<u32>) -> Result<(), ErrorCode> {
-        if self.mem_range_type != VirtualMemoryRangeType::Manual {
+        if self.mem_range_type != VirtualMemoryRangeManagementMode::Manual {
             return Err(ErrorCode::InvalidOperation);
         }
         self.free_manual(pages_to_free)?;
