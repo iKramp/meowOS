@@ -18,14 +18,15 @@ pub enum VirtualMemoryRangeCapacity {
 }
 
 impl VirtualMemoryRangeCapacity {
-    pub fn from_level(level: u8) -> Self {
-        match level {
+    pub fn from_level(level: u8) -> Option<Self> {
+        let capacity = match level {
             0 => VirtualMemoryRangeCapacity::_4KB,
             1 => VirtualMemoryRangeCapacity::_2MB,
             2 => VirtualMemoryRangeCapacity::_1GB,
             3 => VirtualMemoryRangeCapacity::_05TB,
-            _ => panic!("invalid value in virtual memory range level"),
-        }
+            _ => return None,
+        };
+        Some(capacity)
     }
 
     pub fn into_level(self) -> u8 {
@@ -92,7 +93,7 @@ pub struct VirtualMemoryRange {
 
 impl VirtualMemoryRange {
     pub fn max_size(&self) -> VirtualMemoryRangeCapacity {
-        VirtualMemoryRangeCapacity::from_level(self.virt_tree_level)
+        VirtualMemoryRangeCapacity::from_level(self.virt_tree_level).expect("Invalid virt tree level in VirtualMemoryRange")
     }
 
     pub fn current_size_pages(&self) -> u32 {
@@ -122,7 +123,7 @@ impl VirtualMemoryRange {
     pub fn create(
         capacity: VirtualMemoryRangeCapacity,
         perms: VirtualMemoryRangePermissions,
-        mem_range_type: VirtualMemoryRangeManagementMode,
+        mem_range_management_mode: VirtualMemoryRangeManagementMode,
     ) -> Self {
         let table_addr = physical_allocator::allocate_frame();
         let table = unsafe { get_at_physical_addr::<PageTable>(table_addr) };
@@ -133,7 +134,7 @@ impl VirtualMemoryRange {
             virt_tree_level: capacity.into_level(),
             allocated_pages: AtomicU32::new(0),
             perms,
-            mem_range_type,
+            mem_range_type: mem_range_management_mode,
             alloc_lock: NoIntSpinlock::new(()),
         }
     }
@@ -164,7 +165,7 @@ impl VirtualMemoryRange {
             new_start..start
         };
 
-        self.allocate_manual(range, self.perms)?;
+        self.allocate_manual(range)?;
         Ok(())
     }
 
@@ -191,24 +192,20 @@ impl VirtualMemoryRange {
         self.free_manual(range)
     }
 
-    pub fn allocate_manual_external(
-        &self,
-        pages_to_map: Range<u32>,
-        perms: VirtualMemoryRangePermissions,
-    ) -> Result<(), ErrorCode> {
+    pub fn allocate_manual_external(&self, pages_to_map: Range<u32>) -> Result<(), ErrorCode> {
         if self.mem_range_type != VirtualMemoryRangeManagementMode::Manual {
             return Err(ErrorCode::InvalidOperation);
         }
-        self.allocate_manual(pages_to_map, perms)?;
+        self.allocate_manual(pages_to_map)?;
         Ok(())
     }
 
-    pub fn allocate_manual(&self, pages_to_map: Range<u32>, perms: VirtualMemoryRangePermissions) -> Result<(), ErrorCode> {
+    fn allocate_manual(&self, pages_to_map: Range<u32>) -> Result<(), ErrorCode> {
         let alloc_lock = lock_w_info!(self.alloc_lock);
         let newly_allocated_pages = pages_to_map.end - pages_to_map.start;
         let current_allocated = self.current_size_pages();
 
-        memory::userspace_map(pages_to_map, perms, self.virt_tree_node, self.virt_tree_level, 0)?;
+        memory::userspace_map(pages_to_map, self.perms, self.virt_tree_node, self.virt_tree_level, 0)?;
 
         self.set_current_size_pages(current_allocated.saturating_add(newly_allocated_pages));
 
@@ -224,7 +221,7 @@ impl VirtualMemoryRange {
         Ok(())
     }
 
-    pub fn free_manual(&self, pages_to_free: Range<u32>) -> Result<(), ErrorCode> {
+    fn free_manual(&self, pages_to_free: Range<u32>) -> Result<(), ErrorCode> {
         let alloc_lock = lock_w_info!(self.alloc_lock);
         let freed_pages = pages_to_free.end - pages_to_free.start;
         let current_allocated = self.current_size_pages();
@@ -242,5 +239,25 @@ impl Drop for VirtualMemoryRange {
     fn drop(&mut self) {
         //physical deallocated by dropping the phys_ranges
         PageTable::delete(self.virt_tree_node, self.virt_tree_level, false);
+    }
+}
+
+impl VirtualMemoryRangeManagementMode {
+    pub fn from_u64(value: u64) -> Option<Self> {
+        let lower = value & 0xFFFF_FFFF;
+        let upper = value >> 32;
+        let management_mode = match upper {
+            0 => {
+                let grow_direction = match lower {
+                    0 => VirtualMemoryRangeGrowDirection::Up,
+                    1 => VirtualMemoryRangeGrowDirection::Down,
+                    _ => return None,
+                };
+                VirtualMemoryRangeManagementMode::Managed(grow_direction)
+            }
+            1 => VirtualMemoryRangeManagementMode::Manual,
+            _ => return None,
+        };
+        Some(management_mode)
     }
 }

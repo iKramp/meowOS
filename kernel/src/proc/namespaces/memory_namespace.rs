@@ -21,6 +21,18 @@ pub(in crate::proc) enum MemoryRangeType {
     Shared = 3,
 }
 
+impl MemoryRangeType {
+    pub fn from_u32(value: u32) -> Option<Self> {
+        match value {
+            0 => Some(MemoryRangeType::Stack),
+            1 => Some(MemoryRangeType::Code),
+            2 => Some(MemoryRangeType::Data),
+            3 => Some(MemoryRangeType::Shared),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(in crate::proc) struct OwnedVirtualMemoryRange {
     pub shared_range: Arc<VirtualMemoryRange>,
@@ -61,7 +73,7 @@ impl ProcNamespace for MemoryNamespace {
             );
             if res.is_err() {
                 lock_w_info!(self.dynamic_data).memory_ranges.clear();
-                return res;
+                return res.map(|_| ());
             }
         }
         Ok(())
@@ -77,7 +89,7 @@ impl MemoryNamespace {
             page_tree_root,
             dynamic_data: NoIntSpinlock::new(MemoryNamespaceDynamicData {
                 memory_ranges: Vec::new(),
-                range_counter: 0,
+                range_counter: 1,
             }),
         }
     }
@@ -117,7 +129,6 @@ impl MemoryNamespace {
         };
 
         if entry.present() {
-            println!("checks did not catch invalid map");
             return Err(ErrorCode::InvalidArgument);
         }
 
@@ -139,28 +150,31 @@ impl MemoryNamespace {
         Ok(counter)
     }
 
-    pub fn remove_mem_range_by_name(&mut self, name: &str) -> Result<(), ErrorCode> {
-        let index = lock_w_info!(self.dynamic_data)
+    pub fn remove_mem_range_by_name(&self, name: &str) -> Result<(), ErrorCode> {
+        let mut dynamic_data = lock_w_info!(self.dynamic_data);
+        let index = dynamic_data
             .memory_ranges
             .iter()
             .position(|r| *r.name == *name)
             .ok_or(ErrorCode::NoEntry)?;
-        self.remove_mem_range_by_index(index as u32);
+        self.remove_mem_range_by_index(&mut dynamic_data, index as u32);
         Ok(())
     }
 
-    pub fn remove_mem_range_by_id(&mut self, id: u32) -> Result<(), ErrorCode> {
-        let index = lock_w_info!(self.dynamic_data)
+    pub fn remove_mem_range_by_id(&self, id: u32) -> Result<(), ErrorCode> {
+        let mut dynamic_data = lock_w_info!(self.dynamic_data);
+        let index = dynamic_data
             .memory_ranges
             .iter()
             .position(|r| r.range_id == id)
             .ok_or(ErrorCode::NoEntry)?;
-        self.remove_mem_range_by_index(index as u32);
+        self.remove_mem_range_by_index(&mut dynamic_data, index as u32);
         Ok(())
     }
 
-    pub fn remove_mem_range_by_index(&mut self, index: u32) {
-        let range = lock_w_info!(self.dynamic_data).memory_ranges.swap_remove(index as usize);
+    //pass in locked data so it can't be modified between finding the index and removing the range
+    fn remove_mem_range_by_index(&self, dynamic_data: &mut MemoryNamespaceDynamicData, index: u32) {
+        let range = dynamic_data.memory_ranges.swap_remove(index as usize);
         let Some(table_entry) =
             memory::get_page_table_entry_at_level(self.page_tree_root, range.map_address, range.shared_range.level() + 1, false)
         else {
@@ -183,7 +197,7 @@ impl MemoryNamespace {
         }
     }
 
-    pub fn find_hole(&mut self, size: VirtualMemoryRangeCapacity) -> Option<VirtAddr> {
+    pub fn find_hole(&self, size: VirtualMemoryRangeCapacity) -> Option<VirtAddr> {
         let mut current_addr = VirtAddr(1);
         'repeat: loop {
             current_addr = size.align_up(current_addr);
@@ -201,6 +215,26 @@ impl MemoryNamespace {
             }
             return Some(current_addr);
         }
+    }
+
+    //returns (range, base address)
+    pub fn get_range_from_address(&self, addr: VirtAddr) -> Option<(Arc<VirtualMemoryRange>, VirtAddr)> {
+        for range in lock_w_info!(self.dynamic_data).memory_ranges.iter() {
+            let r_range = range.shared_range.reserved_range(range.map_address);
+            if r_range.start <= addr && addr < r_range.end {
+                return Some((range.shared_range.clone(), range.map_address));
+            }
+        }
+        None
+    }
+
+    pub fn get_range_from_id(&self, id: u32) -> Option<(Arc<VirtualMemoryRange>, VirtAddr)> {
+        for range in lock_w_info!(self.dynamic_data).memory_ranges.iter() {
+            if range.range_id == id {
+                return Some((range.shared_range.clone(), range.map_address));
+            }
+        }
+        None
     }
 }
 

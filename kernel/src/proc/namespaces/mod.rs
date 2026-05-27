@@ -1,4 +1,7 @@
-use core::fmt::Debug;
+use core::{
+    any::{Any, TypeId},
+    fmt::Debug,
+};
 use std::{error::ErrorCode, sync::arc::Arc, vec::Vec};
 
 pub(in crate::proc) use memory_namespace::*;
@@ -9,7 +12,9 @@ mod memory_namespace;
 mod namespace_management_pack;
 mod syscall_namespace;
 
-trait ProcNamespace: Debug + Send + Sync {
+pub(super) use namespace_management_pack::init_namespace_management_syscalls;
+
+pub(super) trait ProcNamespace: Debug + Send + Sync + Any {
     fn get_id(&self) -> u64;
     fn init_from(&self, other: &Self) -> Result<(), ErrorCode>;
 }
@@ -65,28 +70,38 @@ impl ProcNamespaces {
             ids.syscall_namespace = self.syscall_namespace.get_id();
         }
 
-        let Some(NamespaceHolder::Mem(memory_namespace)) = self.get_namespace(ids.memory_namespace) else {
+        let Some(NamespaceHolder::Mem(memory_namespace)) = self.get_namespace_holder(ids.memory_namespace) else {
             return Err(ErrorCode::InvalidArgument);
         };
-        let Some(NamespaceHolder::Syscall(syscall_namespace)) = self.get_namespace(ids.syscall_namespace) else {
+        let Some(NamespaceHolder::Syscall(syscall_namespace)) = self.get_namespace_holder(ids.syscall_namespace) else {
             return Err(ErrorCode::InvalidArgument);
         };
         Ok(Self::new(memory_namespace.clone(), syscall_namespace.clone()))
     }
 
-    pub fn get_syscall_namespace(&self, id: u64) -> Option<Arc<SyscallNamespace>> {
+    pub fn get_namespace<T: ProcNamespace>(&self, id: u64) -> Option<Arc<T>> {
         if id == 0 {
-            Some(self.syscall_namespace.clone())
+            //default namespaces are always available
+            Some(self.get_default_namespace::<T>())
         } else {
-            let index = self
-                .owned_namespaces
-                .binary_search_by_key(&id, |ns| ns.get_id())
-                .expect("namespace id not found");
-            match &self.owned_namespaces[index] {
-                NamespaceHolder::Syscall(ns) => Some(ns.clone()),
-                _ => None,
-            }
+            self.get_indexed_namespace(id)
         }
+    }
+
+    fn get_indexed_namespace<T: ProcNamespace>(&self, id: u64) -> Option<Arc<T>> {
+        let index = self.owned_namespaces.binary_search_by_key(&id, |ns| ns.get_id()).ok()?;
+        let namespace = &self.owned_namespaces[index];
+        namespace.try_unwrap()
+    }
+
+    fn get_default_namespace<T: ProcNamespace>(&self) -> Arc<T> {
+        let default_id = match TypeId::of::<T>() {
+            id if id == TypeId::of::<SyscallNamespace>() => self.syscall_namespace.get_id(),
+            id if id == TypeId::of::<MemoryNamespace>() => self.memory_namespace.get_id(),
+            _ => panic!("unsupported namespace type"),
+        };
+        self.get_indexed_namespace(default_id)
+            .expect("default namespace should always be available")
     }
 
     pub fn change_namespace(&mut self, namespace_id: u64) -> Result<(), ()> {
@@ -113,7 +128,7 @@ impl ProcNamespaces {
         self.owned_namespaces.insert(index, namespace);
     }
 
-    pub fn get_namespace(&self, namespace_id: u64) -> Option<&NamespaceHolder> {
+    pub fn get_namespace_holder(&self, namespace_id: u64) -> Option<&NamespaceHolder> {
         let index = self
             .owned_namespaces
             .binary_search_by_key(&namespace_id, |ns| ns.get_id())
@@ -170,6 +185,18 @@ impl NamespaceHolder {
                 curr_ns.init_from(other_ns)
             }
         }
+    }
+
+    pub fn try_unwrap<T: ProcNamespace>(&self) -> Option<Arc<T>> {
+        let type_id = TypeId::of::<T>();
+        let raw_ptr = match self {
+            NamespaceHolder::Syscall(ns) if ns.type_id() == type_id => Arc::into_raw(ns.clone()) as *const T,
+            NamespaceHolder::Syscall(_) => return None,
+            NamespaceHolder::Mem(ns) if ns.type_id() == type_id => Arc::into_raw(ns.clone()) as *const T,
+            NamespaceHolder::Mem(_) => return None,
+            //no wildcard to get exhaustiveness checking
+        };
+        Some(unsafe { Arc::from_raw(raw_ptr) })
     }
 }
 

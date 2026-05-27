@@ -1,9 +1,11 @@
+#![allow(deprecated)] //alignment, my core lib doesn't have the new one yet
 use core::{
+    alloc::Layout,
     fmt::Debug,
     marker::Unsize,
-    mem::ManuallyDrop,
+    mem::{ManuallyDrop, align_of_val_raw},
     ops::{CoerceUnsized, Deref},
-    ptr::{self, NonNull},
+    ptr::{self, Alignment, NonNull},
     sync::atomic::Ordering,
 };
 
@@ -65,6 +67,34 @@ impl<T: ?Sized> Arc<T> {
         }
         Weak { inner: self.inner }
     }
+
+    pub fn into_raw(self) -> *const T {
+        let data_ptr = unsafe { &self.inner.as_ref().data as *const _ as *const T };
+        core::mem::forget(self);
+        data_ptr
+    }
+
+    /// # Safety
+    /// The pointer must have been obtained from a previous call to `Arc::into_raw`
+    pub unsafe fn from_raw(raw: *const T) -> Self {
+        unsafe {
+            let offset = data_offset(raw);
+            let arc_ptr = raw.byte_sub(offset) as *mut ArcInner<T>;
+            Self {
+                inner: NonNull::new(arc_ptr).expect("Invalid pointer passed to from_raw"),
+            }
+        }
+    }
+}
+
+unsafe fn data_offset<T: ?Sized>(ptr: *const T) -> usize {
+    unsafe { data_offset_alignment(align_of_val_raw(ptr)) }
+}
+
+#[inline]
+fn data_offset_alignment(alignment: usize) -> usize {
+    let layout = Layout::new::<ArcInner<()>>();
+    layout.size() + layout.padding_needed_for(unsafe { Alignment::new_unchecked(alignment) })
 }
 
 impl<T: ?Sized> Weak<T> {

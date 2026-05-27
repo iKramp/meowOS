@@ -25,6 +25,7 @@ mod context_switch;
 mod dispatcher;
 mod exec_syscall;
 mod loaders;
+mod memory_syscall_pack;
 mod namespaces;
 mod process_data;
 mod scheduler;
@@ -63,6 +64,9 @@ pub fn init() {
     *scheduler = MaybeUninit::new(Scheduler::new());
     drop(scheduler);
     loaders::init_process_loaders();
+    namespaces::init_namespace_management_syscalls();
+    exec_syscall::init_exec_syscall();
+    memory_syscall_pack::init_mem_syscalls();
 
     // let time_printer = loaders::load_process(crate::TIME_PRINTER, "time_printer")
     //     .expect("Failed to load test executable time printer");

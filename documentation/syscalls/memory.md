@@ -20,6 +20,8 @@
 3. u64 permissions
 4. u64 region_type
 5. u64 management_mode
+6. u64 region_name_len
+7. u64 region_name_ptr - utf8 valid
 #### Return Value:
  - On success, returns ID of the created region
  - On failure, returns -1
@@ -113,3 +115,4 @@ If region is user managed:
 If region is kernel managed:
  - Removes from (including) address to end of region. End is the farthest the region has grown in whatever direction.
    This is used for shrinking the stack or heap. Region stays contiguous.
+ - NOT IMPLEMENTED YET!!!!!

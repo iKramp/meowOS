@@ -10,7 +10,7 @@ use crate::{
     interrupts::enable_interrupts,
     memory, msr,
     proc::{
-        self,
+        self, SyscallNamespace,
         syscall::{self, legacy_syscall_pack::init_legacy_syscalls},
     },
 };
@@ -47,6 +47,7 @@ pub(super) fn init() {
     msr::set_msr(MSR_SFMASK, syscall_flag_mask as u64);
 
     init_legacy_syscalls();
+    syscall_management_pack::init_syscall_management_syscalls();
 
     enable_syscall();
 }
@@ -166,7 +167,7 @@ extern "C" fn handler(saved_regs_ptr: u64) -> ! {
     let syscall_number = saved_regs.get_syscall_number();
     println!("Syscall number: {}, state: {:#X?}", syscall_number, saved_regs);
 
-    let Some(syscall_namespace) = curr_proc.get_mutable().get_namespaces().get_syscall_namespace(0) else {
+    let Some(syscall_namespace) = curr_proc.get_mutable().get_namespaces().get_namespace::<SyscallNamespace>(0) else {
         proc::kill_process(curr_proc.pid(), u64::MAX);
         release_current_proc(&curr_proc, false);
         no_ret_context_switch();

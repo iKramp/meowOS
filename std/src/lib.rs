@@ -4,6 +4,8 @@
 #![feature(coerce_unsized)]
 #![feature(unsize)]
 #![feature(async_drop)]
+#![feature(ptr_alignment_type)]
+#![feature(layout_for_ptr)]
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {

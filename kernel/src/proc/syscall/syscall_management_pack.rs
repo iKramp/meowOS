@@ -1,7 +1,7 @@
 use std::{boxed::Box, sync::arc::Arc};
 
 use crate::proc::{
-    ProcessData,
+    ProcessData, SyscallNamespace,
     syscall::{self, SyscallCpuState, SyscallPack, syscall_registry},
 };
 
@@ -40,7 +40,7 @@ fn lsgroups(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     }
 
     let proc_mutable = proc.get_mutable();
-    let Some(syscall_namespace) = proc_mutable.get_namespaces().get_syscall_namespace(namespace_id) else {
+    let Some(syscall_namespace) = proc_mutable.get_namespaces().get_namespace::<SyscallNamespace>(namespace_id) else {
         proc.set_syscall_return(&[u64::MAX]);
         return false;
     };
@@ -151,7 +151,7 @@ fn mapgroup(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     };
 
     let proc_mutable = proc.get_mutable();
-    let Some(syscall_namespace) = proc_mutable.get_namespaces().get_syscall_namespace(namespace_id) else {
+    let Some(syscall_namespace) = proc_mutable.get_namespaces().get_namespace::<SyscallNamespace>(namespace_id) else {
         proc.set_syscall_return(&[u64::MAX]);
         return false;
     };
@@ -167,7 +167,7 @@ fn unmap_group(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let offset = args.get_arg(0);
 
     let proc_mutable = proc.get_mutable();
-    let Some(syscall_namespace) = proc_mutable.get_namespaces().get_syscall_namespace(namespace_id) else {
+    let Some(syscall_namespace) = proc_mutable.get_namespaces().get_namespace::<SyscallNamespace>(namespace_id) else {
         proc.set_syscall_return(&[u64::MAX]);
         return false;
     };
@@ -188,7 +188,7 @@ fn restrict(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let mask = args.get_arg(1);
 
     let proc_mutable = proc.get_mutable();
-    let Some(syscall_namespace) = proc_mutable.get_namespaces().get_syscall_namespace(namespace_id) else {
+    let Some(syscall_namespace) = proc_mutable.get_namespaces().get_namespace::<SyscallNamespace>(namespace_id) else {
         proc.set_syscall_return(&[u64::MAX]);
         return false;
     };

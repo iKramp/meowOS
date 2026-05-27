@@ -64,9 +64,12 @@ pub fn build_initialized_memory_namespace(
     context: &ContextInfo,
     mem_namespace: MemoryNamespace,
 ) -> Result<MemoryNamespace, ErrorCode> {
+    let mut perms = VirtualMemoryRangePermissions(0); //allow writing
+    perms.set_write(true);
+
     let proc_mem_range = VirtualMemoryRange::create(
         memory::VirtualMemoryRangeCapacity::_05TB,
-        VirtualMemoryRangePermissions(0),
+        perms,
         VirtualMemoryRangeManagementMode::Manual,
     );
     let proc_mem_range_bounds = proc_mem_range.reserved_range(VirtAddr(0));
@@ -84,13 +87,10 @@ pub fn build_initialized_memory_namespace(
             return Err(ErrorCode::InvalidProcessFile);
         }
 
-        let mut perms = VirtualMemoryRangePermissions(0); //allow writing
-        perms.set_write(true);
-
         let page_start = start.0 / 0x1000;
         let page_end = end.0 / 0x1000;
 
-        proc_mem_range.allocate_manual(page_start as u32..page_end as u32, perms)?;
+        proc_mem_range.allocate_manual_external(page_start as u32..page_end as u32)?;
     }
 
     let mem_range = Arc::new(proc_mem_range);
@@ -112,6 +112,8 @@ pub fn build_initialized_memory_namespace(
             core::ptr::copy_nonoverlapping(src_ptr, dest_ptr, len);
         }
     }
+
+    //TODO: this fucks up permissions per range, fix
 
     //set prot
     for region in context.mem_regions().iter() {

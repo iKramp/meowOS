@@ -45,13 +45,13 @@ impl SyscallRegistry {
         }
     }
 
-    pub fn register_syscall_pack(&self, name: Box<str>, pack: Arc<SyscallPack>) {
+    fn register_syscall_pack(&self, name: Box<str>, pack: Arc<SyscallPack>) {
         let mut packs = lock_w_info!(self.registered_packs);
         let id = SYSCALL_PACK_ID_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         packs.push((name, id, pack));
     }
 
-    pub fn get_syscall_pack(&self, name: &str) -> Option<(Arc<SyscallPack>, u64)> {
+    fn get_syscall_pack(&self, name: &str) -> Option<(Arc<SyscallPack>, u64)> {
         let packs = lock_w_info!(self.registered_packs);
         for (pack_name, pack_id, pack) in packs.iter() {
             if pack_name.as_ref() == name {

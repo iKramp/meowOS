@@ -25,7 +25,7 @@ fn mknamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     if existing_namespace != 0 {
         let mutable = proc.get_mutable();
         let namespaces = mutable.get_namespaces();
-        let Some(existing_namespace) = namespaces.get_namespace(existing_namespace) else {
+        let Some(existing_namespace) = namespaces.get_namespace_holder(existing_namespace) else {
             proc.set_syscall_return(&[u64::MAX]);
             return false;
         };
