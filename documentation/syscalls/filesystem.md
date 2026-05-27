@@ -18,7 +18,6 @@
 1. char* path - path to the file, absolute or relative to current working directory
 1. int64 fd - if set and path is relative, it will be relative to fd, not cwd
 1. uint64 flags - open mode flags
-1. uint64 create_mode - file creation mode
 #### Return Value:
  - On success, returns a non-negative file descriptor
  - On failure, returns -1 and sets errno
@@ -27,26 +26,10 @@
     1. bit 0: READ - allow reading
     1. bit 1: WRITE - allow writing
     1. bit 2: APPEND - append to the end of the file
-    1. bit 3: CREATE - create the file if it does not exist
-    1. bit 4: TRUNCATE - truncate the file to zero length if it exists
-2. create_mode:
-    1. bit 0: USER_READ - user read permission
-    1. bit 1: USER_WRITE - user write permission
-    1. bit 2: USER_EXECUTE - user execute permission
-    1. bit 3: GROUP_READ - group read permission
-    1. bit 4: GROUP_WRITE - group write permission
-    1. bit 5: GROUP_EXECUTE - group execute permission
-    1. bit 6: OTHER_READ - other read permission
-    1. bit 7: OTHER_WRITE - other write permission
-    1. bit 8: OTHER_EXECUTE - other execute permission
-    1. bit 9: STICKY - sticky bit - same as linux for directories
-    1. bit 10: SETUID - set user ID on execution
-    1. bit 11: SETGID - set group ID on execution
-    1. bit 12: DIRECTORY - create as a directory
+    1. bit 4: TRUNCATE - truncate the file to zero length
 #### Description:
 Opens the file at the given path with the specified flags. If the path is absolute, it will go from root.
 If it is relative, it will either go from cwd (fd is 0) or from the directory represented by fd.
-The fd has to be currently open if used, as a permission check.
 
 ### Syscall 1: fclose
 #### Args:
