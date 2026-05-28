@@ -4,10 +4,11 @@ use core::{
 };
 use std::{error::ErrorCode, sync::arc::Arc, vec::Vec};
 
+pub(in crate::proc) use filesystem_namespace::*;
 pub(in crate::proc) use memory_namespace::*;
-
 pub(in crate::proc) use syscall_namespace::*;
 
+mod filesystem_namespace;
 mod memory_namespace;
 mod namespace_management_pack;
 mod syscall_namespace;
@@ -24,12 +25,14 @@ pub(super) trait ProcNamespace: Debug + Send + Sync + Any {
 pub(in crate::proc) enum NamespaceType {
     Syscall = 0,
     Mem = 1,
+    Fs = 2,
 }
 
 #[derive(Debug)]
 pub(in crate::proc) enum NamespaceHolder {
     Syscall(Arc<SyscallNamespace>),
     Mem(Arc<MemoryNamespace>),
+    Fs(Arc<FilesystemNamespace>),
 }
 
 #[derive(Debug)]
@@ -37,6 +40,7 @@ pub(in crate::proc) struct ProcNamespaces {
     owned_namespaces: Vec<NamespaceHolder>,
     pub memory_namespace: Arc<MemoryNamespace>,
     syscall_namespace: Arc<SyscallNamespace>,
+    filesystem_namespace: Arc<FilesystemNamespace>,
 }
 
 #[derive(Clone)]
@@ -44,13 +48,19 @@ pub(in crate::proc) struct ProcNamespaces {
 pub(in crate::proc) struct NamespaceIds {
     memory_namespace: u64,
     syscall_namespace: u64,
+    filesystem_namespace: u64,
 }
 
 impl ProcNamespaces {
-    pub fn new(memory_namespace: Arc<MemoryNamespace>, syscall_namespace: Arc<SyscallNamespace>) -> Self {
+    pub fn new(
+        memory_namespace: Arc<MemoryNamespace>,
+        syscall_namespace: Arc<SyscallNamespace>,
+        filesystem_namespace: Arc<FilesystemNamespace>,
+    ) -> Self {
         let mut owned_namespaces = Vec::new();
         owned_namespaces.push(NamespaceHolder::Mem(memory_namespace.clone()));
         owned_namespaces.push(NamespaceHolder::Syscall(syscall_namespace.clone()));
+        owned_namespaces.push(NamespaceHolder::Fs(filesystem_namespace.clone()));
 
         owned_namespaces.sort_by_key(|ns| ns.get_id());
 
@@ -58,6 +68,7 @@ impl ProcNamespaces {
             owned_namespaces,
             memory_namespace,
             syscall_namespace,
+            filesystem_namespace,
         }
     }
 
@@ -69,6 +80,9 @@ impl ProcNamespaces {
         if ids.syscall_namespace == 0 {
             ids.syscall_namespace = self.syscall_namespace.get_id();
         }
+        if ids.filesystem_namespace == 0 {
+            ids.filesystem_namespace = self.filesystem_namespace.get_id();
+        }
 
         let Some(NamespaceHolder::Mem(memory_namespace)) = self.get_namespace_holder(ids.memory_namespace) else {
             return Err(ErrorCode::InvalidArgument);
@@ -76,7 +90,14 @@ impl ProcNamespaces {
         let Some(NamespaceHolder::Syscall(syscall_namespace)) = self.get_namespace_holder(ids.syscall_namespace) else {
             return Err(ErrorCode::InvalidArgument);
         };
-        Ok(Self::new(memory_namespace.clone(), syscall_namespace.clone()))
+        let Some(NamespaceHolder::Fs(filesystem_namespace)) = self.get_namespace_holder(ids.filesystem_namespace) else {
+            return Err(ErrorCode::InvalidArgument);
+        };
+        Ok(Self::new(
+            memory_namespace.clone(),
+            syscall_namespace.clone(),
+            filesystem_namespace.clone(),
+        ))
     }
 
     pub fn get_namespace<T: ProcNamespace>(&self, id: u64) -> Option<Arc<T>> {
@@ -112,6 +133,7 @@ impl ProcNamespaces {
         match &self.owned_namespaces[index] {
             NamespaceHolder::Syscall(ns) => self.syscall_namespace = ns.clone(),
             NamespaceHolder::Mem(ns) => self.memory_namespace = ns.clone(),
+            NamespaceHolder::Fs(ns) => self.filesystem_namespace = ns.clone(),
         }
         Ok(())
     }
@@ -120,6 +142,7 @@ impl ProcNamespaces {
         let id = match &namespace {
             NamespaceHolder::Syscall(ns) => ns.get_id(),
             NamespaceHolder::Mem(ns) => ns.get_id(),
+            NamespaceHolder::Fs(ns) => ns.get_id(),
         };
         let index = self
             .owned_namespaces
@@ -158,6 +181,7 @@ impl NamespaceHolder {
         match self {
             NamespaceHolder::Syscall(ns) => ns.get_id(),
             NamespaceHolder::Mem(ns) => ns.get_id(),
+            NamespaceHolder::Fs(ns) => ns.get_id(),
         }
     }
 
@@ -165,6 +189,7 @@ impl NamespaceHolder {
         match self {
             NamespaceHolder::Syscall(_) => NamespaceType::Syscall,
             NamespaceHolder::Mem(_) => NamespaceType::Mem,
+            NamespaceHolder::Fs(_) => NamespaceType::Fs,
         }
     }
 
@@ -184,6 +209,13 @@ impl NamespaceHolder {
                 };
                 curr_ns.init_from(other_ns)
             }
+            NamespaceHolder::Fs(curr_ns) => {
+                let other_ns = match other {
+                    NamespaceHolder::Fs(ns) => ns,
+                    _ => return Err(ErrorCode::InvalidArgument),
+                };
+                curr_ns.init_from(other_ns)
+            }
         }
     }
 
@@ -194,6 +226,8 @@ impl NamespaceHolder {
             NamespaceHolder::Syscall(_) => return None,
             NamespaceHolder::Mem(ns) if ns.type_id() == type_id => Arc::into_raw(ns.clone()) as *const T,
             NamespaceHolder::Mem(_) => return None,
+            NamespaceHolder::Fs(ns) if ns.type_id() == type_id => Arc::into_raw(ns.clone()) as *const T,
+            NamespaceHolder::Fs(_) => return None,
             //no wildcard to get exhaustiveness checking
         };
         Some(unsafe { Arc::from_raw(raw_ptr) })
@@ -205,6 +239,7 @@ impl NamespaceType {
         match id {
             0 => Some(Self::Syscall),
             1 => Some(Self::Mem),
+            2 => Some(Self::Fs),
             _ => None,
         }
     }
@@ -213,6 +248,7 @@ impl NamespaceType {
         match self {
             NamespaceType::Syscall => 0,
             NamespaceType::Mem => 1,
+            NamespaceType::Fs => 2,
         }
     }
 
@@ -220,6 +256,7 @@ impl NamespaceType {
         match self {
             NamespaceType::Syscall => NamespaceHolder::Syscall(Arc::new(SyscallNamespace::new(id))),
             NamespaceType::Mem => NamespaceHolder::Mem(Arc::new(MemoryNamespace::new(id))),
+            NamespaceType::Fs => NamespaceHolder::Fs(Arc::new(FilesystemNamespace::new(id))),
         }
     }
 }

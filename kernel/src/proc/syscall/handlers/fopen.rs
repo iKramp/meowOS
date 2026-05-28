@@ -1,9 +1,9 @@
 use core::{slice, str};
-use std::{println, sync::arc::Arc, vec::Vec};
+use std::{println, sync::arc::Arc};
 
 use crate::{
     proc::{
-        self, ProcessData,
+        self, FilesystemNamespace, ProcessData,
         syscall::{self, SyscallCpuState},
     },
     task_runner::{self, PidOption},
@@ -34,14 +34,16 @@ pub fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         None
     } else {
         let proc_mut = proc.get_mutable();
-        let Some(f_handle) = proc_mut.get_file_handle(fd) else {
+        let namespaces = proc_mut.get_namespaces();
+        let fs_namespace = namespaces
+            .get_namespace::<FilesystemNamespace>(0)
+            .expect("default fs namespace must exist");
+        let Some(f_chain) = fs_namespace.get_whole_chain(fd) else {
             println!("fopen: invalid fd {fd}");
             proc.set_legacy_syscall_return(u64::MAX, 1);
             return false;
         };
-        let mut new_chain = Vec::from(f_handle.parent_chain.as_ref());
-        new_chain.push(f_handle.inode);
-        Some(new_chain.into_boxed_slice())
+        Some(f_chain)
     };
 
     let task = async move {
@@ -53,9 +55,14 @@ pub fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         };
         match handle {
             Ok(handle) => {
-                let proc_lock = proc.get();
-                let f_descriptor = proc_lock.open_file_handle(handle);
-                proc_lock.set_legacy_syscall_return(f_descriptor, 0);
+                let proc_mut = proc.get_mutable();
+                let namespaces = proc_mut.get_namespaces();
+                let fs_namespace = namespaces
+                    .get_namespace::<FilesystemNamespace>(0)
+                    .expect("default fs namespace must exist");
+                let f_descriptor = fs_namespace.open_file_handle(handle);
+                drop(proc_mut);
+                proc.get().set_legacy_syscall_return(f_descriptor, 0);
             }
             Err(_) => {
                 println!("fopen: failed to open file at path {path}");

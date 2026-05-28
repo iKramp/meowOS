@@ -10,9 +10,10 @@
 
 ```rust
 #[repr(C)]
-struct Namespaces {
+struct NamespaceIds {
     memory_namespace: u64,
     syscall_namespace: u64,
+    filesystem_namespace: u64,
 }
 
 //This changes based on the architecture
@@ -44,7 +45,7 @@ union RegisterState {
 
 #[repr(C)]
 struct ExecArgs {
-    namespaces: Namespaces,
+    namespaces: NamespaceIds,
     registers: RegisterState,
     start_ptr: u64,
     name_len: u64,

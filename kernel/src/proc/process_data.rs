@@ -31,8 +31,6 @@ pub struct ProcessData {
 pub struct ProcessDataMutable {
     cpu_state: CpuStateType,
     return_status: Option<u64>,
-    file_handles: BTreeMap<u64, FileHandle>,
-    file_handle_index: FileDescriptor,
     namespaces: ProcNamespaces,
 }
 
@@ -75,24 +73,9 @@ impl ProcessData {
             internal: NoIntSpinlock::new(ProcessDataMutable {
                 return_status: None,
                 cpu_state,
-                file_handles: BTreeMap::new(),
-                file_handle_index: 0,
                 namespaces,
             }),
         }
-    }
-
-    pub fn open_file_handle(&self, handle: FileHandle) -> FileDescriptor {
-        let internal = &mut lock_w_info!(self.internal);
-        let index = internal.file_handle_index;
-        internal.file_handles.insert(index, handle);
-        internal.file_handle_index += 1;
-        index
-    }
-
-    pub fn get_inode(&self, fd: FileDescriptor) -> Option<InodeIdentifier> {
-        let internal = lock_w_info!(self.internal);
-        internal.file_handles.get(&fd).map(|handle| handle.inode)
     }
 
     pub fn get_mutable<'a>(&'a self) -> NoIntSpinlockGuard<'a, ProcessDataMutable> {
@@ -148,19 +131,5 @@ impl ProcessData {
     pub fn take_cpu_state(&self) -> CpuStateType {
         let internal = &mut lock_w_info!(self.internal);
         core::mem::replace(&mut internal.cpu_state, CpuStateType::None)
-    }
-}
-
-impl ProcessDataMutable {
-    pub fn get_file_handle(&self, fd: FileDescriptor) -> Option<&FileHandle> {
-        self.file_handles.get(&fd)
-    }
-
-    pub fn take_file_handle(&mut self, fd: FileDescriptor) -> Option<FileHandle> {
-        self.file_handles.remove(&fd)
-    }
-
-    pub fn insert_file_handle(&mut self, fd: FileDescriptor, handle: FileHandle) {
-        self.file_handles.insert(fd, handle);
     }
 }

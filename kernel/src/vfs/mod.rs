@@ -13,6 +13,7 @@ mod adapters;
 mod dtmpfs;
 pub mod file;
 mod filesystem_trait;
+mod fs_syscall_pack;
 mod fs_tree;
 mod inode;
 mod operations;
@@ -95,4 +96,7 @@ pub fn init() {
         .insert(DtmpfsFactory::UUID, Arc::new(DtmpfsFactory {}));
     vfs.filesystem_driver_factories
         .insert(Rfs2Factory::UUID, Arc::new(Rfs2Factory {}));
+    drop(vfs);
+
+    fs_syscall_pack::init_fs_syscall_pack();
 }

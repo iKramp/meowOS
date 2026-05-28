@@ -29,7 +29,7 @@ mod memory_syscall_pack;
 mod namespaces;
 mod process_data;
 mod scheduler;
-mod syscall;
+pub mod syscall;
 pub use context::CommandSplitter;
 pub use context_switch::{context_switch, interrupt_context_switch};
 pub use process_data::{ProcessData, StackCpuStateData};
@@ -46,13 +46,6 @@ static mut GENERIC_PAGE_TREE: PhysAddr = PhysAddr(0);
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 #[repr(transparent)]
 pub struct Pid(pub u32);
-
-#[derive(Debug)]
-struct MappedMemoryRegion {
-    name: Box<str>,
-    base: VirtAddr,
-    size_pages: u64,
-}
 
 pub fn get_namespace_id() -> u64 {
     NAMESPACE_ID_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed)

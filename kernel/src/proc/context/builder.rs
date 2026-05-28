@@ -10,6 +10,7 @@ use crate::proc::ProcNamespaces;
 use crate::proc::ProcessData;
 use crate::proc::SCHEDULER;
 use crate::proc::SyscallNamespace;
+use crate::proc::namespaces::FilesystemNamespace;
 use crate::proc::namespaces::MemoryNamespace;
 use crate::proc::process_data::CpuStateType;
 use std::error::ErrorCode;
@@ -44,6 +45,7 @@ pub fn create_process_from_context(context_info: &ContextInfo) -> Result<Pid, Er
 
     let memory_namespace = Arc::new(memory_namespace);
     let syscall_namespace = Arc::new(SyscallNamespace::default(crate::proc::get_namespace_id()));
+    let filesystem_namespace = Arc::new(FilesystemNamespace::new(crate::proc::get_namespace_id()));
 
     let cpu_state = InterruptProcessorState::new(rip, rsp);
     let process_data = ProcessData::new(
@@ -51,7 +53,7 @@ pub fn create_process_from_context(context_info: &ContextInfo) -> Result<Pid, Er
         is_32_bit,
         cmdline,
         CpuStateType::Interrupt(cpu_state),
-        ProcNamespaces::new(memory_namespace, syscall_namespace),
+        ProcNamespaces::new(memory_namespace, syscall_namespace, filesystem_namespace),
     );
 
     let mut scheduler_lock = lock_w_info!(SCHEDULER);
