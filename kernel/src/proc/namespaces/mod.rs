@@ -2,7 +2,7 @@ use core::{
     any::{Any, TypeId},
     fmt::Debug,
 };
-use std::{error::ErrorCode, sync::arc::Arc, vec::Vec};
+use std::{error::ErrorCode, println, sync::arc::Arc, vec::Vec};
 
 pub(in crate::proc) use filesystem_namespace::*;
 pub(in crate::proc) use memory_namespace::*;
@@ -116,9 +116,19 @@ impl ProcNamespaces {
     }
 
     fn get_default_namespace<T: ProcNamespace>(&self) -> Arc<T> {
+        let type_id = TypeId::of::<T>();
+        let syscall_id = TypeId::of::<SyscallNamespace>();
+        let mem_id = TypeId::of::<MemoryNamespace>();
+        let fs_id = TypeId::of::<FilesystemNamespace>();
+        println!("Getting default namespace for type_id: {:#?}", type_id);
+        println!("SyscallNamespace type_id: {:#?}", syscall_id);
+        println!("MemoryNamespace type_id: {:#?}", mem_id);
+        println!("FilesystemNamespace type_id: {:#?}", fs_id);
+
         let default_id = match TypeId::of::<T>() {
-            id if id == TypeId::of::<SyscallNamespace>() => self.syscall_namespace.get_id(),
-            id if id == TypeId::of::<MemoryNamespace>() => self.memory_namespace.get_id(),
+            id if id == syscall_id => self.syscall_namespace.get_id(),
+            id if id == mem_id => self.memory_namespace.get_id(),
+            id if id == fs_id => self.filesystem_namespace.get_id(),
             _ => panic!("unsupported namespace type"),
         };
         self.get_indexed_namespace(default_id)
@@ -222,11 +232,11 @@ impl NamespaceHolder {
     pub fn try_unwrap<T: ProcNamespace>(&self) -> Option<Arc<T>> {
         let type_id = TypeId::of::<T>();
         let raw_ptr = match self {
-            NamespaceHolder::Syscall(ns) if ns.type_id() == type_id => Arc::into_raw(ns.clone()) as *const T,
+            NamespaceHolder::Syscall(ns) if ns.get().type_id() == type_id => Arc::into_raw(ns.clone()) as *const T,
             NamespaceHolder::Syscall(_) => return None,
-            NamespaceHolder::Mem(ns) if ns.type_id() == type_id => Arc::into_raw(ns.clone()) as *const T,
+            NamespaceHolder::Mem(ns) if ns.get().type_id() == type_id => Arc::into_raw(ns.clone()) as *const T,
             NamespaceHolder::Mem(_) => return None,
-            NamespaceHolder::Fs(ns) if ns.type_id() == type_id => Arc::into_raw(ns.clone()) as *const T,
+            NamespaceHolder::Fs(ns) if ns.get().type_id() == type_id => Arc::into_raw(ns.clone()) as *const T,
             NamespaceHolder::Fs(_) => return None,
             //no wildcard to get exhaustiveness checking
         };

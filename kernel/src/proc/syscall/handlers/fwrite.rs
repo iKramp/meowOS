@@ -1,6 +1,7 @@
 use std::{mem_utils::PhysAddr, println, sync::arc::Arc, vec::Vec};
 
 use crate::{
+    memory::safe_memcpy,
     proc::{
         ProcessData,
         syscall::{self, SyscallCpuState},
@@ -18,7 +19,6 @@ pub fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     println!("fwrite called with: fd {}, size {}", fd, size);
 
     if !syscall::verify_memory_range(buffer_ptr as u64, buffer_ptr as u64 + size) {
-        println!("fwrite: invalid buffer pointer or size");
         proc.set_legacy_syscall_return(u64::MAX, 1);
         return false;
     }
@@ -29,8 +29,12 @@ pub fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     }
 
     let file_handle = {
-        let mut proc_mut = proc.get_mutable();
-        if let Some(f_handle) = proc_mut.take_file_handle(fd) {
+        let proc_mut = proc.get_mutable();
+        let namespaces = proc_mut.get_namespaces();
+        let fs_namespace = namespaces
+            .get_namespace::<crate::proc::FilesystemNamespace>(0)
+            .expect("default fs namespace must exist");
+        if let Some(f_handle) = fs_namespace.get_file_handle(fd) {
             f_handle
         } else {
             println!("fwrite: invalid fd {fd}");
@@ -40,17 +44,27 @@ pub fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     };
 
     let task = async move {
-        let mut f_handle = file_handle; //get to local
+        let f_handle = file_handle; //get to local
         let pages = size.div_ceil(4096);
         let buffer_alloc = crate::memory::physical_allocator::allocate_contiguius_high(pages);
         let dst = std::mem_utils::translate_phys_virt_addr(buffer_alloc).0 as *mut u8;
         let src = buffer_ptr;
         //copy to user buffer
-        unsafe { core::ptr::copy_nonoverlapping(src, dst, size as usize) };
+        let copy_valid = safe_memcpy(dst as u64, src as u64, size as usize);
+        if !copy_valid {
+            let proc_lock = proc.get();
+            proc_lock.set_legacy_syscall_return(u64::MAX, 1);
+
+            //free
+            for i in 0..pages {
+                unsafe { crate::memory::physical_allocator::deallocate_frame(buffer_alloc + (i * 4096)) };
+            }
+            return;
+        }
 
         let buffers = (0..pages).map(|i| buffer_alloc + (i * 4096)).collect::<Vec<PhysAddr>>();
 
-        let write_result = crate::vfs::write_file(&mut f_handle, &buffers, size).await;
+        let write_result = crate::vfs::write_file(f_handle.get(), &buffers, size).await;
         let Some(proc) = crate::proc::get_proc(proc.pid()) else {
             //free
             for i in 0..pages {
@@ -75,9 +89,6 @@ pub fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         for i in 0..pages {
             unsafe { crate::memory::physical_allocator::deallocate_frame(buffer_alloc + (i * 4096)) };
         }
-
-        //return fd
-        proc.get_mutable().insert_file_handle(fd, f_handle);
 
         //return
         proc.set_legacy_syscall_return(bytes_written, 0);

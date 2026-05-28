@@ -5,6 +5,7 @@ global probe_check_u64
 global probe_check_u32
 global probe_check_u16
 global probe_check_u8
+global probe_memcpy
 global probe_functions_end
 global probe_fail
 
@@ -19,16 +20,28 @@ probe_check_u32:
     mov eax, [rdi]
     mov rdx, 1
     ret
+
 probe_check_u16:
     xor rax, rax
     mov ax, [rdi]
     mov rdx, 1
     ret
+
 probe_check_u8:
     xor rax, rax
     mov al, [rdi]
     mov rdx, 1
     ret
+
+; rdi = dst, rsi = src, rdx = size
+; copy without checks, page fault catches
+probe_memcpy: 
+    mov rcx, rdx
+    rep movsb
+    mov rdx, 1
+    ret
+
+
 probe_functions_end:
 
 probe_fail:

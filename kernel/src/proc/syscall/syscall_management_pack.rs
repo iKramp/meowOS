@@ -1,8 +1,11 @@
 use std::{boxed::Box, sync::arc::Arc};
 
-use crate::proc::{
-    ProcessData, SyscallNamespace,
-    syscall::{self, SyscallCpuState, SyscallPack, syscall_registry},
+use crate::{
+    memory::safe_memcpy,
+    proc::{
+        ProcessData, SyscallNamespace,
+        syscall::{self, SyscallCpuState, SyscallPack, syscall_registry},
+    },
 };
 
 pub fn init_syscall_management_syscalls() {
@@ -29,15 +32,6 @@ fn lsgroups(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let namespace_id = args.get_namespace_id();
     let groups_buf_ptr = args.get_arg(0);
     let groups_buf_size = args.get_arg(1);
-
-    let valid = syscall::verify_memory_range(
-        groups_buf_ptr,
-        groups_buf_ptr + groups_buf_size * core::mem::size_of::<MappedGroupInfo>() as u64,
-    );
-    if !valid {
-        proc.set_syscall_return(&[u64::MAX]);
-        return false;
-    }
 
     let proc_mutable = proc.get_mutable();
     let Some(syscall_namespace) = proc_mutable.get_namespaces().get_namespace::<SyscallNamespace>(namespace_id) else {
@@ -68,9 +62,15 @@ fn lsgroups(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
             mask: *mapped_mask,
         };
 
-        unsafe {
-            let dest_ptr = (groups_buf_ptr + i as u64 * core::mem::size_of::<MappedGroupInfo>() as u64) as *mut MappedGroupInfo;
-            dest_ptr.write(group_info);
+        let dest_ptr = groups_buf_ptr + i as u64 * core::mem::size_of::<MappedGroupInfo>() as u64;
+        let res = safe_memcpy(
+            dest_ptr,
+            (&raw const group_info) as u64,
+            core::mem::size_of::<MappedGroupInfo>(),
+        );
+        if !res {
+            proc.set_syscall_return(&[u64::MAX]);
+            return false;
         }
     }
 
@@ -84,15 +84,6 @@ fn lsgroups(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
 fn lsallgroups(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let groups_buf_ptr = args.get_arg(0);
     let groups_buf_size = args.get_arg(1);
-
-    let valid = syscall::verify_memory_range(
-        groups_buf_ptr,
-        groups_buf_ptr + groups_buf_size * core::mem::size_of::<GroupInfo>() as u64,
-    );
-    if !valid {
-        proc.set_syscall_return(&[u64::MAX]);
-        return false;
-    }
 
     let all_packs = syscall_registry::get_all_pack_info();
     let to_write = all_packs.iter().enumerate();
@@ -112,9 +103,11 @@ fn lsallgroups(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
             },
         };
 
-        unsafe {
-            let dest_ptr = (groups_buf_ptr + i as u64 * core::mem::size_of::<GroupInfo>() as u64) as *mut GroupInfo;
-            dest_ptr.write(group_info);
+        let dest_ptr = groups_buf_ptr + i as u64 * core::mem::size_of::<GroupInfo>() as u64;
+        let res = safe_memcpy(dest_ptr, (&raw const group_info) as u64, core::mem::size_of::<GroupInfo>());
+        if !res {
+            proc.set_syscall_return(&[u64::MAX]);
+            return false;
         }
     }
 
@@ -131,15 +124,21 @@ fn mapgroup(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let group_name_ptr = args.get_arg(1);
     let base_index = args.get_arg(2);
 
-    let valid = syscall::verify_memory_range(group_name_ptr, group_name_ptr + group_name_len);
-    if !valid {
+    let group_name_buf_uninit = Box::new_uninit_slice(group_name_len as usize);
+    let res = safe_memcpy(group_name_buf_uninit.as_ptr() as u64, group_name_ptr, group_name_len as usize);
+    if !res {
         proc.set_syscall_return(&[u64::MAX]);
         return false;
     }
+    let group_name_buf: Box<[u8]> = unsafe { group_name_buf_uninit.assume_init() };
 
     let group_name = unsafe {
-        let slice = core::slice::from_raw_parts(group_name_ptr as *const u8, group_name_len as usize);
-        core::str::from_utf8_unchecked(slice) //don't care if it's valid, bytes just have to match
+        let res = core::str::from_utf8(&group_name_buf);
+        if res.is_err() {
+            proc.set_syscall_return(&[u64::MAX]);
+            return false;
+        }
+        res.unwrap_unchecked()
     };
 
     let (pack, pack_id) = match syscall_registry::get_syscall_pack(group_name) {

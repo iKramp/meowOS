@@ -1,5 +1,11 @@
 use core::sync::atomic::AtomicU64;
-use std::{collections::btree_map::BTreeMap, error::ErrorCode, r_lock_w_info, sync::rw_lock::RWSpinlock, w_lock_w_info};
+use std::{
+    collections::btree_map::BTreeMap,
+    error::ErrorCode,
+    r_lock_w_info,
+    sync::{arc::Arc, rw_lock::RWSpinlock},
+    w_lock_w_info,
+};
 
 use crate::{
     proc::ProcNamespace,
@@ -12,7 +18,7 @@ use crate::{
 #[derive(Debug)]
 pub struct FilesystemNamespace {
     id: u64,
-    open_files: RWSpinlock<BTreeMap<u64, FileHandle>>,
+    open_files: RWSpinlock<BTreeMap<u64, Arc<FileHandle>>>,
     file_handle_counter: AtomicU64,
 }
 
@@ -28,7 +34,7 @@ impl FilesystemNamespace {
     pub fn open_file_handle(&self, file_handle: FileHandle) -> FileDescriptor {
         let mut internal = w_lock_w_info!(self.open_files);
         let fd = self.file_handle_counter.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
-        internal.insert(fd, file_handle);
+        internal.insert(fd, Arc::new(file_handle));
         fd
     }
 
@@ -50,14 +56,14 @@ impl FilesystemNamespace {
         Some(chain.into_boxed_slice())
     }
 
-    pub fn take_file_handle(&self, fd: FileDescriptor) -> Option<FileHandle> {
-        let mut internal = w_lock_w_info!(self.open_files);
-        internal.remove(&fd)
+    pub fn get_file_handle(&self, fd: FileDescriptor) -> Option<Arc<FileHandle>> {
+        let internal = r_lock_w_info!(self.open_files);
+        internal.get(&fd).cloned()
     }
 
-    pub fn update_file_handle(&self, fd: FileDescriptor, file_handle: FileHandle) {
+    pub fn close_file_handle(&self, fd: FileDescriptor) -> Option<Arc<FileHandle>> {
         let mut internal = w_lock_w_info!(self.open_files);
-        internal.insert(fd, file_handle);
+        internal.remove(&fd)
     }
 }
 

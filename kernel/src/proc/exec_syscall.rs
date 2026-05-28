@@ -1,7 +1,9 @@
+use core::alloc::{GlobalAlloc, Layout};
 use std::{boxed::Box, error::ErrorCode, lock_w_info, string::ToString, sync::arc::Arc};
 
 use crate::{
     interrupts::InterruptProcessorState,
+    memory::{heap, safe_memcpy},
     proc::{
         NamespaceIds, PROCESS_ID_COUNTER, Pid, ProcNamespaces, ProcessData, SCHEDULER,
         process_data::CpuStateType,
@@ -54,24 +56,34 @@ struct ExecArgs {
 
 fn exec(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let exec_args_ptr = args.get_arg(0);
-    let valid = crate::proc::syscall::verify_memory_range(exec_args_ptr, exec_args_ptr + core::mem::size_of::<ExecArgs>() as u64);
-    if !valid {
-        proc.set_syscall_return(&[u64::MAX]);
-        return false;
-    }
 
-    let exec_args = unsafe { &*(exec_args_ptr as *const ExecArgs) };
-    let valid = crate::proc::syscall::verify_memory_range(exec_args.name_ptr, exec_args.name_ptr + exec_args.name_len);
+    let exec_args_heap_ptr = unsafe { heap::HEAP.alloc(Layout::new::<ExecArgs>()) as u64 };
+    let valid = safe_memcpy(exec_args_heap_ptr, exec_args_ptr, core::mem::size_of::<ExecArgs>());
     if !valid {
         proc.set_syscall_return(&[u64::MAX]);
         return false;
     }
+    let exec_args = unsafe { Box::from_raw(exec_args_ptr as *mut ExecArgs) };
+
+    let name_buf_uninit = Box::new_uninit_slice(exec_args.name_len as usize);
+    let valid = safe_memcpy(
+        name_buf_uninit.as_ptr() as u64,
+        exec_args.name_ptr,
+        exec_args.name_len as usize,
+    );
+    if !valid {
+        proc.set_syscall_return(&[u64::MAX]);
+        return false;
+    }
+    let name_buf = unsafe { name_buf_uninit.assume_init() };
 
     let name = unsafe {
-        core::str::from_utf8_unchecked(core::slice::from_raw_parts(
-            exec_args.name_ptr as *const u8,
-            exec_args.name_len as usize,
-        ))
+        let res = core::str::from_utf8(&name_buf);
+        if res.is_err() {
+            proc.set_syscall_return(&[u64::MAX]);
+            return false;
+        }
+        res.unwrap_unchecked()
     };
 
     let Ok(namespaces) = proc

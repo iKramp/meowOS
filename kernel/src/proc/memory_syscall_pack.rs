@@ -1,7 +1,7 @@
 use std::{boxed::Box, mem_utils::VirtAddr, println, string::ToString, sync::arc::Arc};
 
 use crate::{
-    memory::{self, VirtualMemoryRangeManagementMode},
+    memory::{self, VirtualMemoryRangeManagementMode, safe_memcpy},
     proc::{MemoryNamespace, MemoryRangeType, ProcessData, syscall::SyscallCpuState},
 };
 
@@ -23,18 +23,20 @@ fn make_region(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let region_name_len = args.get_arg(5);
     let region_name_ptr = args.get_arg(6);
 
-    let valid = crate::proc::syscall::verify_memory_range(region_name_ptr, region_name_ptr + region_name_len);
+    let name_buf_uninit = Box::new_uninit_slice(region_name_len as usize);
+    let valid = safe_memcpy(name_buf_uninit.as_ptr() as u64, region_name_ptr, region_name_len as usize);
     if !valid {
         proc.set_syscall_return(&[u64::MAX]);
         return false;
     }
-    let Ok(region_name) =
-        core::str::from_utf8(unsafe { core::slice::from_raw_parts(region_name_ptr as *const u8, region_name_len as usize) })
-    else {
-        proc.set_syscall_return(&[u64::MAX]);
-        return false;
+    let name_buf: Box<[u8]> = unsafe { name_buf_uninit.assume_init() };
+    let region_name = match std::str::from_utf8(&name_buf) {
+        Ok(name) => name.to_string().into_boxed_str(),
+        Err(_) => {
+            proc.set_syscall_return(&[u64::MAX]);
+            return false;
+        }
     };
-    let region_name = region_name.to_string().into_boxed_str();
 
     let Some(range_capacity) = memory::VirtualMemoryRangeCapacity::from_level(size_order as u8) else {
         proc.set_syscall_return(&[u64::MAX]);
@@ -72,6 +74,7 @@ fn make_region(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
 
 fn remove_region(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let namespace_id = args.get_namespace_id();
+    let region_id = args.get_arg(0) as u32;
 
     let mutable = proc.get_mutable();
     let namespaces = mutable.get_namespaces();
@@ -79,7 +82,7 @@ fn remove_region(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         proc.set_syscall_return(&[u64::MAX]);
         return false;
     };
-    let res = memory_namespace.remove_mem_range_by_id(args.get_arg(0) as u32);
+    let res = memory_namespace.remove_mem_range_by_id(region_id);
     let err_code = if res.is_ok() { 0 } else { u64::MAX };
     proc.set_syscall_return(&[err_code]);
     false

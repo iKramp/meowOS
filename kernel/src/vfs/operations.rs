@@ -1,3 +1,4 @@
+use core::sync::atomic::{AtomicU64, Ordering};
 use std::{
     boxed::Box,
     error::ErrorCode,
@@ -237,7 +238,7 @@ pub async fn open_file(
     Ok(FileHandle {
         inode: inode_index,
         parent_chain: inode_chain,
-        position: 0,
+        position: AtomicU64::new(0),
         file_flags: open_mode,
         open_file,
     })
@@ -259,7 +260,7 @@ pub async fn get_dir_entries(file_handle: &FileHandle) -> Result<Box<[DirEntry]>
     fs.read_dir(file_handle.inode.index).await
 }
 
-pub async fn create_file(parent_dir: &mut FileHandle, name: &str, inode_type: InodeType) -> Result<(), ErrorCode> {
+pub async fn create_file(parent_dir: &FileHandle, name: &str, inode_type: InodeType) -> Result<(), ErrorCode> {
     if !parent_dir.file_flags.write() {
         return Err(ErrorCode::InsufficientPermissions);
     }
@@ -293,14 +294,14 @@ pub async fn create_file(parent_dir: &mut FileHandle, name: &str, inode_type: In
     Ok(())
 }
 
-pub async fn write_file(file_handle: &mut FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, ErrorCode> {
+pub async fn write_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, ErrorCode> {
     // let inode = fs_tree::get_inode(file_handle.inode).ok_or(ErrorCode::InodeNotPresent)?;
     let mut inode = file_handle.open_file.inode.lock().await;
 
     let desired_offset = if file_handle.file_flags.append() {
         inode.size
     } else {
-        file_handle.position
+        file_handle.position.load(Ordering::Relaxed)
     };
 
     if !file_handle.file_flags.write() {
@@ -322,7 +323,9 @@ pub async fn write_file(file_handle: &mut FileHandle, buffer: &[PhysAddr], size:
 
     println!("operations::write_file: Wrote {} bytes", res.1);
 
-    file_handle.position += res.1.min(size);
+    file_handle
+        .position
+        .store(res.1.min(size) + desired_offset, Ordering::Relaxed);
 
     inode.update_from(&res.0);
 
@@ -333,12 +336,12 @@ pub async fn stat_file(file_handle: &FileHandle) -> Inode {
     file_handle.open_file.inode.lock().await.clone()
 }
 
-pub async fn read_file(file_handle: &mut FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, ErrorCode> {
+pub async fn read_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, ErrorCode> {
     if !file_handle.file_flags.read() {
         return Err(ErrorCode::InsufficientPermissions);
     }
 
-    let offset = file_handle.position;
+    let offset = file_handle.position.load(Ordering::Relaxed);
 
     let inode = unsafe { file_handle.open_file.inode.get_read_ptr() };
 
@@ -358,6 +361,6 @@ pub async fn read_file(file_handle: &mut FileHandle, buffer: &[PhysAddr], size: 
     println!("operations::read_file: Read {} bytes", bytes_read);
 
     let res = bytes_read.min(size);
-    file_handle.position += res;
+    file_handle.position.store(offset + res, Ordering::Relaxed);
     Ok(res)
 }

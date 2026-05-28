@@ -4,9 +4,9 @@ use std::{
     time::{GET_TIME, UNIX_EPOCH},
 };
 
-use crate::proc::{
-    ProcessData,
-    syscall::{self, SyscallCpuState},
+use crate::{
+    memory::safe_memcpy,
+    proc::{ProcessData, syscall::SyscallCpuState},
 };
 
 pub fn time(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
@@ -16,15 +16,14 @@ pub fn time(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let ptr_seconds = args.get_legacy_syscall_arg(1);
     let ptr_nanos = args.get_legacy_syscall_arg(2);
 
-    let valid_ptrs = syscall::verify_memory_ptr(ptr_seconds) && syscall::verify_memory_ptr(ptr_nanos);
+    let secs = duration.as_secs();
+    let nanos = duration.subsec_nanos() as u64;
+
+    let valid_ptrs =
+        safe_memcpy(ptr_seconds, (&raw const secs) as u64, 8) && safe_memcpy(ptr_nanos, (&raw const nanos) as u64, 8);
     if !valid_ptrs {
         proc.set_legacy_syscall_return(u64::MAX, 0);
         return false;
-    }
-
-    unsafe {
-        *(ptr_seconds as *mut u64) = duration.as_secs();
-        *(ptr_nanos as *mut u64) = duration.subsec_nanos() as u64;
     }
 
     println!("time syscall returning");

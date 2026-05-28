@@ -24,6 +24,7 @@ unsafe extern "C" {
     fn probe_check_u32(ptr: u64) -> ProbeResult;
     fn probe_check_u16(ptr: u64) -> ProbeResult;
     fn probe_check_u8(ptr: u64) -> ProbeResult;
+    fn probe_memcpy(dst: u64, src: u64, len: u64) -> ProbeResult;
     pub fn probe_fail() -> ProbeResult;
     pub static probe_functions_end: u8;
 }
@@ -109,6 +110,18 @@ pub fn probe_pointer_range(ptr_start: u64, mut ptr_end: u64) -> bool {
         println!(level:warn, "pointer range {:#x?} - {:#x?} is invalid", ptr_start, ptr_end);
     }
     valid
+}
+
+pub fn safe_memcpy(dst: u64, src: u64, len: usize) -> bool {
+    let prev_int_state = disable_interrupts();
+
+    let res = unsafe { probe_memcpy(dst, src, len as u64) };
+
+    if prev_int_state {
+        enable_interrupts();
+    }
+
+    res.valid
 }
 
 pub fn print_mem_mapping() {

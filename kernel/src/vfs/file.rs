@@ -1,4 +1,4 @@
-use core::future::AsyncDrop;
+use core::{future::AsyncDrop, sync::atomic::AtomicU64};
 use std::{
     boxed::Box,
     collections::btree_map::BTreeMap,
@@ -31,7 +31,7 @@ static FILE_STORAGE: NoIntSpinlock<FileStorage> = NoIntSpinlock::new(FileStorage
 pub struct FileHandle {
     pub inode: InodeIdentifier,
     pub parent_chain: InodeIdentifierChain,
-    pub position: u64,
+    pub position: AtomicU64,
     pub file_flags: FileFlags,
     pub(in crate::vfs) open_file: Arc<OpenFile>,
 }

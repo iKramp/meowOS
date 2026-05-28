@@ -1,6 +1,5 @@
 use std::{
     boxed::Box,
-    collections::btree_map::BTreeMap,
     lock_w_info,
     mem_utils::PhysAddr,
     sync::no_int_spinlock::{NoIntSpinlock, NoIntSpinlockGuard},
@@ -9,10 +8,6 @@ use std::{
 use crate::{
     interrupts::InterruptProcessorState,
     proc::{ProcNamespaces, syscall::SyscallCpuState},
-    vfs::{
-        InodeIdentifier,
-        file::{FileDescriptor, FileHandle},
-    },
 };
 
 use super::Pid;

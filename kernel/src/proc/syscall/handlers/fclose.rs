@@ -10,7 +10,7 @@ pub fn fclose(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         .get_namespace::<FilesystemNamespace>(0)
         .expect("default fs namespace must exist");
 
-    if fs_namespace.take_file_handle(fd).is_some() {
+    if fs_namespace.close_file_handle(fd).is_some() {
         proc.set_legacy_syscall_return(0, 0);
     } else {
         proc.set_legacy_syscall_return(u64::MAX, 1);

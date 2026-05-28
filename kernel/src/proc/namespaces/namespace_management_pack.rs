@@ -1,9 +1,12 @@
 use std::{boxed::Box, sync::arc::Arc};
 
-use crate::proc::{
-    ProcessData, get_namespace_id,
-    namespaces::NamespaceType,
-    syscall::{self, SyscallCpuState, SyscallPack},
+use crate::{
+    memory::safe_memcpy,
+    proc::{
+        ProcessData, get_namespace_id,
+        namespaces::NamespaceType,
+        syscall::{self, SyscallCpuState, SyscallPack},
+    },
 };
 
 pub fn init_namespace_management_syscalls() {
@@ -71,14 +74,6 @@ fn lsnamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let namespace_buf_ptr = args.get_arg(0);
     let namespace_buf_size = args.get_arg(1);
 
-    if !syscall::verify_memory_range(
-        namespace_buf_ptr,
-        namespace_buf_size * std::mem::size_of::<NamespaceInfo>() as u64,
-    ) {
-        proc.set_syscall_return(&[u64::MAX]);
-        return false;
-    }
-
     let mutable = proc.get_mutable();
     let namespaces = mutable.get_namespaces();
 
@@ -91,9 +86,11 @@ fn lsnamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
             ns_type: ns.get_type(),
             currently_used: namespaces.is_in_use(ns.get_id()),
         };
-        unsafe {
-            let dst = (namespace_buf_ptr + (i as u64 * std::mem::size_of::<NamespaceInfo>() as u64)) as *mut NamespaceInfo;
-            core::ptr::write(dst, info);
+        let dst = namespace_buf_ptr + (i as u64 * std::mem::size_of::<NamespaceInfo>() as u64);
+        let res = safe_memcpy(dst, (&raw const info) as u64, core::mem::size_of::<NamespaceInfo>());
+        if !res {
+            proc.set_syscall_return(&[u64::MAX]);
+            return false;
         }
     }
 

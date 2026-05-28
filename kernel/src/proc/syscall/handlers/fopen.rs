@@ -1,11 +1,9 @@
-use core::{slice, str};
-use std::{println, sync::arc::Arc};
+use core::str;
+use std::{boxed::Box, println, string::String, sync::arc::Arc};
 
 use crate::{
-    proc::{
-        self, FilesystemNamespace, ProcessData,
-        syscall::{self, SyscallCpuState},
-    },
+    memory::safe_memcpy,
+    proc::{self, FilesystemNamespace, ProcessData, syscall::SyscallCpuState},
     task_runner::{self, PidOption},
     vfs::{self, InodeIdentifierChain, file::FileFlags},
 };
@@ -18,13 +16,17 @@ pub fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let ftags = args.get_legacy_syscall_arg(4);
     let _create_mode = args.get_legacy_syscall_arg(5);
 
-    let res = syscall::verify_memory_range(path_ptr, path_ptr + path_len);
+    // let path_buf = Box::new([0u8; path_len as usize]);
+    let path_buf_uninit = Box::new_uninit_slice(path_len as usize);
+    let res = safe_memcpy(path_buf_uninit.as_ptr() as u64, path_ptr, path_len as usize);
     if !res {
+        println!("fopen: invalid path pointer or length");
         proc.set_legacy_syscall_return(u64::MAX, 1);
         return false;
     }
+    let path_buf: Box<[u8]> = unsafe { path_buf_uninit.assume_init() };
 
-    let Ok(path) = (unsafe { str::from_utf8(slice::from_raw_parts(path_ptr as *const u8, path_len as usize)) }) else {
+    let Ok(path) = String::from_utf8(path_buf.to_vec()) else {
         println!("fopen: invalid path string (not utf8)");
         proc.set_legacy_syscall_return(u64::MAX, 1);
         return false;
@@ -47,7 +49,7 @@ pub fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     };
 
     let task = async move {
-        let resolved_path = vfs::resolve_path(path);
+        let resolved_path = vfs::resolve_path(&path);
         let file_flags = FileFlags(ftags as u8);
         let handle = vfs::open_file((&resolved_path).into(), file_source, file_flags).await;
         let Some(proc) = crate::proc::get_proc(pid) else {

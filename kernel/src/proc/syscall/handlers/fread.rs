@@ -1,6 +1,7 @@
 use std::{mem_utils::PhysAddr, sync::arc::Arc, vec::Vec};
 
 use crate::{
+    memory::safe_memcpy,
     proc::{
         ProcessData,
         syscall::{self, SyscallCpuState},
@@ -15,6 +16,7 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let proc = proc.clone();
     let pid = proc.pid();
 
+    //keep for early retur (don't waste time on disk if buffer is invalid)
     if !syscall::verify_memory_range(buffer_ptr as u64, buffer_ptr as u64 + size) {
         proc.set_legacy_syscall_return(u64::MAX, 1);
         return false;
@@ -26,8 +28,12 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     }
 
     let file_handle = {
-        let mut proc_mut = proc.get_mutable();
-        if let Some(f_handle) = proc_mut.take_file_handle(fd) {
+        let proc_mut = proc.get_mutable();
+        let namespaces = proc_mut.get_namespaces();
+        let fs_namespace = namespaces
+            .get_namespace::<crate::proc::FilesystemNamespace>(0)
+            .expect("default fs namespace must exist");
+        if let Some(f_handle) = fs_namespace.get_file_handle(fd) {
             f_handle
         } else {
             proc.set_legacy_syscall_return(u64::MAX, 1);
@@ -36,12 +42,12 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     };
 
     let task = async move {
-        let mut f_handle = file_handle; //get to local
+        let f_handle = file_handle; //get to local
         let pages = size.div_ceil(4096);
         let buffer_alloc = crate::memory::physical_allocator::allocate_contiguius_high(pages);
         let buffers = (0..pages).map(|i| buffer_alloc + (i * 4096)).collect::<Vec<PhysAddr>>();
 
-        let read_result = crate::vfs::read_file(&mut f_handle, &buffers, size).await;
+        let read_result = crate::vfs::read_file(f_handle.get(), &buffers, size).await;
         let Some(proc) = crate::proc::get_proc(proc.pid()) else {
             return; //proc was killed
         };
@@ -51,17 +57,19 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
             return;
         };
         //copy to user buffer
-        let dst = buffer_ptr;
-        let src = std::mem_utils::translate_phys_virt_addr(buffer_alloc).0 as *const u8;
-        unsafe { core::ptr::copy_nonoverlapping(src, dst, size as usize) };
+        let dst = buffer_ptr as u64;
+        let src = std::mem_utils::translate_phys_virt_addr(buffer_alloc).0;
+        let valid_copy = safe_memcpy(dst, src, size as usize);
+        if !valid_copy {
+            let proc_lock = proc.get();
+            proc_lock.set_legacy_syscall_return(u64::MAX, 1);
+            return;
+        }
 
         //free
         for i in 0..pages {
             unsafe { crate::memory::physical_allocator::deallocate_frame(buffer_alloc + (i * 4096)) };
         }
-
-        //return fd
-        proc.get_mutable().insert_file_handle(fd, f_handle);
 
         //return
         proc.set_legacy_syscall_return(bytes_read, 0);
