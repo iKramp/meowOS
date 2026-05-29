@@ -1,9 +1,9 @@
-use core::sync::atomic::AtomicU64;
+use core::sync::atomic::{AtomicU64, Ordering};
 use std::{
     collections::btree_map::BTreeMap,
     error::ErrorCode,
-    r_lock_w_info,
-    sync::{arc::Arc, rw_lock::RWSpinlock},
+    lock_w_info, r_lock_w_info,
+    sync::{arc::Arc, no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
     w_lock_w_info,
 };
 
@@ -20,14 +20,16 @@ pub struct FilesystemNamespace {
     id: u64,
     open_files: RWSpinlock<BTreeMap<u64, Arc<FileHandle>>>,
     file_handle_counter: AtomicU64,
+    cwd: NoIntSpinlock<FileHandle>,
 }
 
 impl FilesystemNamespace {
-    pub fn new(id: u64) -> Self {
+    pub fn new(id: u64, cwd: FileHandle) -> Self {
         FilesystemNamespace {
             id,
             open_files: RWSpinlock::new(BTreeMap::new()),
             file_handle_counter: AtomicU64::new(1),
+            cwd: NoIntSpinlock::new(cwd),
         }
     }
 
@@ -65,6 +67,14 @@ impl FilesystemNamespace {
         let mut internal = w_lock_w_info!(self.open_files);
         internal.remove(&fd)
     }
+
+    pub fn get_cwd_chain(&self) -> InodeIdentifierChain {
+        let cwd = lock_w_info!(self.cwd);
+        let chain = cwd.parent_chain.clone();
+        let mut chain = chain.to_vec();
+        chain.push(cwd.inode);
+        chain.into_boxed_slice()
+    }
 }
 
 impl ProcNamespace for FilesystemNamespace {
@@ -72,8 +82,24 @@ impl ProcNamespace for FilesystemNamespace {
         self.id
     }
 
-    fn init_from(&self, _other: &Self) -> Result<(), ErrorCode> {
-        //For now, we just create a new empty filesystem namespace. In the future, we might want to share some state between namespaces.
-        Ok(())
+    fn create_empty(_id: u64) -> Result<Self, ErrorCode> {
+        Err(ErrorCode::InvalidOperation)
+    }
+
+    fn create_from(id: u64, other: &Self) -> Result<Self, ErrorCode> {
+        let other_cwd = lock_w_info!(other.cwd);
+        let other_open_files = r_lock_w_info!(other.open_files);
+        let counter = other.file_handle_counter.load(Ordering::Relaxed);
+        let mut open_files = BTreeMap::new();
+        for (fd, handle) in other_open_files.iter() {
+            open_files.insert(*fd, handle.clone());
+        }
+        let cwd = FileHandle::clone_from(&other_cwd);
+        Ok(FilesystemNamespace {
+            id,
+            open_files: RWSpinlock::new(open_files),
+            file_handle_counter: AtomicU64::new(counter),
+            cwd: NoIntSpinlock::new(cwd),
+        })
     }
 }

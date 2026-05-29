@@ -17,7 +17,10 @@ use crate::{
         block_device::disk::{BlockDevice, DirEntry, MountedPartition, PartitionSchemeDriver},
         gpt::GPTDriver,
     },
-    vfs::{Inode, InodeIdentifier, file::get_file},
+    vfs::{
+        Inode, InodeIdentifier,
+        file::{OpenFlags, get_file},
+    },
 };
 
 use super::{
@@ -229,17 +232,23 @@ pub async fn unmount(path: ResolvedPathBorrowed<'_>) -> Result<(), ErrorCode> {
 pub async fn open_file(
     path: ResolvedPathBorrowed<'_>,
     from: Option<InodeIdentifierChain>,
-    mut open_mode: FileFlags,
+    open_flags: OpenFlags,
 ) -> Result<FileHandle, ErrorCode> {
+    if open_flags.truncate() {
+        println!(level:error, "Truncate on open is not supported yet");
+        return Err(ErrorCode::InvalidOperation);
+    }
+
     let (inode_index, inode_chain) = fs_tree::get_inode_chain(path, from).await?;
     let open_file = get_file(inode_index).await?;
-    open_mode.set_dir(unsafe { open_file.inode.get_read_ptr().type_mode.is_dir() });
+    let is_dir = unsafe { open_file.inode.get_read_ptr().type_mode.is_dir() };
+    let file_flags = FileFlags::new_with_flags(open_flags.read(), open_flags.write(), open_flags.append(), is_dir);
     //TODO: check permissions
     Ok(FileHandle {
         inode: inode_index,
         parent_chain: inode_chain,
         position: AtomicU64::new(0),
-        file_flags: open_mode,
+        file_flags,
         open_file,
     })
 }

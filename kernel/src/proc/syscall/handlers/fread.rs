@@ -16,15 +16,15 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let proc = proc.clone();
     let pid = proc.pid();
 
+    if size == 0 {
+        proc.set_legacy_syscall_return(0, 0);
+        return true;
+    }
+
     //keep for early retur (don't waste time on disk if buffer is invalid)
     if !syscall::verify_memory_range(buffer_ptr as u64, buffer_ptr as u64 + size) {
         proc.set_legacy_syscall_return(u64::MAX, 1);
         return false;
-    }
-
-    if size == 0 {
-        proc.set_legacy_syscall_return(0, 0);
-        return true;
     }
 
     let file_handle = {

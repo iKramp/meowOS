@@ -31,9 +31,17 @@ impl ProcNamespace for SyscallNamespace {
         self.id
     }
 
-    fn init_from(&self, other: &Self) -> Result<(), ErrorCode> {
+    fn create_empty(id: u64) -> Result<Self, ErrorCode> {
+        Ok(Self {
+            id,
+            mapped_syscalls: NoIntSpinlock::new(Vec::new()),
+        })
+    }
+
+    fn create_from(id: u64, other: &Self) -> Result<Self, ErrorCode> {
+        let new_namespace = Self::create_empty(id)?;
         let other_mapped_syscalls = lock_w_info!(other.mapped_syscalls);
-        let mut mapped_syscalls = lock_w_info!(self.mapped_syscalls);
+        let mut mapped_syscalls = lock_w_info!(new_namespace.mapped_syscalls);
         mapped_syscalls.clear();
         for mapped in other_mapped_syscalls.iter() {
             mapped_syscalls.push(MappedSyscallPack {
@@ -43,21 +51,15 @@ impl ProcNamespace for SyscallNamespace {
                 pack: mapped.pack.clone(),
             });
         }
-        Ok(())
+        drop(mapped_syscalls);
+        Ok(new_namespace)
     }
 }
 
 impl SyscallNamespace {
-    pub fn new(id: u64) -> Self {
-        Self {
-            id,
-            mapped_syscalls: NoIntSpinlock::new(Vec::new()),
-        }
-    }
-
     pub fn default(id: u64) -> Self {
         let (legacy_pack, pack_id) = syscall::get_syscall_pack("legacy").expect("legacy syscall pack not found");
-        let ns = Self::new(id);
+        let ns = Self::create_empty(id).expect("can't fail to create empty syscall namespace");
         ns.map_syscall_pack(0, legacy_pack, pack_id);
         ns
     }

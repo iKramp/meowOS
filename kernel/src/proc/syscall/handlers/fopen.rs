@@ -1,11 +1,16 @@
-use core::str;
 use std::{boxed::Box, println, string::String, sync::arc::Arc};
 
 use crate::{
     memory::safe_memcpy,
-    proc::{self, FilesystemNamespace, ProcessData, syscall::SyscallCpuState},
+    proc::{
+        self, FilesystemNamespace, ProcessData,
+        syscall::{SyscallCpuState, string_from_args},
+    },
     task_runner::{self, PidOption},
-    vfs::{self, InodeIdentifierChain, file::FileFlags},
+    vfs::{
+        self, InodeIdentifierChain,
+        file::{FileFlags, OpenFlags},
+    },
 };
 
 pub fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
@@ -13,45 +18,44 @@ pub fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let path_len = args.get_legacy_syscall_arg(1);
     let path_ptr = args.get_legacy_syscall_arg(2);
     let fd = args.get_legacy_syscall_arg(3);
-    let ftags = args.get_legacy_syscall_arg(4);
+    let flags = args.get_legacy_syscall_arg(4);
     let _create_mode = args.get_legacy_syscall_arg(5);
 
-    // let path_buf = Box::new([0u8; path_len as usize]);
-    let path_buf_uninit = Box::new_uninit_slice(path_len as usize);
-    let res = safe_memcpy(path_buf_uninit.as_ptr() as u64, path_ptr, path_len as usize);
-    if !res {
+    let Some(path) = string_from_args(path_ptr, path_len) else {
         println!("fopen: invalid path pointer or length");
-        proc.set_legacy_syscall_return(u64::MAX, 1);
-        return false;
-    }
-    let path_buf: Box<[u8]> = unsafe { path_buf_uninit.assume_init() };
-
-    let Ok(path) = String::from_utf8(path_buf.to_vec()) else {
-        println!("fopen: invalid path string (not utf8)");
         proc.set_legacy_syscall_return(u64::MAX, 1);
         return false;
     };
 
-    let file_source: Option<InodeIdentifierChain> = if fd == 0 {
-        None
+    let proc_mut = proc.get_mutable();
+    let namespaces = proc_mut.get_namespaces();
+    let fs_namespace = namespaces
+        .get_namespace::<FilesystemNamespace>(0)
+        .expect("default fs namespace must exist");
+
+    let file_source: InodeIdentifierChain = if fd == 0 {
+        fs_namespace.get_cwd_chain()
     } else {
-        let proc_mut = proc.get_mutable();
-        let namespaces = proc_mut.get_namespaces();
-        let fs_namespace = namespaces
-            .get_namespace::<FilesystemNamespace>(0)
-            .expect("default fs namespace must exist");
         let Some(f_chain) = fs_namespace.get_whole_chain(fd) else {
             println!("fopen: invalid fd {fd}");
             proc.set_legacy_syscall_return(u64::MAX, 1);
             return false;
         };
-        Some(f_chain)
+        f_chain
     };
 
     let task = async move {
         let resolved_path = vfs::resolve_path(&path);
-        let file_flags = FileFlags(ftags as u8);
-        let handle = vfs::open_file((&resolved_path).into(), file_source, file_flags).await;
+        let file_flags = FileFlags(flags as u8);
+
+        //legacy BS because open flags are different
+        let mut open_flags = OpenFlags(0);
+        open_flags
+            .set_read(file_flags.read())
+            .set_write(file_flags.write())
+            .set_append(file_flags.append());
+
+        let handle = vfs::open_file((&resolved_path).into(), Some(file_source), open_flags).await;
         let Some(proc) = crate::proc::get_proc(pid) else {
             return; //proc was killed
         };

@@ -6,6 +6,7 @@ use crate::memory::VirtualMemoryRangePermissions;
 use crate::memory::current_root;
 use crate::proc::MemoryRangeType;
 use crate::proc::PROCESS_ID_COUNTER;
+use crate::proc::ProcNamespace;
 use crate::proc::ProcNamespaces;
 use crate::proc::ProcessData;
 use crate::proc::SCHEDULER;
@@ -13,6 +14,7 @@ use crate::proc::SyscallNamespace;
 use crate::proc::namespaces::FilesystemNamespace;
 use crate::proc::namespaces::MemoryNamespace;
 use crate::proc::process_data::CpuStateType;
+use crate::vfs::file::FileHandle;
 use std::error::ErrorCode;
 use std::lock_w_info;
 use std::string::ToString;
@@ -25,7 +27,7 @@ use super::info::ContextInfo;
 
 const DEFAULT_PROC_STACK_SIZE: usize = 0x1000; // 1kB initial stack
 
-pub fn create_process_from_context(context_info: &ContextInfo) -> Result<Pid, ErrorCode> {
+pub fn create_process_from_context(context_info: &ContextInfo, cwd: FileHandle) -> Result<Pid, ErrorCode> {
     println!("creating process with context: {:#?}", context_info);
     let pid = Pid(PROCESS_ID_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed));
     let is_32_bit = context_info.is_32_bit();
@@ -45,7 +47,7 @@ pub fn create_process_from_context(context_info: &ContextInfo) -> Result<Pid, Er
 
     let memory_namespace = Arc::new(memory_namespace);
     let syscall_namespace = Arc::new(SyscallNamespace::default(crate::proc::get_namespace_id()));
-    let filesystem_namespace = Arc::new(FilesystemNamespace::new(crate::proc::get_namespace_id()));
+    let filesystem_namespace = Arc::new(FilesystemNamespace::new(crate::proc::get_namespace_id(), cwd));
 
     let cpu_state = InterruptProcessorState::new(rip, rsp);
     let process_data = ProcessData::new(
@@ -181,7 +183,7 @@ pub fn add_stack(mem_namespace: &mut MemoryNamespace, stack_size_pages: u8) -> R
 }
 
 pub fn build_empty_memory_namespace() -> MemoryNamespace {
-    let namespace = MemoryNamespace::new(crate::proc::get_namespace_id());
+    let namespace = MemoryNamespace::create_empty(crate::proc::get_namespace_id()).expect("failed to create memory namespace");
 
     let new_page_tree_root = namespace.page_tree_root();
     let existing_page_tree_root = memory::current_root();

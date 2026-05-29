@@ -99,7 +99,7 @@ impl ShellState {
                 self.started_proc = true;
 
                 let task = async move {
-                    let run_proc_future = proc::run_process_default_env((&resolved_path).into(), &cmd_cloned).await;
+                    let run_proc_future = proc::run_process_default_env((&resolved_path).into(), &cmd_cloned, "/").await;
                     match run_proc_future {
                         Ok(pid) => {
                             let mut self_state = lock_w_info!(SHELL_STATE);

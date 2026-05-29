@@ -59,41 +59,46 @@ impl ProcNamespace for MemoryNamespace {
         self.id
     }
 
-    fn init_from(&self, other: &Self) -> Result<(), ErrorCode> {
-        //drop current ranges
-        lock_w_info!(self.dynamic_data).memory_ranges.clear();
-
-        let other_dynamic = lock_w_info!(other.dynamic_data);
-        for range in other_dynamic.memory_ranges.iter() {
-            let res = self.add_mem_range(
-                range.shared_range.clone(),
-                range.name.clone(),
-                range.range_type,
-                range.map_address,
-            );
-            if res.is_err() {
-                lock_w_info!(self.dynamic_data).memory_ranges.clear();
-                return res.map(|_| ());
-            }
-        }
-        Ok(())
-    }
-}
-
-impl MemoryNamespace {
-    pub fn new(id: u64) -> Self {
+    fn create_empty(id: u64) -> Result<Self, ErrorCode> {
         let page_tree_root = physical_allocator::allocate_frame();
         unsafe { memset_physical_addr(page_tree_root, 0, 0x1000) };
-        Self {
+        Ok(Self {
             id,
             page_tree_root,
             dynamic_data: NoIntSpinlock::new(MemoryNamespaceDynamicData {
                 memory_ranges: Vec::new(),
                 range_counter: 1,
             }),
-        }
+        })
     }
 
+    fn create_from(id: u64, other: &Self) -> Result<MemoryNamespace, ErrorCode> {
+        let new_namespace = MemoryNamespace::create_empty(id)?;
+
+        //drop current ranges
+        let mut new_dynamic_data = lock_w_info!(new_namespace.dynamic_data);
+        let other_dynamic = lock_w_info!(other.dynamic_data);
+        new_dynamic_data.memory_ranges.clear();
+        new_dynamic_data.range_counter = other_dynamic.range_counter;
+        drop(new_dynamic_data);
+
+        for range in other_dynamic.memory_ranges.iter() {
+            let res = new_namespace.add_mem_range(
+                range.shared_range.clone(),
+                range.name.clone(),
+                range.range_type,
+                range.map_address,
+            );
+            if let Err(e) = res {
+                return Err(e);
+            }
+        }
+
+        Ok(new_namespace)
+    }
+}
+
+impl MemoryNamespace {
     pub fn page_tree_root(&self) -> PhysAddr {
         self.page_tree_root
     }

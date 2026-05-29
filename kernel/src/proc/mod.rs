@@ -4,10 +4,9 @@ use core::{
 };
 use scheduler::Scheduler;
 use std::{
-    boxed::Box,
     error::ErrorCode,
     lock_w_info,
-    mem_utils::{PhysAddr, VirtAddr, translate_phys_virt_addr},
+    mem_utils::{PhysAddr, translate_phys_virt_addr},
     println,
     string::ToString,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
@@ -26,7 +25,7 @@ mod dispatcher;
 mod exec_syscall;
 mod loaders;
 mod memory_syscall_pack;
-mod namespaces;
+pub mod namespaces;
 mod process_data;
 mod scheduler;
 pub mod syscall;
@@ -108,7 +107,7 @@ pub fn init_ap() {
     syscall::init();
 }
 
-pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &str) -> Result<Pid, ErrorCode> {
+pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &str, cwd: &str) -> Result<Pid, ErrorCode> {
     let mut file_handle = vfs::open_file(path, None, FileFlags::new().with_read(true)).await?;
     let stat = vfs::stat_file(&file_handle).await;
     let buf_pages = stat.size.div_ceil(4096);
@@ -139,7 +138,10 @@ pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &s
         }
     };
 
-    let new_pid = match create_process_from_context(&context) {
+    let cwd_resolved = vfs::resolve_path(cwd);
+    let file_handle = vfs::open_file((&cwd_resolved).into(), None, FileFlags::new().with_read(true)).await?;
+
+    let new_pid = match create_process_from_context(&context, file_handle) {
         Ok(pid) => pid,
         Err(e) => {
             println!(level:error, "Failed to create process from file: {}, error: {:?}", path.to_string(), e);

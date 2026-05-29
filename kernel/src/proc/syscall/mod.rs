@@ -1,4 +1,4 @@
-use std::println;
+use std::{boxed::Box, println, string::String};
 
 use super::{
     context_switch::no_ret_context_switch,
@@ -83,6 +83,21 @@ pub fn verify_memory_ptr(mut ptr: u64) -> bool {
         println!(level:warn, "Invalid memory pointer: {:#X}", ptr);
     }
     valid
+}
+
+pub fn string_from_args(ptr: u64, len: u64) -> Option<String> {
+    let str_buf_uninit = Box::new_uninit_slice(len as usize);
+    let res = memory::safe_memcpy(str_buf_uninit.as_ptr() as u64, ptr, len as usize);
+    if !res {
+        println!(level:warn, "Invalid string pointer or length: {:#X}, {}", ptr, len);
+        return None;
+    }
+    let str_buf: Box<[u8]> = unsafe { str_buf_uninit.assume_init() };
+    let Ok(string) = String::from_utf8(str_buf.to_vec()) else {
+        println!(level:warn, "Invalid string data (not utf8) at pointer: {:#X}, length: {}", ptr, len);
+        return None;
+    };
+    Some(string)
 }
 
 //sys V abi:

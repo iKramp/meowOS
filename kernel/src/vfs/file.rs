@@ -36,9 +36,30 @@ pub struct FileHandle {
     pub(in crate::vfs) open_file: Arc<OpenFile>,
 }
 
+impl FileHandle {
+    pub fn clone_from(other: &Self) -> Self {
+        FileHandle {
+            inode: other.inode,
+            parent_chain: other.parent_chain.clone(),
+            position: AtomicU64::new(other.position.load(core::sync::atomic::Ordering::SeqCst)),
+            file_flags: other.file_flags,
+            open_file: other.open_file.clone(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(in crate::vfs) struct OpenFile {
     pub inode: AsyncSpinlock<Inode>,
+}
+
+bitfield! {
+    pub struct OpenFlags(u64);
+    impl Debug;
+    pub read, set_read: 0;
+    pub write, set_write: 1;
+    pub append, set_append: 2;
+    pub truncate, set_truncate: 3;
 }
 
 bitfield! {
@@ -48,8 +69,6 @@ bitfield! {
     pub read, set_read: 0;
     pub write, set_write: 1;
     pub append, set_append: 2;
-    //bit 3 is create, not a file bit
-    //bit 4 is truncate, not a file bit
     pub dir, set_dir: 5;
 }
 
@@ -93,18 +112,14 @@ impl FileFlags {
 
 async fn open_file(inode_id: InodeIdentifier) -> Result<Arc<OpenFile>, ErrorCode> {
     let vfs = lock_w_info!(VFS);
-    println!("Opening file for inode id: {:?}", inode_id);
     let device = vfs.devices.get(&inode_id.device_id).ok_or(ErrorCode::NoEntry)?;
-    println!(level:info, "Found device for device id: {:?}", inode_id.device_id);
     let partition = vfs
         .mounted_filesystems
         .get(&device.partition)
         .ok_or(ErrorCode::NoEntry)?
         .clone();
-    println!("Found partition for partition id: {:?}", device.partition);
     drop(vfs);
     let inode = partition.stat(inode_id.index).await?;
-    println!("Got inode for inode id: {:?}, inode: {:?}", inode_id, inode);
 
     let open_file = Arc::new(OpenFile {
         inode: AsyncSpinlock::new(inode),
@@ -114,14 +129,11 @@ async fn open_file(inode_id: InodeIdentifier) -> Result<Arc<OpenFile>, ErrorCode
 }
 
 pub(in crate::vfs) async fn get_file(inode_id: InodeIdentifier) -> Result<Arc<OpenFile>, ErrorCode> {
-    println!("Getting file for inode id: {:?}", inode_id);
     let mut file_storage = lock_w_info!(FILE_STORAGE);
     if let Some(open_file) = file_storage.open_files.get(&inode_id) {
         if let Some(open_file) = open_file.upgrade() {
-            println!("Open file for inode {:?} was found and is still valid, returning", inode_id);
             return Ok(open_file);
         }
-        println!("Open file for inode {:?} was found but has been dropped, reopening", inode_id);
         file_storage.open_files.remove(&inode_id);
     }
     drop(file_storage);
@@ -170,7 +182,6 @@ impl Drop for OpenFile {
 
 impl AsyncDrop for OpenFile {
     async fn drop(self: core::pin::Pin<&mut Self>) {
-        println!(level:info, "Dropping open file asynchronously");
         //First flush to disk, then clean up/invalidate any cached data
     }
 }

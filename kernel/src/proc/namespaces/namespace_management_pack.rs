@@ -3,7 +3,7 @@ use std::{boxed::Box, sync::arc::Arc};
 use crate::{
     memory::safe_memcpy,
     proc::{
-        ProcessData, get_namespace_id,
+        NamespaceHolder, ProcessData, get_namespace_id,
         namespaces::NamespaceType,
         syscall::{self, SyscallCpuState, SyscallPack},
     },
@@ -23,19 +23,27 @@ fn mknamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         proc.set_syscall_return(&[u64::MAX]);
         return false;
     };
-    let namespace = namespace_type.create_empty_namespace(get_namespace_id());
 
-    if existing_namespace != 0 {
+    let namespace;
+
+    if existing_namespace == 0 {
+        let Some(namespace_) = namespace_type.create_empty_namespace(get_namespace_id()) else {
+            proc.set_syscall_return(&[u64::MAX]);
+            return false;
+        };
+        namespace = namespace_;
+    } else {
         let mutable = proc.get_mutable();
         let namespaces = mutable.get_namespaces();
         let Some(existing_namespace) = namespaces.get_namespace_holder(existing_namespace) else {
             proc.set_syscall_return(&[u64::MAX]);
             return false;
         };
-        if namespace.init_from(existing_namespace).is_err() {
+        let Ok(new_namespace) = NamespaceHolder::create_from(get_namespace_id(), existing_namespace) else {
             proc.set_syscall_return(&[u64::MAX]);
             return false;
-        }
+        };
+        namespace = new_namespace;
     }
 
     proc.get_mutable().get_namespaces_mut().add_namespace(namespace);

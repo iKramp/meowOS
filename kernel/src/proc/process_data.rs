@@ -30,7 +30,7 @@ pub struct ProcessDataMutable {
 }
 
 impl ProcessDataMutable {
-    pub(in crate::proc) fn get_namespaces(&self) -> &ProcNamespaces {
+    pub fn get_namespaces(&self) -> &ProcNamespaces {
         &self.namespaces
     }
 
