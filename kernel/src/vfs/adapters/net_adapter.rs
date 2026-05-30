@@ -9,7 +9,7 @@ use std::{r_lock_w_info, w_lock_w_info};
 
 use crate::drivers::block_device::disk::DirEntry;
 use crate::vfs::adapters::VfsAdapterTrait;
-use crate::vfs::{DeviceId, Inode, InodeIndex, InodeType, inode};
+use crate::vfs::{DeviceId, Inode, InodeIndex, InodeTypeAndPerms, inode};
 
 const ENTRIES_PER_NIC_DEVICE: u64 = 2;
 const _: () = assert!(ENTRIES_PER_NIC_DEVICE.is_power_of_two());
@@ -184,7 +184,7 @@ impl VfsAdapterTrait for NetAdapter {
             NICEntryType::MainFolder => inode::Inode {
                 index: inode,
                 device: self.device_id,
-                type_mode: InodeType::new_dir(0o444),
+                type_mode: InodeTypeAndPerms::new_dir(0o444),
                 link_cnt: 1,
                 uid: 0,
                 gid: 0,
@@ -196,7 +196,7 @@ impl VfsAdapterTrait for NetAdapter {
             NICEntryType::MacAddress | NICEntryType::Mtu => inode::Inode {
                 index: inode,
                 device: self.device_id,
-                type_mode: InodeType::new_file(0o444),
+                type_mode: InodeTypeAndPerms::new_file(0o444),
                 link_cnt: 1,
                 uid: 0,
                 gid: 0,
@@ -208,7 +208,7 @@ impl VfsAdapterTrait for NetAdapter {
             NICEntryType::Data => inode::Inode {
                 index: inode,
                 device: self.device_id,
-                type_mode: InodeType::new_file(0o600),
+                type_mode: InodeTypeAndPerms::new_file(0o600),
                 link_cnt: 1,
                 uid: 0,
                 gid: 0,

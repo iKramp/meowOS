@@ -84,18 +84,22 @@ impl<T: VfsAdapterTrait> FileSystem for T {
         &self,
         _name: &str,
         _parent_dir: InodeIndex,
-        _type_mode: super::InodeType,
+        _type_mode: super::InodeTypeAndPerms,
         _uid: u16,
         _gid: u16,
     ) -> Result<(Inode, Inode), ErrorCode> {
         Err(ErrorCode::UnsupportedOperation)
     }
 
-    async fn unlink(&self, _parent_inode: InodeIndex, _name: &str) -> Result<(), ErrorCode> {
+    async fn unlink(&self, _parent_inode: InodeIndex, _name: &str) -> Result<(Inode, Inode), ErrorCode> {
         Err(ErrorCode::UnsupportedOperation)
     }
 
-    async fn link(&self, _inode: InodeIndex, _parent_dir: InodeIndex, _name: &str) -> Result<Inode, ErrorCode> {
+    async fn remove_inode(&self, _inode: InodeIndex) -> Result<(), ErrorCode> {
+        Err(ErrorCode::UnsupportedOperation)
+    }
+
+    async fn link(&self, _inode: InodeIndex, _parent_dir: InodeIndex, _name: &str) -> Result<(Inode, Inode), ErrorCode> {
         Err(ErrorCode::UnsupportedOperation)
     }
 

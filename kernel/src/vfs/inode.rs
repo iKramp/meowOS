@@ -11,7 +11,7 @@ pub struct Inode {
     //RO
     pub device: DeviceId, //some map to major/minor (minor are partitions)
     //type RO, permissions RW
-    pub type_mode: InodeType,
+    pub type_mode: InodeTypeAndPerms,
     //RW
     pub link_cnt: u16,
     //RW
@@ -41,61 +41,106 @@ impl Inode {
     }
 }
 
-const FILE_MODE_MASK: u32 = 0xFFF00000;
-const FILE_TYPE_MASK: u32 = 0xF000;
-const PERM_MASK: u32 = 0x1FF;
-const TEST: u32 = 0o4000;
-//use this: https://man7.org/linux/man-pages/man7/inode.7.html
-//internal fs inode types may differ (as there is no need for socket, block device,...) but rfs
-//uses this
-#[derive(Debug, Clone)]
-pub struct InodeType(u32);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum InodeType {
+    File = 0,        //--\
+    Directory = 1,   //------real file types
+    Symlink = 2,     //--/
+    Socket = 3,      //--\
+    BlockDevice = 4, //---\
+    CharDevice = 5,  //------mental illnesses
+    Fifo = 6,        //---/
+}
 
 impl InodeType {
-    pub fn get_flags(&self) -> InodeFlags {
-        InodeFlags(self.0 & PERM_MASK)
+    pub fn from_id(id: u32) -> Option<Self> {
+        match id {
+            0 => Some(InodeType::File),
+            1 => Some(InodeType::Directory),
+            2 => Some(InodeType::Symlink),
+            3 => Some(InodeType::Socket),
+            4 => Some(InodeType::BlockDevice),
+            5 => Some(InodeType::CharDevice),
+            6 => Some(InodeType::Fifo),
+            _ => None,
+        }
+    }
+
+    pub fn to_id(&self) -> u32 {
+        match self {
+            InodeType::File => 0,
+            InodeType::Directory => 1,
+            InodeType::Symlink => 2,
+            InodeType::Socket => 3,
+            InodeType::BlockDevice => 4,
+            InodeType::CharDevice => 5,
+            InodeType::Fifo => 6,
+        }
+    }
+}
+
+const PERM_MASK: u32 = 0xFF_FF_FF;
+//use this: https://man7.org/linux/man-pages/man7/inode.7.html
+///The top 8 bits represent the file type [`InodeType`] (bit shifted)
+///The bottom 24 bits represent [`InodePermissionFlags`]
+#[derive(Debug, Clone)]
+pub struct InodeTypeAndPerms(u32);
+
+impl InodeTypeAndPerms {
+    pub fn get_perms(&self) -> InodePermissionFlags {
+        InodePermissionFlags(self.0 & PERM_MASK)
+    }
+
+    pub fn inode_type(&self) -> Option<InodeType> {
+        InodeType::from_id(self.0 >> 24)
+    }
+
+    pub fn new(inode_type: InodeType, perms: InodePermissionFlags) -> Self {
+        InodeTypeAndPerms((inode_type.to_id() << 24) | perms.0)
     }
 
     pub fn is_socket(&self) -> bool {
-        self.0 & FILE_TYPE_MASK == 0o140000
+        self.inode_type() == Some(InodeType::Socket)
     }
 
     pub fn is_symlink(&self) -> bool {
-        self.0 & FILE_TYPE_MASK == 0o120000
+        self.inode_type() == Some(InodeType::Symlink)
     }
 
     pub fn is_file(&self) -> bool {
-        self.0 & FILE_TYPE_MASK == 0o100000
+        self.inode_type() == Some(InodeType::File)
     }
 
     pub fn is_dir(&self) -> bool {
-        self.0 & FILE_TYPE_MASK == 0o40000
+        self.inode_type() == Some(InodeType::Directory)
     }
 
     pub fn is_block_device(&self) -> bool {
-        self.0 & FILE_TYPE_MASK == 0o60000
+        self.inode_type() == Some(InodeType::BlockDevice)
     }
 
     pub fn is_char_device(&self) -> bool {
-        self.0 & FILE_TYPE_MASK == 0o20000
+        self.inode_type() == Some(InodeType::CharDevice)
     }
 
     pub fn is_fifo(&self) -> bool {
-        self.0 & FILE_TYPE_MASK == 0o10000
+        self.inode_type() == Some(InodeType::Fifo)
     }
 
     pub fn new_dir(perms: u32) -> Self {
-        InodeType(0o40000 | perms)
+        InodeTypeAndPerms(0o40000 | perms)
     }
 
     pub fn new_file(perms: u32) -> Self {
-        InodeType(perms)
+        InodeTypeAndPerms(perms)
     }
 }
 
 //unused for now, we don't need permissions
+//NOTE: only use the bottom 24 bits, the top 8 are for the file type
 bitfield! {
-    pub struct InodeFlags(u32);
+    pub struct InodePermissionFlags(u32);
     impl Debug;
     pub suid, set_suid: 11;
     pub sgid, set_sgid: 10;

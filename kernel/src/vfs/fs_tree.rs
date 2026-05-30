@@ -116,7 +116,8 @@ pub async fn get_inode_chain(
         println!("get_inode_chain: found child inode: {:?} for component: {}", child, component);
         current.push(child);
     }
-    if let Some(mount_point) = cache_lock
+    while let Some(mount_point) = cache_lock
+        .as_ref()
         .expect("is some")
         .mount_points
         .get(current.last().expect("current can't be empty"))
@@ -269,6 +270,24 @@ pub fn insert_inode(parent_cache_num: InodeIdentifier, name: Box<str>, inode_ind
     Ok(())
 }
 
+pub fn unlink_inode(parent_cache_num: InodeIdentifier, name: &str) -> Result<(), ErrorCode> {
+    let mut cache = lock_w_info!(INODE_CACHE);
+    let parent_res = cache.inodes.get_mut(&parent_cache_num);
+    match parent_res {
+        None => Err(ErrorCode::InodeNotPresent),
+        Some(parent) => {
+            if let Some(pos) = parent.children.iter().position(|(child_name, _)| **child_name == *name) {
+                let inode_index = parent.children[pos].1;
+                parent.children.remove(pos);
+                cache.inodes.remove(&inode_index);
+                Ok(())
+            } else {
+                Err(ErrorCode::NoEntry)
+            }
+        }
+    }
+}
+
 ///parent_cache_num refers to the mountpoint itself, on top of which the new inode will be mounted
 pub fn mount_inode(parent_cache_num: InodeIdentifier, target_inode: InodeIdentifier) {
     let mut cache = lock_w_info!(INODE_CACHE);
@@ -305,5 +324,19 @@ pub fn remove_device(device_id: DeviceId) {
             device_id: DeviceId::new(0),
             index: 0,
         };
+    }
+}
+
+pub fn get_child_inode(parent_cache_num: InodeIdentifier, name: &str) -> Result<InodeIdentifier, ErrorCode> {
+    let cache = lock_w_info!(INODE_CACHE);
+    let parent_res = cache.inodes.get(&parent_cache_num);
+    match parent_res {
+        None => Err(ErrorCode::InodeNotPresent),
+        Some(parent) => parent
+            .children
+            .iter()
+            .find(|(child_name, _)| **child_name == *name)
+            .map(|(_, inode_index)| *inode_index)
+            .ok_or(ErrorCode::NoEntry),
     }
 }

@@ -9,7 +9,7 @@ use std::{
 use crate::{
     memory::physical_allocator,
     task_runner::block_task,
-    vfs::{self, InodeType, file::FileFlags, open_file},
+    vfs::{self, InodeTypeAndPerms, file::FileFlags, open_file},
 };
 
 const BEE_MOVIE_SCRIPT_START: &str = include_str!("./bee_movie_script.txt");
@@ -104,7 +104,7 @@ impl CreateFileOperation {
         let ffi_open_file_future = into_ffi_future(open_file_future);
         let mut parent = block_task(ffi_open_file_future).expect("fopen failed in debug function");
 
-        let create_future = vfs::create_file(&mut parent, file_name, InodeType::new_file(0));
+        let create_future = vfs::create_file(&mut parent, file_name, InodeTypeAndPerms::new_file(0));
         let ffi_create_future = into_ffi_future(create_future);
         let _ = block_task(ffi_create_future);
     }
@@ -186,7 +186,7 @@ impl CreateFolderOperation {
         let ffi_open_file_future = into_ffi_future(open_file_future);
         let mut parent = block_task(ffi_open_file_future).expect("fopen failed in debug function");
 
-        let create_future = vfs::create_file(&mut parent, file_name, InodeType::new_dir(0));
+        let create_future = vfs::create_file(&mut parent, file_name, InodeTypeAndPerms::new_dir(0));
         let ffi_create_future = into_ffi_future(create_future);
         let _ = block_task(ffi_create_future);
     }

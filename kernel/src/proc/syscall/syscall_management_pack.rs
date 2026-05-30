@@ -9,7 +9,7 @@ use crate::{
 };
 
 pub fn init_syscall_management_syscalls() {
-    let handlers = [lsgroups, lsallgroups, mapgroup, unmap_group, restrict];
+    let handlers = [lsgroups, lsallgroups, map_group, unmap_group, restrict];
 
     let syscall_management_syscalls = SyscallPack::new(Box::new(handlers));
     syscall::register_syscall_pack("syscall_management".into(), Arc::new(syscall_management_syscalls));
@@ -118,7 +118,7 @@ fn lsallgroups(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     false
 }
 
-fn mapgroup(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn map_group(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let namespace_id = args.get_namespace_id();
     let group_name_len = args.get_arg(0);
     let group_name_ptr = args.get_arg(1);

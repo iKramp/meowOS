@@ -1,22 +1,20 @@
 use core::sync::atomic::Ordering;
 use std::boxed::Box;
 use std::mem_utils::PhysAddr;
+use std::println;
 use std::sync::arc::Arc;
 use std::vec::Vec;
-use std::{lock_w_info, println};
-
-use bitfield::bitfield;
 
 use crate::memory::{physical_allocator, safe_memcpy};
 use crate::proc::namespaces::FilesystemNamespace;
 use crate::proc::syscall::{SyscallCpuState, SyscallPack, register_syscall_pack, string_from_args};
 use crate::proc::{self, ProcessData, syscall};
 use crate::task_runner::{self, PidOption};
-use crate::vfs::file::{FileFlags, OpenFlags};
-use crate::vfs::{self, InodeIdentifierChain};
+use crate::vfs::file::OpenFlags;
+use crate::vfs::{self, InodeIdentifierChain, InodePermissionFlags, InodeType, InodeTypeAndPerms};
 
 pub(super) fn init_fs_syscall_pack() {
-    let handlers = [fopen, fclose, fread, fwrite, fseek];
+    let handlers = [fopen, fclose, fread, fwrite, fseek, fcreate, flink, funlink, fstat];
 
     let fs_syscalls = SyscallPack::new(Box::new(handlers));
     register_syscall_pack("fs".into(), Arc::new(fs_syscalls));
@@ -324,6 +322,198 @@ fn fseek(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         file_handle.position.store(new_pos, Ordering::Release);
 
         proc.set_syscall_return(&[new_pos]);
+        crate::proc::wake_process(proc.pid())
+    };
+
+    let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
+
+    task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
+    true
+}
+
+fn fcreate(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+    let namespace_id = args.get_namespace_id();
+    let name_len = args.get_arg(0);
+    let name_ptr = args.get_arg(1);
+    let fd = args.get_arg(2);
+    let Some(inode_type) = InodeType::from_id(args.get_arg(3) as u32) else {
+        println!("fcreate: invalid inode type id");
+        proc.set_syscall_return(&[u64::MAX]);
+        return false;
+    };
+    let perms = InodePermissionFlags((args.get_arg(4) & 0xFF_FF_FF) as u32);
+    let type_perms = InodeTypeAndPerms::new(inode_type, perms);
+
+    let Some(name) = string_from_args(name_ptr, name_len) else {
+        println!("fcreate: invalid name pointer or length");
+        proc.set_syscall_return(&[u64::MAX]);
+        return false;
+    };
+
+    let pid = proc.pid();
+
+    let proc_mut = proc.get_mutable();
+    let namespaces = proc_mut.get_namespaces();
+    let fs_namespace = namespaces
+        .get_namespace::<FilesystemNamespace>(namespace_id)
+        .expect("default fs namespace must exist");
+
+    let Some(parent_dir) = fs_namespace.get_file_handle(fd) else {
+        println!("fcreate: invalid fd {fd}");
+        proc.set_syscall_return(&[u64::MAX]);
+        return false;
+    };
+
+    let proc = proc.clone();
+
+    let task = async move {
+        let res = vfs::create_file(&parent_dir, &name, type_perms).await;
+        if let Err(e) = res {
+            println!("fcreate: failed to create file: {e}");
+            proc.set_syscall_return(&[u64::MAX]);
+            crate::proc::wake_process(proc.pid());
+            return;
+        }
+        proc.set_syscall_return(&[0]);
+        crate::proc::wake_process(proc.pid());
+    };
+
+    let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
+
+    task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
+    true
+}
+
+fn flink(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+    let namespace_id = args.get_namespace_id();
+    let name_len = args.get_arg(0);
+    let name_ptr = args.get_arg(1);
+    let parent_fd = args.get_arg(2);
+    let target_fd = args.get_arg(3);
+
+    let Some(name) = string_from_args(name_ptr, name_len) else {
+        println!("fcreate: invalid name pointer or length");
+        proc.set_syscall_return(&[u64::MAX]);
+        return false;
+    };
+
+    let pid = proc.pid();
+
+    let proc_mut = proc.get_mutable();
+    let namespaces = proc_mut.get_namespaces();
+    let fs_namespace = namespaces
+        .get_namespace::<FilesystemNamespace>(namespace_id)
+        .expect("default fs namespace must exist");
+
+    let Some(parent_dir) = fs_namespace.get_file_handle(parent_fd) else {
+        println!("fcreate: invalid fd {parent_fd}");
+        proc.set_syscall_return(&[u64::MAX]);
+        return false;
+    };
+    let Some(target_file) = fs_namespace.get_file_handle(target_fd) else {
+        println!("fcreate: invalid fd {target_fd}");
+        proc.set_syscall_return(&[u64::MAX]);
+        return false;
+    };
+
+    let proc = proc.clone();
+
+    let task = async move {
+        let res = vfs::link_file(&parent_dir, &name, &target_file).await;
+        if let Err(e) = res {
+            println!("fcreate: failed to create file: {e}");
+            proc.set_syscall_return(&[u64::MAX]);
+            crate::proc::wake_process(proc.pid());
+            return;
+        }
+        proc.set_syscall_return(&[0]);
+        crate::proc::wake_process(proc.pid());
+    };
+
+    let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
+
+    task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
+    true
+}
+
+fn funlink(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+    let namespace_id = args.get_namespace_id();
+    let name_len = args.get_arg(0);
+    let name_ptr = args.get_arg(1);
+    let parent_fd = args.get_arg(2);
+
+    let Some(name) = string_from_args(name_ptr, name_len) else {
+        println!("funlink: invalid name pointer or length");
+        proc.set_syscall_return(&[u64::MAX]);
+        return false;
+    };
+
+    let pid = proc.pid();
+
+    let proc_mut = proc.get_mutable();
+    let namespaces = proc_mut.get_namespaces();
+    let fs_namespace = namespaces
+        .get_namespace::<FilesystemNamespace>(namespace_id)
+        .expect("default fs namespace must exist");
+
+    let Some(parent_dir) = fs_namespace.get_file_handle(parent_fd) else {
+        println!("funlink: invalid fd {parent_fd}");
+        proc.set_syscall_return(&[u64::MAX]);
+        return false;
+    };
+
+    let proc = proc.clone();
+
+    let task = async move {
+        let res = vfs::unlink_file(&parent_dir, &name).await;
+        if let Err(e) = res {
+            println!("funlink: failed to unlink file: {e}");
+            proc.set_syscall_return(&[u64::MAX]);
+            crate::proc::wake_process(proc.pid());
+            return;
+        }
+        proc.set_syscall_return(&[0]);
+        crate::proc::wake_process(proc.pid());
+    };
+
+    let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
+
+    task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
+    true
+}
+
+fn fstat(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+    let namespace_id = args.get_namespace_id();
+    let fd = args.get_arg(0);
+    let buf_ptr = args.get_arg(1);
+
+    let proc_mut = proc.get_mutable();
+    let namespaces = proc_mut.get_namespaces();
+    let fs_namespace = namespaces
+        .get_namespace::<FilesystemNamespace>(namespace_id)
+        .expect("default fs namespace must exist");
+    let Some(file_handle) = fs_namespace.get_file_handle(fd) else {
+        println!("fstat: invalid fd {fd}");
+        proc.set_syscall_return(&[u64::MAX]);
+        return false;
+    };
+
+    let pid = proc.pid();
+    let proc = proc.clone();
+
+    let task = async move {
+        let stat_result = vfs::stat_file(file_handle.get()).await;
+
+        let dst = buf_ptr;
+        let src = (&raw const stat_result) as u64;
+        let valid_copy = safe_memcpy(dst, src, core::mem::size_of::<vfs::Inode>() as usize);
+        if !valid_copy {
+            println!("fstat: failed to copy stat result to user buffer");
+            proc.set_syscall_return(&[u64::MAX]);
+            return;
+        }
+
+        proc.set_syscall_return(&[0]);
         crate::proc::wake_process(proc.pid())
     };
 

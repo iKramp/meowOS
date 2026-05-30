@@ -17,7 +17,7 @@ use crate::{
         filesystem::rfs2::{BLOCK_SIZE_SECTORS, BlockPtr, Rfs2, WorkingBlock, btree::BTreeNode},
     },
     memory::physical_allocator,
-    vfs::{FileSystem, InodeType},
+    vfs::{FileSystem, InodeTypeAndPerms},
 };
 
 mod dir_ops;
@@ -71,7 +71,7 @@ impl Into<VfsDirEntry> for &DirEntry {
 struct InodeInfo {
     size: u64,
     levels: u8,
-    type_flags: InodeType,
+    type_flags: InodeTypeAndPerms,
     owner_uid: u16,
     owner_gid: u16,
     link_count: u16,
@@ -277,7 +277,7 @@ impl FileSystem for Rfs2 {
         &self,
         name: &str,
         parent_dir: VfsInodeIndex,
-        type_mode: InodeType,
+        type_mode: InodeTypeAndPerms,
         uid: u16,
         gid: u16,
     ) -> Result<(VfsInode, VfsInode), ErrorCode> {
@@ -310,15 +310,14 @@ impl FileSystem for Rfs2 {
                 self.release_inode(new_inode).await;
                 return Err(e);
             }
-            Ok(parent_inode) => {
+            Ok((parent_inode, child_inode)) => {
                 println!("linking done successfully");
-                let child_inode = new_inode_info.into_vfs(new_inode, self);
                 Ok((parent_inode, child_inode))
             }
         }
     }
 
-    async fn unlink(&self, parent_inode: VfsInodeIndex, name: &str) -> Result<(), ErrorCode> {
+    async fn unlink(&self, parent_inode: VfsInodeIndex, name: &str) -> Result<(VfsInode, VfsInode), ErrorCode> {
         if name.len() > 256 {
             return Err(ErrorCode::InvalidArgument);
         }
@@ -326,51 +325,73 @@ impl FileSystem for Rfs2 {
             return Err(ErrorCode::InvalidArgument);
         }
 
-        let lock = self.get_file_lock(parent_inode as InodeIndex);
-        let locked = lock.lock();
+        let parent_lock = self.get_file_lock(parent_inode as InodeIndex);
+        let parent_locked = parent_lock.lock();
 
         let (binding, entries) = self.read_direntries(parent_inode).await;
         let Some(pos) = entries.iter_mut().position(|ent| ent.is_name(name)) else {
-            drop(locked);
+            drop(parent_locked);
             Self::dealloc_dirent_binding(binding, entries.len());
             return Err(ErrorCode::InodeNotPresent);
         };
 
         let child_inode = entries[pos].inode;
 
+        let child_lock = self.get_file_lock(child_inode);
+        let child_locked = child_lock.lock();
+
         entries[pos] = entries[entries.len() - 2].clone();
         entries[entries.len() - 2] = entries[entries.len() - 1].clone();
 
         self.write_direntries(parent_inode, binding, entries.len() - 2).await;
 
-        drop(locked);
-
-        let lock = self.get_file_lock(child_inode);
-        let locked = lock.lock();
+        let parent_root = self.get_file_root_block(parent_inode as InodeIndex).await?;
+        let parent_info = self.get_file_info(parent_root).await;
+        let parent_vfs_inode = parent_info.into_vfs(parent_inode as InodeIndex, self);
 
         let child_root = self.get_file_root_block(child_inode).await?;
         let mut child_info = self.get_file_info(child_root).await;
         child_info.link_count -= 1;
-        if child_info.link_count > 0 {
-            self.set_file_info(child_root, child_info).await;
-            return Ok(());
+
+        let child_vfs_inode = child_info.into_vfs(child_inode, self);
+
+        drop(child_locked);
+        drop(parent_locked);
+
+        Ok((parent_vfs_inode, child_vfs_inode))
+    }
+
+    async fn remove_inode(&self, inode: VfsInodeIndex) -> Result<(), ErrorCode> {
+        let lock = self.get_file_lock(inode as InodeIndex);
+        let locked = lock.lock();
+
+        let inode_root = self.get_file_root_block(inode as InodeIndex).await?;
+        let inode_info = self.get_file_info(inode_root).await;
+
+        if inode_info.link_count > 0 {
+            return Err(ErrorCode::InvalidArgument);
         }
 
-        self.truncate_locked(child_root, 0).await;
+        self.truncate_locked(inode_root, 0).await;
 
         let inode_lock = self.inode_lock.lock().await;
-        BTreeNode::remove_key_root(child_inode, self).await;
-        self.release_inode(child_inode).await;
+        BTreeNode::remove_key_root(inode as InodeIndex, self).await;
+        self.release_inode(inode as InodeIndex).await;
         drop(inode_lock);
 
-        self.release_block(child_root).await;
+        self.release_block(inode_root).await;
         drop(locked);
 
         Ok(())
     }
 
     ///returns the new parent inode
-    async fn link(&self, child_inode: VfsInodeIndex, parent_inode: VfsInodeIndex, name: &str) -> Result<VfsInode, ErrorCode> {
+    async fn link(
+        &self,
+        child_inode: VfsInodeIndex,
+        parent_inode: VfsInodeIndex,
+        name: &str,
+    ) -> Result<(VfsInode, VfsInode), ErrorCode> {
         if name.len() > 256 {
             return Err(ErrorCode::InvalidArgument);
         }
@@ -382,6 +403,14 @@ impl FileSystem for Rfs2 {
         let locked = lock.lock();
         let child_lock = self.get_file_lock(child_inode as InodeIndex);
         let child_locked = child_lock.lock();
+
+        //check if child inode exists
+        let inode_lock = self.inode_lock.lock().await;
+        let child_root_res = BTreeNode::find_inode_root(child_inode as InodeIndex, self).await;
+        drop(inode_lock);
+        if child_root_res.is_none() {
+            return Err(ErrorCode::InodeNotPresent);
+        }
 
         let parent_root = self.get_file_root_block(parent_inode as InodeIndex).await?;
         let child_root = self.get_file_root_block(child_inode as InodeIndex).await?;
@@ -407,17 +436,18 @@ impl FileSystem for Rfs2 {
 
         self.write_direntries(parent_root, binding, entries.len()).await;
 
-        drop(locked);
-
         let mut child_info = self.get_file_info(child_root).await;
         child_info.link_count += 1;
+        let new_child_inode = child_info.into_vfs(child_inode as InodeIndex, self);
         self.set_file_info(child_root, child_info).await;
-        drop(child_locked);
 
         let parent_info = self.get_file_info(parent_root).await;
-        let new_inode = parent_info.into_vfs(parent_inode as InodeIndex, self);
+        let new_parent_inode = parent_info.into_vfs(parent_inode as InodeIndex, self);
 
-        Ok(new_inode)
+        drop(locked);
+        drop(child_locked);
+
+        Ok((new_parent_inode, new_child_inode))
     }
 
     async fn truncate(&self, inode: VfsInodeIndex, size: u64) -> Result<(), ErrorCode> {

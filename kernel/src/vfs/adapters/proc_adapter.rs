@@ -1,4 +1,4 @@
-use crate::vfs::{DeviceId, InodeType};
+use crate::vfs::{DeviceId, InodeTypeAndPerms};
 
 use super::{DirEntry, VfsAdapterTrait};
 use std::{boxed::Box, error::ErrorCode};
@@ -48,7 +48,7 @@ impl VfsAdapterTrait for ProcAdapter {
         Ok(crate::vfs::Inode {
             index: inode,
             device: self.device_id,
-            type_mode: InodeType::new_dir(0o755),
+            type_mode: InodeTypeAndPerms::new_dir(0o755),
             link_cnt: 1,
             uid: 0,
             gid: 0,

@@ -4,7 +4,7 @@ use std::lock_w_info;
 use std::sync::no_int_spinlock::NoIntSpinlock;
 
 use crate::tty;
-use crate::vfs::{DeviceId, Inode, InodeIndex, InodeType};
+use crate::vfs::{DeviceId, Inode, InodeIndex, InodeTypeAndPerms};
 
 use super::{DirEntry, VfsAdapterTrait};
 
@@ -26,7 +26,7 @@ impl TtyAdapter {
         crate::vfs::Inode {
             index,
             device: self.device_id,
-            type_mode: InodeType::new_file(0o777),
+            type_mode: InodeTypeAndPerms::new_file(0o777),
             link_cnt: 1,
             uid: 0,
             gid: 0,

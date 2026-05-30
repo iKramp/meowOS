@@ -19,12 +19,12 @@ use crate::{
     },
     vfs::{
         Inode, InodeIdentifier,
-        file::{OpenFlags, get_file},
+        file::{self, OpenFlags, get_file},
     },
 };
 
 use super::{
-    DeviceDetails, InodeIdentifierChain, InodeType, ROOT_INODE_INDEX, ResolvedPath, ResolvedPathBorrowed, VFS,
+    DeviceDetails, InodeIdentifierChain, InodeTypeAndPerms, ROOT_INODE_INDEX, ResolvedPath, ResolvedPathBorrowed, VFS,
     VFS_ADAPTER_DEVICE, Vfs,
     file::{FileFlags, FileHandle},
     filesystem_trait::FileSystem,
@@ -173,9 +173,6 @@ async fn mount_filesystem(mountpoint: ResolvedPath, fs: Arc<dyn FileSystem + Sen
 }
 
 async fn mount_new_root(fs: &Arc<dyn FileSystem + Send>) -> Result<(), ErrorCode> {
-    // let inode = fs.stat(ROOT_INODE_INDEX).await?;
-    // println!("Mounted root filesystem with root inode: {:X?}", inode);
-    // let inode_index = inode.index;
     let inode_id = InodeIdentifier {
         device_id: fs.device_id(),
         index: ROOT_INODE_INDEX,
@@ -190,7 +187,7 @@ async fn mount_new_root(fs: &Arc<dyn FileSystem + Send>) -> Result<(), ErrorCode
         if !root_dirs.iter().any(|entry| entry.name.as_ref() == *required_dir) {
             println!("Root filesystem is missing required directory {required_dir}, creating it");
             //create the required directory
-            fs.create(required_dir, ROOT_INODE_INDEX, InodeType::new_dir(0o755), 0, 0)
+            fs.create(required_dir, ROOT_INODE_INDEX, InodeTypeAndPerms::new_dir(0o755), 0, 0)
                 .await?;
         }
     }
@@ -269,7 +266,7 @@ pub async fn get_dir_entries(file_handle: &FileHandle) -> Result<Box<[DirEntry]>
     fs.read_dir(file_handle.inode.index).await
 }
 
-pub async fn create_file(parent_dir: &FileHandle, name: &str, inode_type: InodeType) -> Result<(), ErrorCode> {
+pub async fn create_file(parent_dir: &FileHandle, name: &str, inode_type: InodeTypeAndPerms) -> Result<(), ErrorCode> {
     if !parent_dir.file_flags.write() {
         return Err(ErrorCode::InsufficientPermissions);
     }
@@ -277,7 +274,7 @@ pub async fn create_file(parent_dir: &FileHandle, name: &str, inode_type: InodeT
         return Err(ErrorCode::UnsupportedOperation);
     }
 
-    let parent_inode = unsafe { parent_dir.open_file.inode.get_read_ptr() };
+    let mut parent_inode = parent_dir.open_file.inode.lock().await;
     let mut vfs = lock_w_info!(VFS);
     let device_details = vfs.devices.get(&parent_inode.device).ok_or(ErrorCode::InodeNotPresent)?;
     let partition_id = device_details.partition;
@@ -287,18 +284,87 @@ pub async fn create_file(parent_dir: &FileHandle, name: &str, inode_type: InodeT
         .ok_or(ErrorCode::InodeNotPresent)?;
     let fs = fs.clone();
     drop(vfs);
-    let (parent_inode, file_inode) = fs.create(name, parent_inode.index, inode_type, 0, 0).await?;
+    let (new_parent_inode, file_inode) = fs.create(name, parent_inode.index, inode_type, 0, 0).await?;
     println!(
         "create file returned file and parent inodes: {:X?}, {:X?}",
-        file_inode, parent_inode
+        file_inode, new_parent_inode
     );
     let child_id = InodeIdentifier {
-        device_id: parent_inode.device,
+        device_id: new_parent_inode.device,
         index: file_inode.index,
     };
-    // fs_tree::update_inode(parent_dir.inode, parent_inode)?;
     fs_tree::insert_inode(parent_dir.inode, name.to_string().into_boxed_str(), child_id)?;
-    parent_dir.open_file.inode.lock().await.update_from(&parent_inode);
+    parent_inode.update_from(&new_parent_inode);
+
+    Ok(())
+}
+
+pub async fn link_file(parent_dir: &FileHandle, name: &str, target: &FileHandle) -> Result<(), ErrorCode> {
+    if !parent_dir.file_flags.write() {
+        return Err(ErrorCode::InsufficientPermissions);
+    }
+    if !parent_dir.file_flags.dir() {
+        return Err(ErrorCode::UnsupportedOperation);
+    }
+
+    let mut parent_inode = parent_dir.open_file.inode.lock().await;
+    let target_inode = unsafe { target.open_file.inode.get_read_ptr() };
+
+    let parent_device = parent_inode.device;
+    let target_device = target_inode.device;
+
+    if parent_device != target_device {
+        return Err(ErrorCode::UnsupportedOperation);
+    }
+
+    let mut vfs = lock_w_info!(VFS);
+    let device_details = vfs.devices.get(&parent_inode.device).ok_or(ErrorCode::InodeNotPresent)?;
+    let partition_id = device_details.partition;
+    let fs = vfs.mounted_filesystems.get_mut(&partition_id).ok_or(ErrorCode::NoEntry)?;
+    let fs = fs.clone();
+    drop(vfs);
+
+    let (new_parent_inode, _new_child_inode) = fs.link(target_inode.index, parent_inode.index, name).await?;
+    println!("link file returned new parent inode: {:X?}", new_parent_inode);
+    let child_id = InodeIdentifier {
+        device_id: parent_inode.device,
+        index: target_inode.index,
+    };
+    fs_tree::insert_inode(parent_dir.inode, name.to_string().into_boxed_str(), child_id)?;
+    parent_inode.update_from(&new_parent_inode);
+    target.open_file.inode.lock().await.link_cnt += 1;
+
+    Ok(())
+}
+
+pub async fn unlink_file(parent_dir: &FileHandle, name: &str) -> Result<(), ErrorCode> {
+    if !parent_dir.file_flags.write() {
+        return Err(ErrorCode::InsufficientPermissions);
+    }
+    if !parent_dir.file_flags.dir() {
+        return Err(ErrorCode::UnsupportedOperation);
+    }
+
+    let mut parent_inode = parent_dir.open_file.inode.lock().await;
+
+    let mut vfs = lock_w_info!(VFS);
+    let device_details = vfs.devices.get(&parent_inode.device).ok_or(ErrorCode::InodeNotPresent)?;
+    let partition_id = device_details.partition;
+    let fs = vfs.mounted_filesystems.get_mut(&partition_id).ok_or(ErrorCode::NoEntry)?;
+    let fs = fs.clone();
+    drop(vfs);
+
+    let (new_parent_inode, new_child_inode) = fs.unlink(parent_inode.index, name).await?;
+    //ignore error, at most there's no entry, but that shouldn't matter too much
+    fs_tree::unlink_inode(parent_dir.inode, name);
+    parent_inode.update_from(&new_parent_inode);
+    let child_file = get_file(InodeIdentifier {
+        device_id: parent_inode.device,
+        index: new_child_inode.index,
+    })
+    .await?;
+    let mut child_inode = child_file.inode.lock().await;
+    child_inode.link_cnt -= 1;
 
     Ok(())
 }

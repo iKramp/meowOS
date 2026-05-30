@@ -11,7 +11,7 @@ use bitfield::bitfield;
 
 use crate::{
     task_runner::{self, PidOption},
-    vfs::{DeviceId, Inode, InodeType, VFS},
+    vfs::{DeviceId, Inode, InodeTypeAndPerms, VFS},
 };
 
 use super::{InodeIdentifier, InodeIdentifierChain};
@@ -145,7 +145,7 @@ impl Drop for OpenFile {
         let mut dummy_inode = Inode {
             index: 0,
             device: unsafe { DeviceId(0) },
-            type_mode: InodeType::new_file(0),
+            type_mode: InodeTypeAndPerms::new_file(0),
             link_cnt: 0,
             uid: 0,
             gid: 0,

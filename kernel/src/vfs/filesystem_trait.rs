@@ -6,7 +6,7 @@ use crate::{
     vfs::DeviceId,
 };
 
-use super::{Inode, InodeIndex, InodeType};
+use super::{Inode, InodeIndex, InodeTypeAndPerms};
 
 #[async_trait::async_trait]
 pub trait FileSystemFactory: Send + Sync {
@@ -29,13 +29,16 @@ pub trait FileSystem: Debug + Send + Sync {
         &self,
         name: &str,
         parent_dir: InodeIndex,
-        type_mode: InodeType,
+        type_mode: InodeTypeAndPerms,
         uid: u16,
         gid: u16,
     ) -> Result<(Inode, Inode), ErrorCode>;
-    async fn unlink(&self, parent_inode: InodeIndex, name: &str) -> Result<(), ErrorCode>;
-    ///returns the new parent inode
-    async fn link(&self, inode: InodeIndex, parent_dir: InodeIndex, name: &str) -> Result<Inode, ErrorCode>;
+    //returns the new inodes (parent, child). Reaching link count 0 doesn't remove the file yet
+    async fn unlink(&self, parent_inode: InodeIndex, name: &str) -> Result<(Inode, Inode), ErrorCode>;
+    //removes the inode and all its data. Link count has to be 0
+    async fn remove_inode(&self, inode: InodeIndex) -> Result<(), ErrorCode>;
+    ///returns the new inodes (parent, child)
+    async fn link(&self, inode: InodeIndex, parent_dir: InodeIndex, name: &str) -> Result<(Inode, Inode), ErrorCode>;
     async fn truncate(&self, inode: InodeIndex, size: u64) -> Result<(), ErrorCode>;
     async fn rename(&self, inode: InodeIndex, parent_inode: InodeIndex, name: &str) -> Result<(), ErrorCode>;
 }

@@ -5,7 +5,7 @@ use crate::{
         BLOCK_SIZE_SECTORS, GROUP_SIZE_BLOCKS, InodeIndex, Rfs2, SuperBlock, WorkingBlock, btree::BTreeNode,
         operations::InodeInfo,
     },
-    vfs::{InodeType, ROOT_INODE_INDEX},
+    vfs::{InodeTypeAndPerms, ROOT_INODE_INDEX},
 };
 
 impl Rfs2 {
@@ -134,7 +134,7 @@ impl Rfs2 {
         *inode_info = InodeInfo {
             size: 0,
             levels: 0,
-            type_flags: InodeType::new_dir(0o755),
+            type_flags: InodeTypeAndPerms::new_dir(0o755),
             owner_uid: 0,
             owner_gid: 0,
             link_count: 1,

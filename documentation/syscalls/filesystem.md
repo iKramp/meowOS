@@ -8,6 +8,10 @@
 | 2 | fread | reads data from a file descriptor |
 | 3 | fwrite | writes data to a file descriptor |
 | 4 | fseek | seeks to a position in a file descriptor |
+| 5 | fcreate | creates a new file and returns a file descriptor |
+| 6 | flink | creates a hard link to a file |
+| 7 | funlink | unlinks a file |
+| 8 | fstat | gets information about a file descriptor |
 
 
 ## DETAILED SYSCALL DOCUMENTATION
@@ -85,3 +89,107 @@ enum FileSeekMode {
 ```
 #### Description:
 Repositions the file offset of the open file descriptor fd according to the offset and whence parameters.
+
+### Syscall 5: fcreate
+#### Args:
+1. u64 name_len - length of the name in bytes
+1. *u8 name - name (direntry name) of the file
+1. u64 parent_fd - file descriptor of the parent directory to create the file in
+1. u64 type - type of the inode to be created
+1. u64 permissions - permissions for the new file
+#### Return Value:
+ - On success, returns 0
+ - On failure, returns -1
+
+#### Type:
+```rust
+pub enum InodeType {
+    File = 0,        //--\
+    Directory = 1,   //------real file types
+    Symlink = 2,     //--/
+    Socket = 3,      //--\
+    BlockDevice = 4, //---\
+    CharDevice = 5,  //------mental illnesses
+    Fifo = 6,        //---/
+}
+```
+
+#### Permissions:
+```rust
+bitfield! {
+    pub struct InodePermissionFlags(u32);
+    impl Debug;
+    pub suid, set_suid: 11;
+    pub sgid, set_sgid: 10;
+    pub sticky, set_sticky: 9;
+
+    pub r_usr, set_r_usr: 8;
+    pub w_usr, set_w_usr: 7;
+    pub x_usr, set_x_usr: 6;
+
+    pub r_grp, set_r_grp: 5;
+    pub w_grp, set_w_grp: 4;
+    pub x_grp, set_x_grp: 3;
+
+    pub r_othr, set_r_othr: 2;
+    pub w_othr, set_w_othr: 1;
+    pub x_othr, set_x_othr: 0;
+}
+```
+#### Description:
+Creates a new file with the specified name, type, and permissions in the directory represented by parent_fd. 
+The name is a direntry name, not any kind of path.
+
+### Syscall 6: flink
+#### Args:
+1. u64 name_len - length of the name in bytes
+1. *u8 name - name (direntry name) of the link to be created
+1. u64 parent_fd - file descriptor of the directory to create the link in
+1. u64 target_fd - file descriptor of the file to link to
+#### Return Value:
+ - On success, returns 0
+ - On failure, returns -1
+#### Description:
+Creates a hard link with the specified name in the directory represented by parent_fd that points to the same file as target_fd. The name is a direntry name, not any kind of path.
+
+### Syscall 7: funlink
+#### Args:
+1. u64 fd - file descriptor of the directory in which the file to be deleted is located
+1. u64 name_len - length of the name in bytes
+1. *u8 name - name (direntry name) of the file to be deleted
+#### Return Value:
+ - On success, returns 0
+ - On failure, returns -1
+#### Description:
+Deletes the file with the specified name in the directory represented by fd. The name is a direntry name, not any kind of path.
+In reality this calls unlink on the filesystem, so if the file has multiple hard links, it won't be removed yet.
+
+### Syscall 8: fstat
+#### Args:
+1. u64 fd - file descriptor to get information about
+1. u64 buf - buffer to write the stat struct to
+#### Return Value:
+ - On success, returns 0
+ - On failure, returns -1
+#### Description:
+Gets information about the file descriptor fd and writes it to the buffer buf as a stat struct.
+#### Stat struct:
+```rust
+#[repr(C)]
+pub struct Inode {
+    pub index: u64,
+    pub device: u64,
+    pub type_mode: InodeTypeAndPerms,
+    pub link_cnt: u16,
+    pub uid: u16,
+    pub gid: u16,
+    pub size: u64,
+    pub access_time: u64,
+    pub modification_time: u64,
+    pub stat_change_time: u64,
+}
+
+///The top 8 bits represent the file type [`InodeType`] (bit shifted)
+///The bottom 24 bits represent [`InodePermissionFlags`]
+pub struct InodeTypeAndPerms(u32);
+```

@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::drivers::block_device::disk::DirEntry;
 
 use super::{
-    DeviceId, InodeIndex, InodeType, ROOT_INODE_INDEX,
+    DeviceId, InodeIndex, InodeTypeAndPerms, ROOT_INODE_INDEX,
     filesystem_trait::{FileSystem, FileSystemFactory},
 };
 
@@ -109,8 +109,8 @@ impl FileSystem for Dtmpfs {
         Ok(super::Inode {
             index: inode,
             device: self.device_id(),
-            type_mode: InodeType::new_dir(0o755), //rwxr-xr-x
-            link_cnt: 0,
+            type_mode: InodeTypeAndPerms::new_dir(0o755), //rwxr-xr-x
+            link_cnt: 1,
             uid: 0,
             gid: 0,
             size: 0,
@@ -128,7 +128,7 @@ impl FileSystem for Dtmpfs {
         &self,
         name: &str,
         parent_dir: InodeIndex,
-        _type_mode: super::InodeType,
+        _type_mode: super::InodeTypeAndPerms,
         _uid: u16,
         _gid: u16,
     ) -> Result<(super::Inode, super::Inode), ErrorCode> {
@@ -146,15 +146,20 @@ impl FileSystem for Dtmpfs {
         Ok((self.stat(parent_dir).await?, self.stat(inode_index).await?))
     }
 
-    async fn unlink(&self, parent_inode: InodeIndex, name: &str) -> Result<(), ErrorCode> {
-        let mut inner = lock_w_info!(self.global_lock);
-        if let Some(parent_node) = inner.inodes.get_mut(&parent_inode) {
-            parent_node.children.retain(|(n, _)| n != name);
-        }
-        Ok(())
+    async fn unlink(&self, _parent_inode: InodeIndex, _name: &str) -> Result<(super::Inode, super::Inode), ErrorCode> {
+        return Err(ErrorCode::UnsupportedOperation);
     }
 
-    async fn link(&self, _inode: InodeIndex, _parent_dir: InodeIndex, _name: &str) -> Result<super::Inode, ErrorCode> {
+    async fn remove_inode(&self, _inode: InodeIndex) -> Result<(), ErrorCode> {
+        Err(ErrorCode::UnsupportedOperation)
+    }
+
+    async fn link(
+        &self,
+        _inode: InodeIndex,
+        _parent_dir: InodeIndex,
+        _name: &str,
+    ) -> Result<(super::Inode, super::Inode), ErrorCode> {
         Err(ErrorCode::UnsupportedOperation)
     }
 
