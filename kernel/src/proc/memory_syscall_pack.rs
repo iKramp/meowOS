@@ -1,8 +1,11 @@
-use std::{boxed::Box, mem_utils::VirtAddr, println, string::ToString, sync::arc::Arc};
+use std::{boxed::Box, mem_utils::VirtAddr, println, sync::arc::Arc};
 
 use crate::{
-    memory::{self, VirtualMemoryRangeManagementMode, safe_memcpy},
-    proc::{MemoryNamespace, MemoryRangeType, ProcessData, syscall::SyscallCpuState},
+    memory::{self, VirtualMemoryRangeManagementMode},
+    proc::{
+        MemoryNamespace, MemoryRangeType, ProcessData,
+        syscall::{self, SyscallCpuState},
+    },
 };
 
 pub fn init_mem_syscalls() {
@@ -23,19 +26,9 @@ fn make_region(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let region_name_len = args.get_arg(5);
     let region_name_ptr = args.get_arg(6);
 
-    let name_buf_uninit = Box::new_uninit_slice(region_name_len as usize);
-    let valid = safe_memcpy(name_buf_uninit.as_ptr() as u64, region_name_ptr, region_name_len as usize);
-    if !valid {
+    let Some(region_name) = syscall::string_from_args(region_name_ptr, region_name_len) else {
         proc.set_syscall_return(&[u64::MAX]);
         return false;
-    }
-    let name_buf: Box<[u8]> = unsafe { name_buf_uninit.assume_init() };
-    let region_name = match std::str::from_utf8(&name_buf) {
-        Ok(name) => name.to_string().into_boxed_str(),
-        Err(_) => {
-            proc.set_syscall_return(&[u64::MAX]);
-            return false;
-        }
     };
 
     let Some(range_capacity) = memory::VirtualMemoryRangeCapacity::from_level(size_order as u8) else {
@@ -65,7 +58,12 @@ fn make_region(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
 
     let virtual_memory_range = memory::VirtualMemoryRange::create(range_capacity, permissions, management_mode);
 
-    let res = memory_namespace.add_mem_range(Arc::new(virtual_memory_range), region_name, region_type, start_addr);
+    let res = memory_namespace.add_mem_range(
+        Arc::new(virtual_memory_range),
+        region_name.into_boxed_str(),
+        region_type,
+        start_addr,
+    );
     let err_code = if res.is_ok() { 0 } else { u64::MAX };
     proc.set_syscall_return(&[err_code]);
 

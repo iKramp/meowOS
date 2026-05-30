@@ -87,7 +87,7 @@ pub fn verify_memory_ptr(mut ptr: u64) -> bool {
 
 pub fn string_from_args(ptr: u64, len: u64) -> Option<String> {
     let str_buf_uninit = Box::new_uninit_slice(len as usize);
-    let res = memory::safe_memcpy(str_buf_uninit.as_ptr() as u64, ptr, len as usize);
+    let res = memory::safe_memcpy_from_user(str_buf_uninit.as_ptr() as u64, ptr, len as usize);
     if !res {
         println!(level:warn, "Invalid string pointer or length: {:#X}, {}", ptr, len);
         return None;

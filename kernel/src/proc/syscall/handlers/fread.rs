@@ -1,7 +1,7 @@
 use std::{mem_utils::PhysAddr, sync::arc::Arc, vec::Vec};
 
 use crate::{
-    memory::safe_memcpy,
+    memory::safe_memcpy_to_user,
     proc::{
         ProcessData,
         syscall::{self, SyscallCpuState},
@@ -59,7 +59,7 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         //copy to user buffer
         let dst = buffer_ptr as u64;
         let src = std::mem_utils::translate_phys_virt_addr(buffer_alloc).0;
-        let valid_copy = safe_memcpy(dst, src, size as usize);
+        let valid_copy = safe_memcpy_to_user(dst, src, size as usize);
         if !valid_copy {
             let proc_lock = proc.get();
             proc_lock.set_legacy_syscall_return(u64::MAX, 1);

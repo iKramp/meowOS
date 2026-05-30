@@ -3,12 +3,15 @@ use std::{error::ErrorCode, lock_w_info, mem_utils, vec::Vec};
 use crate::{
     memory::physical_allocator,
     tty::TTY,
-    vfs::{self, file::FileFlags},
+    vfs::{
+        self,
+        file::{FileFlags, OpenFlags},
+    },
 };
 
 pub(super) async fn cmd_cat(path: &str) -> Result<(), ErrorCode> {
     let resolved_path = vfs::resolve_path(path);
-    let mut file_handle = vfs::open_file((&resolved_path).into(), None, FileFlags::new().with_read(true)).await?;
+    let mut file_handle = vfs::open_file((&resolved_path).into(), None, OpenFlags(1)).await?;
     let file_info = vfs::stat_file(&file_handle).await;
 
     let file_size = file_info.size;

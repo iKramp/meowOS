@@ -1,7 +1,7 @@
 use std::{mem_utils::PhysAddr, println, sync::arc::Arc, vec::Vec};
 
 use crate::{
-    memory::safe_memcpy,
+    memory::safe_memcpy_from_user,
     proc::{
         ProcessData,
         syscall::{self, SyscallCpuState},
@@ -48,7 +48,7 @@ pub fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         let dst = std::mem_utils::translate_phys_virt_addr(buffer_alloc).0 as *mut u8;
         let src = buffer_ptr;
         //copy to user buffer
-        let copy_valid = safe_memcpy(dst as u64, src as u64, size as usize);
+        let copy_valid = safe_memcpy_from_user(dst as u64, src as u64, size as usize);
         if !copy_valid {
             let proc_lock = proc.get();
             proc_lock.set_legacy_syscall_return(u64::MAX, 1);

@@ -2,12 +2,15 @@ use std::{error::ErrorCode, format, lock_w_info};
 
 use crate::{
     tty::TTY,
-    vfs::{self, file::FileFlags},
+    vfs::{
+        self,
+        file::{FileFlags, OpenFlags},
+    },
 };
 
 pub(super) async fn cmd_ls(path: &str) -> Result<(), ErrorCode> {
     let resolved_path = vfs::resolve_path(path);
-    let file_handle = vfs::open_file((&resolved_path).into(), None, FileFlags::new().with_read(true)).await?;
+    let file_handle = vfs::open_file((&resolved_path).into(), None, OpenFlags(1)).await?;
 
     let res = vfs::get_dir_entries(&file_handle).await;
 

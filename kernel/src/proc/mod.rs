@@ -16,7 +16,10 @@ use std::{
 use crate::{
     memory::{self, physical_allocator},
     proc::{context::builder::create_process_from_context, namespaces::*},
-    vfs::{self, ResolvedPathBorrowed, file::FileFlags},
+    vfs::{
+        self, ResolvedPathBorrowed,
+        file::{FileFlags, OpenFlags},
+    },
 };
 
 mod context;
@@ -108,7 +111,7 @@ pub fn init_ap() {
 }
 
 pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &str, cwd: &str) -> Result<Pid, ErrorCode> {
-    let mut file_handle = vfs::open_file(path, None, FileFlags::new().with_read(true)).await?;
+    let mut file_handle = vfs::open_file(path, None, OpenFlags(1)).await?;
     let stat = vfs::stat_file(&file_handle).await;
     let buf_pages = stat.size.div_ceil(4096);
     let phys_buf = physical_allocator::allocate_contiguius_high(buf_pages);
@@ -139,7 +142,7 @@ pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &s
     };
 
     let cwd_resolved = vfs::resolve_path(cwd);
-    let file_handle = vfs::open_file((&cwd_resolved).into(), None, FileFlags::new().with_read(true)).await?;
+    let file_handle = vfs::open_file((&cwd_resolved).into(), None, OpenFlags(1)).await?;
 
     let new_pid = match create_process_from_context(&context, file_handle) {
         Ok(pid) => pid,

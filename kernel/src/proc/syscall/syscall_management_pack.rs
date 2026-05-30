@@ -1,7 +1,7 @@
 use std::{boxed::Box, sync::arc::Arc};
 
 use crate::{
-    memory::safe_memcpy,
+    memory::safe_memcpy_to_user,
     proc::{
         ProcessData, SyscallNamespace,
         syscall::{self, SyscallCpuState, SyscallPack, syscall_registry},
@@ -63,7 +63,7 @@ fn lsgroups(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         };
 
         let dest_ptr = groups_buf_ptr + i as u64 * core::mem::size_of::<MappedGroupInfo>() as u64;
-        let res = safe_memcpy(
+        let res = safe_memcpy_to_user(
             dest_ptr,
             (&raw const group_info) as u64,
             core::mem::size_of::<MappedGroupInfo>(),
@@ -104,7 +104,7 @@ fn lsallgroups(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         };
 
         let dest_ptr = groups_buf_ptr + i as u64 * core::mem::size_of::<GroupInfo>() as u64;
-        let res = safe_memcpy(dest_ptr, (&raw const group_info) as u64, core::mem::size_of::<GroupInfo>());
+        let res = safe_memcpy_to_user(dest_ptr, (&raw const group_info) as u64, core::mem::size_of::<GroupInfo>());
         if !res {
             proc.set_syscall_return(&[u64::MAX]);
             return false;
@@ -124,24 +124,12 @@ fn map_group(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let group_name_ptr = args.get_arg(1);
     let base_index = args.get_arg(2);
 
-    let group_name_buf_uninit = Box::new_uninit_slice(group_name_len as usize);
-    let res = safe_memcpy(group_name_buf_uninit.as_ptr() as u64, group_name_ptr, group_name_len as usize);
-    if !res {
+    let Some(group_name) = syscall::string_from_args(group_name_ptr, group_name_len) else {
         proc.set_syscall_return(&[u64::MAX]);
         return false;
-    }
-    let group_name_buf: Box<[u8]> = unsafe { group_name_buf_uninit.assume_init() };
-
-    let group_name = unsafe {
-        let res = core::str::from_utf8(&group_name_buf);
-        if res.is_err() {
-            proc.set_syscall_return(&[u64::MAX]);
-            return false;
-        }
-        res.unwrap_unchecked()
     };
 
-    let (pack, pack_id) = match syscall_registry::get_syscall_pack(group_name) {
+    let (pack, pack_id) = match syscall_registry::get_syscall_pack(&group_name) {
         Some(info) => info,
         None => {
             proc.set_syscall_return(&[u64::MAX]);

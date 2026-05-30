@@ -1,7 +1,6 @@
-use std::{boxed::Box, println, string::String, sync::arc::Arc};
+use std::{println, sync::arc::Arc};
 
 use crate::{
-    memory::safe_memcpy,
     proc::{
         self, FilesystemNamespace, ProcessData,
         syscall::{SyscallCpuState, string_from_args},

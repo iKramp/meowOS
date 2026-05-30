@@ -7,7 +7,7 @@ pub use virt_mem_manager::*;
 use crate::LIMINE_BOOTLOADER_REQUESTS;
 use crate::interrupts::{disable_interrupts, enable_interrupts};
 use crate::{println, printlnc};
-use std::mem_utils::{self, PhysAddr};
+use std::mem_utils::{self, PhysAddr, VirtAddr, is_userspace_ptr};
 
 pub static mut TRAMPOLINE_RESERVED: PhysAddr = PhysAddr(0);
 
@@ -112,7 +112,25 @@ pub fn probe_pointer_range(ptr_start: u64, mut ptr_end: u64) -> bool {
     valid
 }
 
-pub fn safe_memcpy(dst: u64, src: u64, len: usize) -> bool {
+pub fn safe_memcpy_from_user(dst: u64, src: u64, len: usize) -> bool {
+    let src_end = src + len as u64 - 1;
+    if !is_userspace_ptr(VirtAddr(src)) || !is_userspace_ptr(VirtAddr(src_end)) {
+        println!(level:warn, "invalid userspace pointer range: {:#x?} - {:#x?}", src, src_end);
+        return false;
+    }
+    safe_memcpy_kernel(dst, src, len)
+}
+
+pub fn safe_memcpy_to_user(dst: u64, src: u64, len: usize) -> bool {
+    let dst_end = dst + len as u64 - 1;
+    if !is_userspace_ptr(VirtAddr(dst)) || !is_userspace_ptr(VirtAddr(dst_end)) {
+        println!(level:warn, "invalid userspace pointer range: {:#x?} - {:#x?}", dst, dst_end);
+        return false;
+    }
+    safe_memcpy_kernel(dst, src, len)
+}
+
+pub fn safe_memcpy_kernel(dst: u64, src: u64, len: usize) -> bool {
     let prev_int_state = disable_interrupts();
 
     let res = unsafe { probe_memcpy(dst, src, len as u64) };

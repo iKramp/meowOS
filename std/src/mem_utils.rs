@@ -338,3 +338,8 @@ pub unsafe fn set_static_lifetime_mut<T>(data: &mut T) -> &'static mut T {
     let static_data: &'static mut T = unsafe { &mut *data_ptr };
     static_data
 }
+
+#[inline]
+pub fn is_userspace_ptr(addr: VirtAddr) -> bool {
+    addr.0 < 0x0000_8000_0000_0000
+}

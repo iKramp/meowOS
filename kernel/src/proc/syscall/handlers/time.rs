@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    memory::safe_memcpy,
+    memory::safe_memcpy_to_user,
     proc::{ProcessData, syscall::SyscallCpuState},
 };
 
@@ -19,8 +19,8 @@ pub fn time(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let secs = duration.as_secs();
     let nanos = duration.subsec_nanos() as u64;
 
-    let valid_ptrs =
-        safe_memcpy(ptr_seconds, (&raw const secs) as u64, 8) && safe_memcpy(ptr_nanos, (&raw const nanos) as u64, 8);
+    let valid_ptrs = safe_memcpy_to_user(ptr_seconds, (&raw const secs) as u64, 8)
+        && safe_memcpy_to_user(ptr_nanos, (&raw const nanos) as u64, 8);
     if !valid_ptrs {
         proc.set_legacy_syscall_return(u64::MAX, 0);
         return false;

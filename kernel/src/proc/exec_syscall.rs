@@ -3,7 +3,7 @@ use std::{boxed::Box, error::ErrorCode, lock_w_info, string::ToString, sync::arc
 
 use crate::{
     interrupts::InterruptProcessorState,
-    memory::{heap, safe_memcpy},
+    memory::{heap, safe_memcpy_from_user},
     proc::{
         NamespaceIds, PROCESS_ID_COUNTER, Pid, ProcNamespaces, ProcessData, SCHEDULER,
         process_data::CpuStateType,
@@ -58,7 +58,7 @@ fn exec(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let exec_args_ptr = args.get_arg(0);
 
     let exec_args_heap_ptr = unsafe { heap::HEAP.alloc(Layout::new::<ExecArgs>()) as u64 };
-    let valid = safe_memcpy(exec_args_heap_ptr, exec_args_ptr, core::mem::size_of::<ExecArgs>());
+    let valid = safe_memcpy_from_user(exec_args_heap_ptr, exec_args_ptr, core::mem::size_of::<ExecArgs>());
     if !valid {
         proc.set_syscall_return(&[u64::MAX]);
         return false;
@@ -66,7 +66,7 @@ fn exec(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let exec_args = unsafe { Box::from_raw(exec_args_ptr as *mut ExecArgs) };
 
     let name_buf_uninit = Box::new_uninit_slice(exec_args.name_len as usize);
-    let valid = safe_memcpy(
+    let valid = safe_memcpy_from_user(
         name_buf_uninit.as_ptr() as u64,
         exec_args.name_ptr,
         exec_args.name_len as usize,

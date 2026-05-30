@@ -5,7 +5,7 @@ use std::println;
 use std::sync::arc::Arc;
 use std::vec::Vec;
 
-use crate::memory::{physical_allocator, safe_memcpy};
+use crate::memory::{physical_allocator, safe_memcpy_from_user, safe_memcpy_to_user};
 use crate::proc::namespaces::FilesystemNamespace;
 use crate::proc::syscall::{SyscallCpuState, SyscallPack, register_syscall_pack, string_from_args};
 use crate::proc::{self, ProcessData, syscall};
@@ -167,7 +167,7 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         //copy to user buffer
         let dst = buf_ptr;
         let src = std::mem_utils::translate_phys_virt_addr(buffer_alloc).0;
-        let valid_copy = safe_memcpy(dst, src, size as usize);
+        let valid_copy = safe_memcpy_to_user(dst, src, size as usize);
         if !valid_copy {
             proc.set_syscall_return(&[u64::MAX]);
             return;
@@ -229,7 +229,7 @@ fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         let dst = std::mem_utils::translate_phys_virt_addr(buffer_alloc).0 as *mut u8;
         let src = buf_ptr;
         //copy to user buffer
-        let copy_valid = safe_memcpy(dst as u64, src as u64, size as usize);
+        let copy_valid = safe_memcpy_from_user(dst as u64, src as u64, size as usize);
         if !copy_valid {
             proc.set_syscall_return(&[u64::MAX]);
 
@@ -506,7 +506,7 @@ fn fstat(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
 
         let dst = buf_ptr;
         let src = (&raw const stat_result) as u64;
-        let valid_copy = safe_memcpy(dst, src, core::mem::size_of::<vfs::Inode>() as usize);
+        let valid_copy = safe_memcpy_to_user(dst, src, core::mem::size_of::<vfs::Inode>() as usize);
         if !valid_copy {
             println!("fstat: failed to copy stat result to user buffer");
             proc.set_syscall_return(&[u64::MAX]);

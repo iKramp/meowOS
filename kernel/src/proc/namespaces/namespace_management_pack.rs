@@ -1,7 +1,7 @@
 use std::{boxed::Box, sync::arc::Arc};
 
 use crate::{
-    memory::safe_memcpy,
+    memory::safe_memcpy_to_user,
     proc::{
         NamespaceHolder, ProcessData, get_namespace_id,
         namespaces::NamespaceType,
@@ -95,7 +95,7 @@ fn lsnamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
             currently_used: namespaces.is_in_use(ns.get_id()),
         };
         let dst = namespace_buf_ptr + (i as u64 * std::mem::size_of::<NamespaceInfo>() as u64);
-        let res = safe_memcpy(dst, (&raw const info) as u64, core::mem::size_of::<NamespaceInfo>());
+        let res = safe_memcpy_to_user(dst, (&raw const info) as u64, core::mem::size_of::<NamespaceInfo>());
         if !res {
             proc.set_syscall_return(&[u64::MAX]);
             return false;
