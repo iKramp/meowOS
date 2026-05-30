@@ -21,7 +21,7 @@ pub struct MemoryRegionDescriptor {
 
 impl MemoryRegionDescriptor {
     pub fn new(start: VirtAddr, size_pages: usize, flags: MemoryRegionFlags) -> Result<Self, MemoryRegionError> {
-        if start.0 % 0x1000 != 0 {
+        if !start.0.is_multiple_of(0x1000) {
             return Err(MemoryRegionError::StartNotPageAligned);
         }
 
@@ -106,7 +106,7 @@ impl<'a> ContextInfo<'a> {
         //Note: This prevents cases where 2 non overlapping regions are in fixed_regions, and a new
         //region that ovrelaps both is added. When sorted, any region added may only extend an
         //existing region, not connect two existing regions.
-        mem_regions.sort_by(|lhs, rhs| lhs.start().0.cmp(&rhs.start().0));
+        mem_regions.sort_by_key(|lhs| lhs.start().0);
 
         let mut fixed_regions: Vec<MemoryRegionDescriptor> = Vec::new();
 
@@ -126,7 +126,7 @@ impl<'a> ContextInfo<'a> {
             fixed_regions.push(region.clone());
         }
 
-        mem_init.sort_by(|lhs, rhs| lhs.0.0.cmp(&rhs.0.0));
+        mem_init.sort_by_key(|lhs| lhs.0.0);
 
         for (i, init_1) in mem_init.iter().enumerate() {
             for init_2 in mem_init[i + 1..].iter() {

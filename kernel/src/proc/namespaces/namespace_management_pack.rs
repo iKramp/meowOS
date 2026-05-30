@@ -24,14 +24,12 @@ fn mknamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         return false;
     };
 
-    let namespace;
-
-    if existing_namespace == 0 {
-        let Some(namespace_) = namespace_type.create_empty_namespace(get_namespace_id()) else {
+    let namespace = if existing_namespace == 0 {
+        let Some(namespace) = namespace_type.create_empty_namespace(get_namespace_id()) else {
             proc.set_syscall_return(&[u64::MAX]);
             return false;
         };
-        namespace = namespace_;
+        namespace
     } else {
         let mutable = proc.get_mutable();
         let namespaces = mutable.get_namespaces();
@@ -43,8 +41,8 @@ fn mknamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
             proc.set_syscall_return(&[u64::MAX]);
             return false;
         };
-        namespace = new_namespace;
-    }
+        new_namespace
+    };
 
     proc.get_mutable().get_namespaces_mut().add_namespace(namespace);
     proc.set_syscall_return(&[0]);

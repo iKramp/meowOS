@@ -19,7 +19,7 @@ fn is_elf(data: &[u8]) -> bool {
 }
 
 fn load_elf_process<'a>(data: &'a [u8], cmdline: &'a str) -> Result<ContextInfo<'a>, super::ProcessLoadError> {
-    let parsed_elf = if data.as_ptr() as usize % 8 == 0 {
+    let parsed_elf = if (data.as_ptr() as usize).is_multiple_of(8) {
         elf::parse(data)
     } else {
         panic!("data into load_elf_process must be u64 aligned");

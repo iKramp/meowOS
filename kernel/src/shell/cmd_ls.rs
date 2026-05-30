@@ -2,10 +2,7 @@ use std::{error::ErrorCode, format, lock_w_info};
 
 use crate::{
     tty::TTY,
-    vfs::{
-        self,
-        file::{FileFlags, OpenFlags},
-    },
+    vfs::{self, file::OpenFlags},
 };
 
 pub(super) async fn cmd_ls(path: &str) -> Result<(), ErrorCode> {

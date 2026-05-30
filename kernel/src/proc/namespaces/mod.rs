@@ -15,7 +15,7 @@ mod syscall_namespace;
 
 pub(super) use namespace_management_pack::init_namespace_management_syscalls;
 
-pub(super) trait ProcNamespace: Debug + Send + Sync + Any + Sized {
+pub trait ProcNamespace: Debug + Send + Sync + Any + Sized {
     fn get_id(&self) -> u64;
     fn create_from(id: u64, other: &Self) -> Result<Self, ErrorCode>;
     fn create_empty(id: u64) -> Result<Self, ErrorCode>;
@@ -39,7 +39,7 @@ pub(in crate::proc) enum NamespaceHolder {
 #[derive(Debug)]
 pub struct ProcNamespaces {
     owned_namespaces: Vec<NamespaceHolder>,
-    pub memory_namespace: Arc<MemoryNamespace>,
+    pub(in crate::proc) memory_namespace: Arc<MemoryNamespace>,
     syscall_namespace: Arc<SyscallNamespace>,
     filesystem_namespace: Arc<FilesystemNamespace>,
 }
@@ -53,7 +53,7 @@ pub(in crate::proc) struct NamespaceIds {
 }
 
 impl ProcNamespaces {
-    pub fn new(
+    pub(in crate::proc) fn new(
         memory_namespace: Arc<MemoryNamespace>,
         syscall_namespace: Arc<SyscallNamespace>,
         filesystem_namespace: Arc<FilesystemNamespace>,
@@ -73,7 +73,7 @@ impl ProcNamespaces {
         }
     }
 
-    pub fn clone_from_ids(&self, mut ids: NamespaceIds) -> Result<Self, ErrorCode> {
+    pub(in crate::proc) fn clone_from_ids(&self, mut ids: NamespaceIds) -> Result<Self, ErrorCode> {
         //defaults
         if ids.memory_namespace == 0 {
             ids.memory_namespace = self.memory_namespace.get_id();
@@ -149,7 +149,7 @@ impl ProcNamespaces {
         Ok(())
     }
 
-    pub fn add_namespace(&mut self, namespace: NamespaceHolder) {
+    pub(in crate::proc) fn add_namespace(&mut self, namespace: NamespaceHolder) {
         let id = match &namespace {
             NamespaceHolder::Syscall(ns) => ns.get_id(),
             NamespaceHolder::Mem(ns) => ns.get_id(),
@@ -162,7 +162,7 @@ impl ProcNamespaces {
         self.owned_namespaces.insert(index, namespace);
     }
 
-    pub fn get_namespace_holder(&self, namespace_id: u64) -> Option<&NamespaceHolder> {
+    pub(in crate::proc) fn get_namespace_holder(&self, namespace_id: u64) -> Option<&NamespaceHolder> {
         let index = self
             .owned_namespaces
             .binary_search_by_key(&namespace_id, |ns| ns.get_id())

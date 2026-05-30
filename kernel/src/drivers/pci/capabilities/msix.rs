@@ -78,7 +78,7 @@ pub fn ini_msix_interrupt(dev: &FullPciDevType, msi_irq: u8) -> Result<(), Error
     let redirection_hint = 0; //0 for no hint, 1 for hint
 
     for i in 0..table_size {
-        let msi_addr = (0xFFE << 20) | ((destination_id as u64) << 12) | (redirection_hint << 3) | (destination_mode << 2);
+        let msi_addr = (0xFFE << 20) | (destination_id << 12) | (redirection_hint << 3) | (destination_mode << 2);
 
         let msi_data = msi_irq as u32;
 

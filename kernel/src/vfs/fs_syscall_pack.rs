@@ -229,7 +229,7 @@ fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         let dst = std::mem_utils::translate_phys_virt_addr(buffer_alloc).0 as *mut u8;
         let src = buf_ptr;
         //copy to user buffer
-        let copy_valid = safe_memcpy_from_user(dst as u64, src as u64, size as usize);
+        let copy_valid = safe_memcpy_from_user(dst as u64, src, size as usize);
         if !copy_valid {
             proc.set_syscall_return(&[u64::MAX]);
 

@@ -9,11 +9,7 @@ use std::{
 use crate::{
     memory::physical_allocator,
     task_runner::block_task,
-    vfs::{
-        self, InodeTypeAndPerms,
-        file::{FileFlags, OpenFlags},
-        open_file,
-    },
+    vfs::{self, InodeTypeAndPerms, file::OpenFlags, open_file},
 };
 
 const BEE_MOVIE_SCRIPT_START: &str = include_str!("./bee_movie_script.txt");
@@ -106,9 +102,9 @@ impl CreateFileOperation {
 
         let open_file_future = open_file((&path).into(), None, OpenFlags(2));
         let ffi_open_file_future = into_ffi_future(open_file_future);
-        let mut parent = block_task(ffi_open_file_future).expect("fopen failed in debug function");
+        let parent = block_task(ffi_open_file_future).expect("fopen failed in debug function");
 
-        let create_future = vfs::create_file(&mut parent, file_name, InodeTypeAndPerms::new_file(0));
+        let create_future = vfs::create_file(&parent, file_name, InodeTypeAndPerms::new_file(0));
         let ffi_create_future = into_ffi_future(create_future);
         let _ = block_task(ffi_create_future);
     }
@@ -157,10 +153,10 @@ impl WriteFileOperation {
 
         let open_file_future = vfs::open_file((&path).into(), None, open_file_flags);
         let ffi_open_file_future = into_ffi_future(open_file_future);
-        let mut file = block_task(ffi_open_file_future).expect("fopen failed in debug function");
+        let file = block_task(ffi_open_file_future).expect("fopen failed in debug function");
 
         println!(level:info, "Writing file: {} of size: {}", self.file_name, content.len());
-        let write_future = vfs::write_file(&mut file, &frames, self.content.len() as u64);
+        let write_future = vfs::write_file(&file, &frames, self.content.len() as u64);
         let ffi_write_future = into_ffi_future(write_future);
         block_task(ffi_write_future).expect("file write failed in debug function");
 
@@ -188,9 +184,9 @@ impl CreateFolderOperation {
 
         let open_file_future = open_file((&path).into(), None, OpenFlags(2));
         let ffi_open_file_future = into_ffi_future(open_file_future);
-        let mut parent = block_task(ffi_open_file_future).expect("fopen failed in debug function");
+        let parent = block_task(ffi_open_file_future).expect("fopen failed in debug function");
 
-        let create_future = vfs::create_file(&mut parent, file_name, InodeTypeAndPerms::new_dir(0));
+        let create_future = vfs::create_file(&parent, file_name, InodeTypeAndPerms::new_dir(0));
         let ffi_create_future = into_ffi_future(create_future);
         let _ = block_task(ffi_create_future);
     }
@@ -243,9 +239,9 @@ impl ReadFileOperation {
         let open_file_flags = OpenFlags(1);
         let open_file_future = vfs::open_file((&path).into(), None, open_file_flags);
         let ffi_open_file_future = into_ffi_future(open_file_future);
-        let mut file = block_task(ffi_open_file_future).expect("fopen failed in debug function");
+        let file = block_task(ffi_open_file_future).expect("fopen failed in debug function");
 
-        let read_future = vfs::read_file(&mut file, &buffer, real_length);
+        let read_future = vfs::read_file(&file, &buffer, real_length);
         let ffi_read_future = into_ffi_future(read_future);
         block_task(ffi_read_future).expect("file read failed in debug function");
 

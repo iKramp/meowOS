@@ -302,7 +302,7 @@ unsafe impl core::alloc::GlobalAlloc for HeapWrapper {
 
         //assert alignment
         debug_assert!(
-            addr.0 % (layout.align() as u64) == 0,
+            addr.0.is_multiple_of(layout.align() as u64),
             "allocated address {:#x?} is not aligned to {}",
             addr,
             layout.align()

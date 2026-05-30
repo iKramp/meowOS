@@ -194,7 +194,7 @@ pub unsafe fn ensure_aligned<T>(addr: VirtAddr) -> VirtAddr {
 ///# Safety
 ///Can only be called on in-memory read only STATIC data structures
 pub unsafe fn ensure_aligned_manual(addr: VirtAddr, size: u64, align: u64) -> VirtAddr {
-    if addr.0 % align == 0 {
+    if addr.0.is_multiple_of(align) {
         addr
     } else {
         let heap_data = unsafe { alloc::alloc::alloc(Layout::from_size_align(size as usize, align as usize).unwrap()) };

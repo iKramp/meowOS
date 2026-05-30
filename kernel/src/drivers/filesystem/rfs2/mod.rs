@@ -233,7 +233,7 @@ impl Rfs2 {
     }
 
     async fn release_block_locked(&self, block: BlockPtr) {
-        if block % GROUP_SIZE_BLOCKS as u64 == 0 {
+        if block.is_multiple_of(GROUP_SIZE_BLOCKS as u64) {
             println!(level:error, "refusing to free inode bitmask");
         }
         let group = block / GROUP_SIZE_BLOCKS as u64;

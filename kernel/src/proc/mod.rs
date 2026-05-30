@@ -16,10 +16,7 @@ use std::{
 use crate::{
     memory::{self, physical_allocator},
     proc::{context::builder::create_process_from_context, namespaces::*},
-    vfs::{
-        self, ResolvedPathBorrowed,
-        file::{FileFlags, OpenFlags},
-    },
+    vfs::{self, ResolvedPathBorrowed, file::OpenFlags},
 };
 
 mod context;
@@ -111,14 +108,14 @@ pub fn init_ap() {
 }
 
 pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &str, cwd: &str) -> Result<Pid, ErrorCode> {
-    let mut file_handle = vfs::open_file(path, None, OpenFlags(1)).await?;
+    let file_handle = vfs::open_file(path, None, OpenFlags(1)).await?;
     let stat = vfs::stat_file(&file_handle).await;
     let buf_pages = stat.size.div_ceil(4096);
     let phys_buf = physical_allocator::allocate_contiguius_high(buf_pages);
     let buf = translate_phys_virt_addr(phys_buf);
 
     let phys_buf_vec = (0..buf_pages).map(|i| phys_buf + i * 4096).collect::<Vec<_>>();
-    let read_res = vfs::read_file(&mut file_handle, &phys_buf_vec, stat.size).await?;
+    let read_res = vfs::read_file(&file_handle, &phys_buf_vec, stat.size).await?;
     if read_res != stat.size {
         for frame in phys_buf_vec {
             unsafe { physical_allocator::deallocate_frame(frame) };

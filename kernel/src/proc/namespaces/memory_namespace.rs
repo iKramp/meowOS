@@ -89,9 +89,7 @@ impl ProcNamespace for MemoryNamespace {
                 range.range_type,
                 range.map_address,
             );
-            if let Err(e) = res {
-                return Err(e);
-            }
+            res?;
         }
 
         Ok(new_namespace)

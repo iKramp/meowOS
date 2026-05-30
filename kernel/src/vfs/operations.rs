@@ -19,7 +19,7 @@ use crate::{
     },
     vfs::{
         Inode, InodeIdentifier,
-        file::{self, OpenFlags, get_file},
+        file::{OpenFlags, get_file},
     },
 };
 
@@ -356,7 +356,8 @@ pub async fn unlink_file(parent_dir: &FileHandle, name: &str) -> Result<(), Erro
 
     let (new_parent_inode, new_child_inode) = fs.unlink(parent_inode.index, name).await?;
     //ignore error, at most there's no entry, but that shouldn't matter too much
-    fs_tree::unlink_inode(parent_dir.inode, name);
+    let _ = fs_tree::unlink_inode(parent_dir.inode, name);
+
     parent_inode.update_from(&new_parent_inode);
     let child_file = get_file(InodeIdentifier {
         device_id: parent_inode.device,
