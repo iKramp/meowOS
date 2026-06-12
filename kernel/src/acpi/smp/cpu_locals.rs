@@ -99,6 +99,7 @@ pub struct CpuLocals {
     pub gdt_ptr: TablePointer,
 
     pub current_process: Option<Arc<ProcessData>>,
+    //id of scheduled event for preemtion, used to cancel preemption
     pub preemtion_id: Option<u64>,
 
     pub apic_id: u8,
@@ -172,26 +173,29 @@ pub fn add_cpu_locals(locals: super::cpu_locals::CpuLocals) -> VirtAddr {
 impl CpuLocals {
     pub fn new(kernel_stack_base: VirtAddr, stack_size_pages: u64, apic_id: u8, processor_id: u8, gdt_ptr: TablePointer) -> Self {
         Self {
+            self_addr: VirtAddr(0), //will be set later
             kernel_stack_base,
+            userspace_stack_base: 0,
             stack_size_pages,
+            gdt_ptr,
+
+            current_process: None,
+            preemtion_id: None,
+
             apic_id,
             processor_id,
-            gdt_ptr,
-            current_process: None,
-            async_task_data: AsyncTaskData::new(),
-            proc_initialized: false,
             int_depth: 0,
+            proc_initialized: false,
             atomic_context: false,
-            userspace_stack_base: 0,
-            self_addr: VirtAddr(0), //will be set later
+            async_task_data: AsyncTaskData::new(),
             lock_info: LockInfo::new(),
             page_fault_handle_mode: PageFaultHandleMode::KernelPanic,
             get_state: CpuLocalGetState {
                 mut_borrow: AtomicBool::new(false),
                 immut_borrow: AtomicU16::new(0),
             },
-            scheduled_events: Vec::new(),
             scheduled_event_id_counter: 0,
+            scheduled_events: Vec::new(),
         }
     }
 

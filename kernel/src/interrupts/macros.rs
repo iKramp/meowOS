@@ -224,7 +224,7 @@ pub extern "C" fn general_interrupt_handler(
     if let Some(curr_proc) = locals.current_process.as_mut() {
         //save current process state
         save_cpu_state(&StackCpuStateData::Interrupt(proc_data), curr_proc);
-        release_current_proc(curr_proc, false);
+        release_current_proc(curr_proc);
     }
     drop(locals);
     interrupt_context_switch();

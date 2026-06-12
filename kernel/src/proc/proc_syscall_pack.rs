@@ -55,14 +55,14 @@ struct ExecArgs {
     name_ptr: u64,
 }
 
-fn exec(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn exec(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let exec_args_ptr = args.get_arg(0);
 
     let exec_args_heap_ptr = unsafe { heap::HEAP.alloc(Layout::new::<ExecArgs>()) as u64 };
     let valid = safe_memcpy_from_user(exec_args_heap_ptr, exec_args_ptr, core::mem::size_of::<ExecArgs>());
     if !valid {
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     }
     let exec_args = unsafe { Box::from_raw(exec_args_ptr as *mut ExecArgs) };
 
@@ -74,7 +74,7 @@ fn exec(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     );
     if !valid {
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     }
     let name_buf = unsafe { name_buf_uninit.assume_init() };
 
@@ -82,7 +82,7 @@ fn exec(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         let res = core::str::from_utf8(&name_buf);
         if res.is_err() {
             proc.set_syscall_return(&[u64::MAX]);
-            return false;
+            return;
         }
         res.unwrap_unchecked()
     };
@@ -93,16 +93,15 @@ fn exec(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         .clone_from_ids(exec_args.namespaces.clone())
     else {
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
 
     let Ok(pid) = create_process_from_parts(unsafe { exec_args.registers.x86 }, exec_args.start_ptr, namespaces, name) else {
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
 
     proc.set_syscall_return(&[pid.0 as u64]);
-    false
 }
 
 pub fn create_process_from_parts(
@@ -147,13 +146,12 @@ pub fn create_process_from_parts(
     Ok(pid)
 }
 
-fn exit(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn exit(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let status = args.get_arg(0);
     proc::kill_process(proc.pid(), status);
-    false
 }
 
-fn sleep(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn sleep(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let sleep_time_sec = args.get_arg(0);
     let sleep_time_ns = args.get_arg(1);
     let sleep_time = core::time::Duration::new(sleep_time_sec, sleep_time_ns as u32);
@@ -168,7 +166,7 @@ fn sleep(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         }),
     };
 
-    schedule_event(scheduled_event);
+    proc.set_sleeping(true);
 
-    true
+    schedule_event(scheduled_event);
 }

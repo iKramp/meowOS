@@ -15,7 +15,7 @@ pub fn init_mem_syscalls() {
     crate::proc::syscall::register_syscall_pack("memory".into(), Arc::new(mem_syscalls));
 }
 
-fn make_region(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn make_region(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_id = args.get_namespace_id();
 
     let start_addr = args.get_arg(0);
@@ -28,33 +28,33 @@ fn make_region(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
 
     let Some(region_name) = syscall::string_from_args(region_name_ptr, region_name_len) else {
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
 
     let Some(range_capacity) = memory::VirtualMemoryRangeCapacity::from_level(size_order as u8) else {
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
     let start_addr = range_capacity.align_down(VirtAddr(start_addr));
     let permissions = memory::VirtualMemoryRangePermissions(permissions);
     let Some(region_type) = MemoryRangeType::from_u32(region_type as u32) else {
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
 
     let Some(management_mode) = VirtualMemoryRangeManagementMode::from_u64(management_mode) else {
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
-
-    //------checks passed------
 
     let mutable = proc.get_mutable();
     let namespaces = mutable.get_namespaces();
     let Some(memory_namespace) = namespaces.get_namespace::<MemoryNamespace>(namespace_id) else {
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
+
+    //------checks passed------
 
     let virtual_memory_range = memory::VirtualMemoryRange::create(range_capacity, permissions, management_mode);
 
@@ -66,11 +66,9 @@ fn make_region(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     );
     let err_code = if res.is_ok() { 0 } else { u64::MAX };
     proc.set_syscall_return(&[err_code]);
-
-    false
 }
 
-fn remove_region(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn remove_region(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_id = args.get_namespace_id();
     let region_id = args.get_arg(0) as u32;
 
@@ -78,25 +76,24 @@ fn remove_region(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let namespaces = mutable.get_namespaces();
     let Some(memory_namespace) = namespaces.get_namespace::<MemoryNamespace>(namespace_id) else {
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
     let res = memory_namespace.remove_mem_range_by_id(region_id);
     let err_code = if res.is_ok() { 0 } else { u64::MAX };
     proc.set_syscall_return(&[err_code]);
-    false
 }
 
-fn list_regions(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn list_regions(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     println!("list regions called with args: {:#x?}, proc: {:#x?}", args, proc);
     todo!()
 }
 
-fn set_prot(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn set_prot(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     println!("set prot called with args: {:#x?}, proc: {:#x?}", args, proc);
     todo!()
 }
 
-fn mmap(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn mmap(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_id = args.get_namespace_id();
     let region_id = args.get_arg(0) as u32;
     let mut offset = args.get_arg(1);
@@ -106,7 +103,7 @@ fn mmap(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let namespaces = mutable.get_namespaces();
     let Some(memory_namespace) = namespaces.get_namespace::<MemoryNamespace>(namespace_id) else {
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
 
     let ret = if region_id == 0 {
@@ -117,7 +114,7 @@ fn mmap(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
 
     let Some((range, base_addr)) = ret else {
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
     if region_id == 0 {
         offset -= base_addr.0;
@@ -129,11 +126,9 @@ fn mmap(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let ret = range.allocate_manual_external(pages_start..pages_end);
     let err_code = if ret.is_ok() { 0 } else { u64::MAX };
     proc.set_syscall_return(&[err_code]);
-
-    false
 }
 
-fn munmap(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn munmap(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_id = args.get_namespace_id();
     let region_id = args.get_arg(0) as u32;
     let mut offset = args.get_arg(1);
@@ -143,7 +138,7 @@ fn munmap(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let namespaces = mutable.get_namespaces();
     let Some(memory_namespace) = namespaces.get_namespace::<MemoryNamespace>(namespace_id) else {
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
 
     let ret = if region_id == 0 {
@@ -154,7 +149,7 @@ fn munmap(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
 
     let Some((range, base_addr)) = ret else {
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
     if region_id == 0 {
         offset -= base_addr.0;
@@ -166,6 +161,4 @@ fn munmap(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let ret = range.free_manual_external(pages_start..pages_end);
     let err_code = if ret.is_ok() { 0 } else { u64::MAX };
     proc.set_syscall_return(&[err_code]);
-
-    false
 }

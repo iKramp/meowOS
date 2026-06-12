@@ -1,5 +1,5 @@
 use crate::{acpi::cpu_locals::CpuLocals, interrupts::InterruptProcessorState, proc::Pid};
-use std::{collections::btree_map::BTreeMap, lock_w_info, sync::arc::Arc, vec::Vec};
+use std::{collections::btree_map::BTreeMap, lock_w_info, println, sync::arc::Arc, vec::Vec};
 
 use super::{
     ProcessData,
@@ -34,10 +34,20 @@ impl Scheduler {
     }
 
     pub fn wake_proc(&mut self, pid: Pid) {
+        let proc = self.tasks.get(&pid);
+        if let Some(proc) = proc {
+            proc.set_sleeping(false);
+        }
+
         let sleeping_pos = self.sleeping_tasks.iter().position(|p| *p == pid);
         if let Some(pos) = sleeping_pos {
             self.sleeping_tasks.swap_remove(pos);
-            self.ready_to_run.push(pid);
+            if proc.is_some() {
+                self.ready_to_run.push(pid);
+            } else {
+                println!(level:warn, "waking process {pid:?} that doesn't exist, removing from scheduler");
+                self.remove_process(pid);
+            }
         }
     }
 
@@ -72,16 +82,18 @@ impl Scheduler {
     }
 
     ///Called after all the data has been saved
-    fn release_process(&mut self, pid: Pid, sleep: bool) {
+    fn release_process(&mut self, pid: Pid) {
         let active_pos = self.active_tasks.iter().position(|(p, _)| *p == pid);
         if let Some(pos) = active_pos {
             self.active_tasks.swap_remove(pos);
         } else {
-            todo!("recover from inconsistent state");
+            println!(level:warn, "releasing process {pid:?} that isn't active, removing from scheduler");
+            self.remove_process(pid);
         }
 
-        if self.tasks.contains_key(&pid) {
-            if sleep {
+        let proc = self.tasks.get(&pid);
+        if let Some(proc) = proc {
+            if proc.is_sleeping() {
                 self.sleeping_tasks.push(pid);
             } else {
                 self.ready_to_run.push(pid);
@@ -113,10 +125,10 @@ impl Scheduler {
     }
 }
 
-pub fn release_current_proc(old_proc: &Arc<ProcessData>, sleep: bool) {
+pub fn release_current_proc(old_proc: &Arc<ProcessData>) {
     let scheduler_lock = &mut lock_w_info!(super::SCHEDULER);
     let scheduler = unsafe { scheduler_lock.assume_init_mut() };
-    scheduler.release_process(old_proc.get().pid(), sleep);
+    scheduler.release_process(old_proc.get().pid());
 }
 
 pub fn save_cpu_state(on_stack_data: &StackCpuStateData, proc: &Arc<ProcessData>) {

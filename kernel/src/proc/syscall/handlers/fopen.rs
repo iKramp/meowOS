@@ -12,7 +12,7 @@ use crate::{
     },
 };
 
-pub fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+pub fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let pid = proc.pid();
     let path_len = args.get_legacy_syscall_arg(1);
     let path_ptr = args.get_legacy_syscall_arg(2);
@@ -23,7 +23,7 @@ pub fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let Some(path) = string_from_args(path_ptr, path_len) else {
         println!("fopen: invalid path pointer or length");
         proc.set_legacy_syscall_return(u64::MAX, 1);
-        return false;
+        return;
     };
 
     let proc_mut = proc.get_mutable();
@@ -38,7 +38,7 @@ pub fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         let Some(f_chain) = fs_namespace.get_whole_chain(fd) else {
             println!("fopen: invalid fd {fd}");
             proc.set_legacy_syscall_return(u64::MAX, 1);
-            return false;
+            return;
         };
         f_chain
     };
@@ -82,5 +82,5 @@ pub fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
 
     task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
-    true
+    proc.set_sleeping(true);
 }

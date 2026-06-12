@@ -190,21 +190,19 @@ extern "C" fn handler(saved_regs_ptr: u64) -> ! {
 
     let Some(syscall_namespace) = curr_proc.get_mutable().get_namespaces().get_namespace::<SyscallNamespace>(0) else {
         proc::kill_process(curr_proc.pid(), u64::MAX);
-        release_current_proc(&curr_proc, false);
+        release_current_proc(&curr_proc);
         no_ret_context_switch();
     };
     let syscall_handler = syscall_namespace.get_syscall_handler(syscall_number as u32);
 
-    let task_sleep;
     if let Some(syscall_handler) = syscall_handler {
-        task_sleep = syscall_handler(saved_regs, &curr_proc);
+        syscall_handler(saved_regs, &curr_proc);
     } else {
         println!(level:warn, "Invalid syscall number: {}", syscall_number);
         syscall::handlers::illegal(saved_regs, &curr_proc);
-        task_sleep = false;
     };
 
-    release_current_proc(&curr_proc, task_sleep);
+    release_current_proc(&curr_proc);
     no_ret_context_switch();
 }
 

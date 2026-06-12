@@ -16,18 +16,18 @@ pub fn init_namespace_management_syscalls() {
     syscall::register_syscall_pack("namespace_management".into(), Arc::new(namespace_management_syscalls));
 }
 
-fn mknamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn mknamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_type = args.get_arg(0);
     let existing_namespace = args.get_arg(1);
     let Some(namespace_type) = NamespaceType::from_id(namespace_type) else {
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
 
     let namespace = if existing_namespace == 0 {
         let Some(namespace) = namespace_type.create_empty_namespace(get_namespace_id()) else {
             proc.set_syscall_return(&[u64::MAX]);
-            return false;
+            return;
         };
         namespace
     } else {
@@ -35,38 +35,35 @@ fn mknamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         let namespaces = mutable.get_namespaces();
         let Some(existing_namespace) = namespaces.get_namespace_holder(existing_namespace) else {
             proc.set_syscall_return(&[u64::MAX]);
-            return false;
+            return;
         };
         let Ok(new_namespace) = NamespaceHolder::create_from(get_namespace_id(), existing_namespace) else {
             proc.set_syscall_return(&[u64::MAX]);
-            return false;
+            return;
         };
         new_namespace
     };
 
     proc.get_mutable().get_namespaces_mut().add_namespace(namespace);
     proc.set_syscall_return(&[0]);
-    false
 }
 
-fn rmnamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn rmnamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_id = args.get_arg(0);
     if proc.get_mutable().get_namespaces_mut().remove_namespace(namespace_id).is_ok() {
         proc.set_syscall_return(&[0]);
     } else {
         proc.set_syscall_return(&[u64::MAX]);
     }
-    false
 }
 
-fn chnamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn chnamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_id = args.get_arg(0);
     if proc.get_mutable().get_namespaces_mut().change_namespace(namespace_id).is_ok() {
         proc.set_syscall_return(&[0]);
     } else {
         proc.set_syscall_return(&[u64::MAX]);
     }
-    false
 }
 
 #[repr(C)]
@@ -76,7 +73,7 @@ struct NamespaceInfo {
     currently_used: bool,
 }
 
-fn lsnamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn lsnamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_buf_ptr = args.get_arg(0);
     let namespace_buf_size = args.get_arg(1);
 
@@ -96,12 +93,11 @@ fn lsnamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         let res = safe_memcpy_to_user(dst, (&raw const info) as u64, core::mem::size_of::<NamespaceInfo>());
         if !res {
             proc.set_syscall_return(&[u64::MAX]);
-            return false;
+            return;
         }
     }
 
     let total_namespaces = namespaces.owned_namespaces.len() as u64;
     let written_namespaces = total_namespaces.min(namespace_buf_size);
     proc.set_syscall_return(&[written_namespaces, total_namespaces]);
-    false
 }

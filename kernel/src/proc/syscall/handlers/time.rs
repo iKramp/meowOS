@@ -9,7 +9,7 @@ use crate::{
     proc::{ProcessData, syscall::SyscallCpuState},
 };
 
-pub fn time(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+pub fn time(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let time = unsafe { GET_TIME() };
     let duration = time.duration_since(UNIX_EPOCH);
 
@@ -23,9 +23,8 @@ pub fn time(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         && safe_memcpy_to_user(ptr_nanos, (&raw const nanos) as u64, 8);
     if !valid_ptrs {
         proc.set_legacy_syscall_return(u64::MAX, 0);
-        return false;
+        return;
     }
 
     println!("time syscall returning");
-    false
 }

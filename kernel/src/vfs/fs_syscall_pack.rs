@@ -37,7 +37,7 @@ impl FileSeekMode {
     }
 }
 
-fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_id = args.get_namespace_id();
     let path_len = args.get_arg(0);
     let path_ptr = args.get_arg(1);
@@ -47,7 +47,7 @@ fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let Some(path) = string_from_args(path_ptr, path_len) else {
         println!("fopen: invalid path pointer or length");
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
 
     let proc_mut = proc.get_mutable();
@@ -62,7 +62,7 @@ fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         let Some(f_chain) = fs_namespace.get_whole_chain(fd) else {
             println!("fopen: invalid fd {fd}");
             proc.set_syscall_return(&[u64::MAX]);
-            return false;
+            return;
         };
         f_chain
     };
@@ -98,10 +98,10 @@ fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
 
     task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
-    true
+    proc.set_sleeping(true);
 }
 
-fn fclose(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn fclose(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_id = args.get_namespace_id();
     let fd = args.get_arg(0);
     let proc_mut = proc.get_mutable();
@@ -115,10 +115,9 @@ fn fclose(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     } else {
         proc.set_syscall_return(&[u64::MAX]);
     }
-    false
 }
 
-fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_id = args.get_namespace_id();
     let fd = args.get_arg(0);
     let size = args.get_arg(1);
@@ -127,13 +126,13 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
 
     if size == 0 {
         proc.set_syscall_return(&[0]);
-        return true;
+        return;
     }
 
     let valid = syscall::verify_memory_range(buf_ptr, buf_ptr + size);
     if !valid {
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     }
 
     let file_handle = {
@@ -146,7 +145,7 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
             f_handle
         } else {
             proc.set_syscall_return(&[u64::MAX]);
-            return false;
+            return;
         }
     };
 
@@ -186,10 +185,10 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
 
     task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
-    true
+    proc.set_sleeping(true);
 }
 
-fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_id = args.get_namespace_id();
     let fd = args.get_arg(0);
     let size = args.get_arg(1);
@@ -198,13 +197,13 @@ fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
 
     if size == 0 {
         proc.set_syscall_return(&[0]);
-        return true;
+        return;
     }
 
     let valid = syscall::verify_memory_range(buf_ptr, buf_ptr + size);
     if !valid {
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     }
 
     let file_handle = {
@@ -218,7 +217,7 @@ fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         } else {
             println!("fwrite: invalid fd {fd}");
             proc.set_syscall_return(&[u64::MAX]);
-            return false;
+            return;
         }
     };
 
@@ -276,10 +275,10 @@ fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
 
     task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
-    true
+    proc.set_sleeping(true);
 }
 
-fn fseek(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn fseek(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_id = args.get_namespace_id();
     let fd = args.get_arg(0);
     let offset = args.get_arg(1) as i64;
@@ -289,7 +288,7 @@ fn fseek(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
 
     let Some(mode) = FileSeekMode::from_u64(mode_value) else {
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
 
     let file_handle = {
@@ -303,11 +302,14 @@ fn fseek(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
         } else {
             println!("fseek: invalid fd {fd}");
             proc.set_syscall_return(&[u64::MAX]);
-            return false;
+            return;
         }
     };
 
+    let proc_clone = proc.clone();
+
     let task = async move {
+        let proc = proc_clone;
         let inode = file_handle.open_file.inode.lock().await;
         let f_size = inode.size;
         let current_pos = file_handle.position.load(Ordering::Acquire);
@@ -328,10 +330,10 @@ fn fseek(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
 
     task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
-    true
+    proc.set_sleeping(true);
 }
 
-fn fcreate(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn fcreate(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_id = args.get_namespace_id();
     let name_len = args.get_arg(0);
     let name_ptr = args.get_arg(1);
@@ -339,7 +341,7 @@ fn fcreate(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let Some(inode_type) = InodeType::from_id(args.get_arg(3) as u32) else {
         println!("fcreate: invalid inode type id");
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
     let perms = InodePermissionFlags((args.get_arg(4) & 0xFF_FF_FF) as u32);
     let type_perms = InodeTypeAndPerms::new(inode_type, perms);
@@ -347,7 +349,7 @@ fn fcreate(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let Some(name) = string_from_args(name_ptr, name_len) else {
         println!("fcreate: invalid name pointer or length");
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
 
     let pid = proc.pid();
@@ -361,12 +363,13 @@ fn fcreate(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let Some(parent_dir) = fs_namespace.get_file_handle(fd) else {
         println!("fcreate: invalid fd {fd}");
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
 
-    let proc = proc.clone();
+    let proc_clone = proc.clone();
 
     let task = async move {
+        let proc = proc_clone;
         let res = vfs::create_file(&parent_dir, &name, type_perms).await;
         if let Err(e) = res {
             println!("fcreate: failed to create file: {e}");
@@ -381,10 +384,10 @@ fn fcreate(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
 
     task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
-    true
+    proc.set_sleeping(true);
 }
 
-fn flink(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn flink(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_id = args.get_namespace_id();
     let name_len = args.get_arg(0);
     let name_ptr = args.get_arg(1);
@@ -394,7 +397,7 @@ fn flink(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let Some(name) = string_from_args(name_ptr, name_len) else {
         println!("fcreate: invalid name pointer or length");
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
 
     let pid = proc.pid();
@@ -408,17 +411,18 @@ fn flink(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let Some(parent_dir) = fs_namespace.get_file_handle(parent_fd) else {
         println!("fcreate: invalid fd {parent_fd}");
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
     let Some(target_file) = fs_namespace.get_file_handle(target_fd) else {
         println!("fcreate: invalid fd {target_fd}");
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
 
-    let proc = proc.clone();
+    let proc_clone = proc.clone();
 
     let task = async move {
+        let proc = proc_clone;
         let res = vfs::link_file(&parent_dir, &name, &target_file).await;
         if let Err(e) = res {
             println!("fcreate: failed to create file: {e}");
@@ -433,10 +437,10 @@ fn flink(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
 
     task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
-    true
+    proc.set_sleeping(true);
 }
 
-fn funlink(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn funlink(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_id = args.get_namespace_id();
     let name_len = args.get_arg(0);
     let name_ptr = args.get_arg(1);
@@ -445,7 +449,7 @@ fn funlink(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let Some(name) = string_from_args(name_ptr, name_len) else {
         println!("funlink: invalid name pointer or length");
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
 
     let pid = proc.pid();
@@ -459,12 +463,13 @@ fn funlink(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let Some(parent_dir) = fs_namespace.get_file_handle(parent_fd) else {
         println!("funlink: invalid fd {parent_fd}");
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
 
-    let proc = proc.clone();
+    let proc_clone = proc.clone();
 
     let task = async move {
+        let proc = proc_clone;
         let res = vfs::unlink_file(&parent_dir, &name).await;
         if let Err(e) = res {
             println!("funlink: failed to unlink file: {e}");
@@ -479,10 +484,10 @@ fn funlink(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
 
     task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
-    true
+    proc.set_sleeping(true);
 }
 
-fn fstat(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+fn fstat(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_id = args.get_namespace_id();
     let fd = args.get_arg(0);
     let buf_ptr = args.get_arg(1);
@@ -495,13 +500,14 @@ fn fstat(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let Some(file_handle) = fs_namespace.get_file_handle(fd) else {
         println!("fstat: invalid fd {fd}");
         proc.set_syscall_return(&[u64::MAX]);
-        return false;
+        return;
     };
 
     let pid = proc.pid();
-    let proc = proc.clone();
+    let proc_clone = proc.clone();
 
     let task = async move {
+        let proc = proc_clone;
         let stat_result = vfs::stat_file(file_handle.get()).await;
 
         let dst = buf_ptr;
@@ -520,5 +526,5 @@ fn fstat(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
 
     task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
-    true
+    proc.set_sleeping(true);
 }

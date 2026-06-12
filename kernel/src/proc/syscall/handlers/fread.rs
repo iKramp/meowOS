@@ -9,7 +9,7 @@ use crate::{
     task_runner::{self, PidOption},
 };
 
-pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let fd = args.get_legacy_syscall_arg(1);
     let size = args.get_legacy_syscall_arg(2);
     let buffer_ptr = args.get_legacy_syscall_arg(3) as *mut u8;
@@ -18,13 +18,13 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
 
     if size == 0 {
         proc.set_legacy_syscall_return(0, 0);
-        return true;
+        return;
     }
 
     //keep for early retur (don't waste time on disk if buffer is invalid)
     if !syscall::verify_memory_range(buffer_ptr as u64, buffer_ptr as u64 + size) {
         proc.set_legacy_syscall_return(u64::MAX, 1);
-        return false;
+        return;
     }
 
     let file_handle = {
@@ -37,11 +37,13 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
             f_handle
         } else {
             proc.set_legacy_syscall_return(u64::MAX, 1);
-            return false;
+            return;
         }
     };
 
+    let proc_clone = proc.clone();
     let task = async move {
+        let proc = proc_clone;
         let f_handle = file_handle; //get to local
         let pages = size.div_ceil(4096);
         let buffer_alloc = crate::memory::physical_allocator::allocate_contiguius_high(pages);
@@ -79,5 +81,5 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
 
     task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
-    true
+    proc.set_sleeping(true);
 }

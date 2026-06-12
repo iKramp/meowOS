@@ -2,7 +2,7 @@ use std::sync::arc::Arc;
 
 use crate::proc::{FilesystemNamespace, ProcessData, syscall::SyscallCpuState};
 
-pub fn fclose(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+pub fn fclose(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let fd = args.get_legacy_syscall_arg(1);
     let proc_mut = proc.get_mutable();
     let namespaces = proc_mut.get_namespaces();
@@ -15,5 +15,4 @@ pub fn fclose(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
     } else {
         proc.set_legacy_syscall_return(u64::MAX, 1);
     }
-    false
 }

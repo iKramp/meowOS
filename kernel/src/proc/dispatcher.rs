@@ -28,7 +28,7 @@ fn preemtion_callback() {
     //nothing, when an interrupt triggers a new process will be scheduled automatically
 }
 
-//this function should NOT use the heap at all to prevent memory leaks by setting IP and SP
+//WARN: DROP ALL HEAP DATA BEFORE DISPATCHING to avoid leaking memory
 pub(super) fn dispatch(new_proc: &ProcessData) -> ! {
     //INFO: any kind of change here should be matched with the one in interrupts/macros.rs and
     //syscall.rs
@@ -40,7 +40,7 @@ pub(super) fn dispatch(new_proc: &ProcessData) -> ! {
     //schedule preemption
     let scheduled_event = ScheduledEvent {
         time: std::time::Instant::now() + MAX_PROC_TIME_SLICE,
-        callback: Box::new(|| preemtion_callback()),
+        callback: Box::new(preemtion_callback),
     };
     let event_id = crate::acpi::schedule_event(scheduled_event);
 

@@ -1,4 +1,4 @@
-use core::sync::atomic::AtomicU64;
+use core::sync::atomic::{AtomicBool, AtomicU64};
 use std::{
     boxed::Box,
     lock_w_info,
@@ -17,6 +17,7 @@ use super::Pid;
 #[derive(Debug)]
 pub struct ProcessData {
     pid: Pid,
+    sleeping: AtomicBool,
     is_32_bit: bool,
     page_tree_root: AtomicU64,
     cmdline: Box<str>,
@@ -63,6 +64,7 @@ impl ProcessData {
         let root = namespaces.memory_namespace.page_tree_root();
         Self {
             pid,
+            sleeping: AtomicBool::new(false),
             is_32_bit,
             page_tree_root: AtomicU64::new(root.0),
             cmdline,
@@ -131,5 +133,13 @@ impl ProcessData {
     pub fn take_cpu_state(&self) -> CpuStateType {
         let internal = &mut lock_w_info!(self.internal);
         core::mem::replace(&mut internal.cpu_state, CpuStateType::None)
+    }
+
+    pub fn set_sleeping(&self, sleeping: bool) {
+        self.sleeping.store(sleeping, core::sync::atomic::Ordering::Release);
+    }
+
+    pub fn is_sleeping(&self) -> bool {
+        self.sleeping.load(core::sync::atomic::Ordering::Acquire)
     }
 }
