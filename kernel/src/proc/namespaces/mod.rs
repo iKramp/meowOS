@@ -2,7 +2,7 @@ use core::{
     any::{Any, TypeId},
     fmt::Debug,
 };
-use std::{error::ErrorCode, println, sync::arc::Arc, vec::Vec};
+use std::{boxed::Box, error::ErrorCode, println, sync::arc::Arc, vec::Vec};
 
 pub use filesystem_namespace::*;
 pub(in crate::proc) use memory_namespace::*;
@@ -14,6 +14,8 @@ mod namespace_management_pack;
 mod syscall_namespace;
 
 pub(super) use namespace_management_pack::init_namespace_management_syscalls;
+
+use crate::proc::ProcessData;
 
 pub trait ProcNamespace: Debug + Send + Sync + Any + Sized {
     fn get_id(&self) -> u64;
@@ -51,6 +53,8 @@ pub(in crate::proc) struct NamespaceIds {
     syscall_namespace: u64,
     filesystem_namespace: u64,
 }
+
+type ChangeNamespaceFn = Box<dyn FnOnce(ProcessData)>;
 
 impl ProcNamespaces {
     pub(in crate::proc) fn new(
@@ -136,17 +140,30 @@ impl ProcNamespaces {
             .expect("default namespace should always be available")
     }
 
-    pub fn change_namespace(&mut self, namespace_id: u64) -> Result<(), ()> {
+    pub fn change_namespace(&mut self, namespace_id: u64) -> Result<Option<ChangeNamespaceFn>, ()> {
         let index = self
             .owned_namespaces
             .binary_search_by_key(&namespace_id, |ns| ns.get_id())
             .map_err(|_| ())?;
-        match &self.owned_namespaces[index] {
-            NamespaceHolder::Syscall(ns) => self.syscall_namespace = ns.clone(),
-            NamespaceHolder::Mem(ns) => self.memory_namespace = ns.clone(),
-            NamespaceHolder::Fs(ns) => self.filesystem_namespace = ns.clone(),
-        }
-        Ok(())
+        let fn_to_call = match &self.owned_namespaces[index] {
+            NamespaceHolder::Syscall(ns) => {
+                self.syscall_namespace = ns.clone();
+                None
+            }
+            NamespaceHolder::Mem(ns) => {
+                self.memory_namespace = ns.clone();
+                let page_tree_root = ns.page_tree_root();
+                let f: ChangeNamespaceFn = Box::new(move |proc_data: ProcessData| {
+                    proc_data.set_page_tree(page_tree_root);
+                });
+                Some(f)
+            }
+            NamespaceHolder::Fs(ns) => {
+                self.filesystem_namespace = ns.clone();
+                None
+            }
+        };
+        Ok(fn_to_call)
     }
 
     pub(in crate::proc) fn add_namespace(&mut self, namespace: NamespaceHolder) {

@@ -6,7 +6,7 @@ use super::{
     scheduler::{release_current_proc, save_cpu_state},
 };
 use crate::{
-    acpi::cpu_locals::PageFaultHandleMode,
+    acpi::{self, cpu_locals::PageFaultHandleMode},
     interrupts::enable_interrupts,
     memory, msr,
     proc::{
@@ -174,6 +174,12 @@ extern "C" fn handler(saved_regs_ptr: u64) -> ! {
         .as_mut()
         .expect("syscalled while no current process in locals")
         .clone();
+
+    let preemption_id = locals.preemtion_id.take();
+    if let Some(preemption_id) = preemption_id {
+        acpi::cancel_scheduled_event(preemption_id);
+    }
+
     drop(locals);
     enable_interrupts();
 

@@ -24,6 +24,7 @@ pub fn enable_interrupts() {
     unsafe { core::arch::asm!("sti", options(nomem, nostack)) };
 }
 
+///Returns true if interrupts were enabled before this was called
 #[inline(always)]
 pub fn disable_interrupts() -> bool {
     let prev_rflags: u64;

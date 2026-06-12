@@ -1,10 +1,12 @@
-# EXEC RELATED SYSCALL DOCUMENTATION
+# PROC RELATED SYSCALL DOCUMENTATION
 
 ## SYSCALL LIST
 
 | Syscall Number | Name | Description |
 |----------------|------|-------------|
 | 0 | exec | executes a new program |
+| 1 | exit | terminates the current process |
+| 2 | sleep | puts the process to sleep for a specified duration |
 
 ## STRUCTURE INFORMATION
 
@@ -65,3 +67,21 @@ struct ExecArgs {
 Executes a new program with the environment defined in the Namespaces and RegisterState structures.
 The program starts executing at start_ptr
 namespace id 0 means clone current namespace
+
+### Syscall 1: exit
+#### Args:
+1. exit_code: u64 - the exit code of the process, which can be retrieved by the parent process
+#### Return Value:
+ - This syscall does not return a value
+#### Description:
+Terminates the current process and returns the given exit code to the parent process
+
+### Syscall 2: sleep
+#### Args:
+1. duration_sec: u64 - the duration to sleep in seconds
+1. duration_nsec: u64 - the additional duration to sleep in nanoseconds
+#### Return Value:
+ - On success, returns 0
+ - On failure, returns -1
+#### Description:
+Puts the process to sleep for the specified duration

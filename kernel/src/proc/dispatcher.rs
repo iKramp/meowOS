@@ -1,12 +1,15 @@
-use std::println;
+use core::time::Duration;
+use std::{boxed::Box, println};
 
 use crate::{
-    acpi::cpu_locals::PageFaultHandleMode,
+    acpi::{ScheduledEvent, cpu_locals::PageFaultHandleMode},
     interrupts::{InterruptProcessorState, disable_interrupts},
     memory,
 };
 
 use super::{ProcessData, process_data::CpuStateType, syscall::SyscallCpuState};
+
+const MAX_PROC_TIME_SLICE: Duration = Duration::from_millis(100);
 
 /*
  * Things that need to be done: (Intel SDM, Vol 3, chapter 8.1.2
@@ -21,13 +24,26 @@ use super::{ProcessData, process_data::CpuStateType, syscall::SyscallCpuState};
  * save/restore gs and fs registers  through MSRs and swapgs
  */
 
+fn preemtion_callback() {
+    //nothing, when an interrupt triggers a new process will be scheduled automatically
+}
+
 //this function should NOT use the heap at all to prevent memory leaks by setting IP and SP
 pub(super) fn dispatch(new_proc: &ProcessData) -> ! {
     //INFO: any kind of change here should be matched with the one in interrupts/macros.rs and
     //syscall.rs
 
+    //change page tree
     let new_page_tree = new_proc.page_tree();
     memory::set_cr3(new_page_tree);
+
+    //schedule preemption
+    let scheduled_event = ScheduledEvent {
+        time: std::time::Instant::now() + MAX_PROC_TIME_SLICE,
+        callback: Box::new(|| preemtion_callback()),
+    };
+    let event_id = crate::acpi::schedule_event(scheduled_event);
+
     let mut locals = crate::acpi::cpu_locals::CpuLocals::get_mut();
     disable_interrupts();
     let cpu_state = new_proc.take_cpu_state();
@@ -36,6 +52,7 @@ pub(super) fn dispatch(new_proc: &ProcessData) -> ! {
     locals.int_depth -= 1;
     locals.lock_info.assert_no_locks();
     locals.page_fault_handle_mode = PageFaultHandleMode::User;
+    locals.preemtion_id = Some(event_id);
     drop(locals);
 
     core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);

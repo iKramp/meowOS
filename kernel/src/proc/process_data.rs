@@ -1,3 +1,4 @@
+use core::sync::atomic::AtomicU64;
 use std::{
     boxed::Box,
     lock_w_info,
@@ -17,7 +18,7 @@ use super::Pid;
 pub struct ProcessData {
     pid: Pid,
     is_32_bit: bool,
-    page_tree_root: PhysAddr,
+    page_tree_root: AtomicU64,
     cmdline: Box<str>,
     internal: NoIntSpinlock<ProcessDataMutable>,
 }
@@ -63,7 +64,7 @@ impl ProcessData {
         Self {
             pid,
             is_32_bit,
-            page_tree_root: root,
+            page_tree_root: AtomicU64::new(root.0),
             cmdline,
             internal: NoIntSpinlock::new(ProcessDataMutable {
                 return_status: None,
@@ -120,7 +121,11 @@ impl ProcessData {
     }
 
     pub fn page_tree(&self) -> PhysAddr {
-        self.page_tree_root
+        PhysAddr(self.page_tree_root.load(core::sync::atomic::Ordering::Acquire))
+    }
+
+    pub fn set_page_tree(&self, new_root: PhysAddr) {
+        self.page_tree_root.store(new_root.0, core::sync::atomic::Ordering::Release);
     }
 
     pub fn take_cpu_state(&self) -> CpuStateType {

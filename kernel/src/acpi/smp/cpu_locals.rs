@@ -14,7 +14,7 @@ use std::{
 };
 
 use crate::{
-    acpi::platform_info::PlatformInfo,
+    acpi::{lapic_timer::AcceptedScheduledEvent, platform_info::PlatformInfo},
     interrupts::{self, idt::TablePointer},
     memory::stack::{KERNEL_STACK_SIZE_PAGES, prepare_kernel_stack},
     proc::ProcessData,
@@ -97,7 +97,10 @@ pub struct CpuLocals {
     pub stack_size_pages: u64,
     /// Points to TablePointer with base and limit of GDT
     pub gdt_ptr: TablePointer,
+
     pub current_process: Option<Arc<ProcessData>>,
+    pub preemtion_id: Option<u64>,
+
     pub apic_id: u8,
     pub processor_id: u8,
     pub int_depth: u32,
@@ -107,6 +110,9 @@ pub struct CpuLocals {
     pub lock_info: LockInfo,
     pub page_fault_handle_mode: PageFaultHandleMode,
     get_state: CpuLocalGetState,
+
+    pub scheduled_event_id_counter: u64,
+    pub scheduled_events: Vec<AcceptedScheduledEvent>,
 }
 
 pub fn init(platform_info: &PlatformInfo) {
@@ -184,6 +190,8 @@ impl CpuLocals {
                 mut_borrow: AtomicBool::new(false),
                 immut_borrow: AtomicU16::new(0),
             },
+            scheduled_events: Vec::new(),
+            scheduled_event_id_counter: 0,
         }
     }
 
@@ -196,7 +204,10 @@ impl CpuLocals {
             );
             let immut_ref = &mut *cpu_locals;
             immut_ref.get_state.immut_borrow.fetch_add(1, Ordering::AcqRel);
-            // assert!(!immut_ref.get_state.mut_borrow.load(Ordering::Acquire), "CpuLocals already mutably borrowed");
+            assert!(
+                !immut_ref.get_state.mut_borrow.load(Ordering::Acquire),
+                "CpuLocals already mutably borrowed"
+            );
             CpuLocalBinding { cpu_locals: immut_ref }
         }
     }
@@ -209,8 +220,11 @@ impl CpuLocals {
                 cpu_locals = out(reg) cpu_locals
             );
             let mut_ref = &mut *cpu_locals;
-            let _ = mut_ref.get_state.mut_borrow.swap(true, Ordering::AcqRel);
-            // assert!(!prev_mut_borrow && mut_ref.get_state.immut_borrow.load(Ordering::Acquire) == 0, "CpuLocals already borrowed");
+            let prev_mut_borrow = mut_ref.get_state.mut_borrow.swap(true, Ordering::AcqRel);
+            assert!(
+                !prev_mut_borrow && mut_ref.get_state.immut_borrow.load(Ordering::Acquire) == 0,
+                "CpuLocals already borrowed"
+            );
             CpuLocalBindingMut { cpu_locals: mut_ref }
         }
     }

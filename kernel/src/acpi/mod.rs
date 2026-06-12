@@ -20,6 +20,7 @@ use std::{
 pub use apic::LAPIC_REGISTERS;
 use fadt::Fadt;
 pub use hpet::HpetTable;
+pub use lapic_timer::{ScheduledEvent, cancel_scheduled_event, schedule_event};
 use madt::Madt;
 pub use mcfg::{BaseAddressAllocation, McfgTable};
 use platform_info::PlatformInfo;

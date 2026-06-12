@@ -2,17 +2,18 @@ use core::alloc::{GlobalAlloc, Layout};
 use std::{boxed::Box, error::ErrorCode, lock_w_info, string::ToString, sync::arc::Arc};
 
 use crate::{
+    acpi::{ScheduledEvent, schedule_event},
     interrupts::InterruptProcessorState,
     memory::{heap, safe_memcpy_from_user},
     proc::{
-        NamespaceIds, PROCESS_ID_COUNTER, Pid, ProcNamespaces, ProcessData, SCHEDULER,
+        self, NamespaceIds, PROCESS_ID_COUNTER, Pid, ProcNamespaces, ProcessData, SCHEDULER,
         process_data::CpuStateType,
         syscall::{SyscallCpuState, SyscallHandler, SyscallPack},
     },
 };
 
-pub fn init_exec_syscall() {
-    let handlers: [SyscallHandler; _] = [exec];
+pub fn init_proc_syscalls() {
+    let handlers: [SyscallHandler; _] = [exec, exit, sleep];
 
     let exec_syscall_pack = SyscallPack::new(Box::new(handlers));
     crate::proc::syscall::register_syscall_pack("exec".into(), Arc::new(exec_syscall_pack));
@@ -144,4 +145,30 @@ pub fn create_process_from_parts(
     scheduler.accept_new_process(pid, process_data);
 
     Ok(pid)
+}
+
+fn exit(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+    let status = args.get_arg(0);
+    proc::kill_process(proc.pid(), status);
+    false
+}
+
+fn sleep(args: &SyscallCpuState, proc: &Arc<ProcessData>) -> bool {
+    let sleep_time_sec = args.get_arg(0);
+    let sleep_time_ns = args.get_arg(1);
+    let sleep_time = core::time::Duration::new(sleep_time_sec, sleep_time_ns as u32);
+    let sleep_until = std::time::Instant::now() + sleep_time;
+
+    let pid = proc.pid();
+
+    let scheduled_event = ScheduledEvent {
+        time: sleep_until,
+        callback: Box::new(move || {
+            proc::wake_process(pid);
+        }),
+    };
+
+    schedule_event(scheduled_event);
+
+    true
 }

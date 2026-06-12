@@ -1,12 +1,12 @@
 use core::time::Duration;
-use std::{println, time::Instant};
+use std::{boxed::Box, println, time::Instant};
 
 use crate::{
     acpi::apic::LapicRegistersPtr,
     handler,
     interrupts::{
-        TIMER_DESIRED_FREQUENCY,
-        handlers::apic_timer_tick,
+        InterruptProcessorState, TIMER_DESIRED_FREQUENCY, disable_interrupts, enable_interrupts,
+        handlers::apic_eoi,
         idt::{Entry, IDT},
     },
 };
@@ -14,6 +14,16 @@ use crate::{
 static mut TIMER_CONF: u32 = 0;
 static mut FREQUENCY: u64 = 0;
 const LAPIC_TIMER_INT_VEC: u8 = 252;
+
+pub struct AcceptedScheduledEvent {
+    event: ScheduledEvent,
+    id: u64,
+}
+
+pub struct ScheduledEvent {
+    pub time: Instant,
+    pub callback: Box<dyn FnOnce()>,
+}
 
 pub(super) fn setup_timer_ap(lapic_registers: &LapicRegistersPtr) {
     unsafe {
@@ -50,7 +60,7 @@ pub(super) fn activate_timer(lapic_registers: &LapicRegistersPtr) {
 
     println!("Ticks: {}", ticks);
 
-    unsafe { IDT.set(Entry::new(handler!(apic_timer_tick)), LAPIC_TIMER_INT_VEC as usize) };
+    unsafe { IDT.set(Entry::new(handler!(apic_interrupt_handler)), LAPIC_TIMER_INT_VEC as usize) };
 
     let initial_count = ticks_counted * 100 / TIMER_DESIRED_FREQUENCY;
     println!("Initial count: {} or {:x}", initial_count, initial_count);
@@ -90,6 +100,53 @@ fn sleep_duration(duration: Duration) {
     }
 }
 
+pub fn schedule_event(event: ScheduledEvent) -> u64 {
+    let previous = disable_interrupts();
+    let mut locals = crate::acpi::cpu_locals::CpuLocals::get_mut();
+
+    let id = locals.scheduled_event_id_counter;
+    locals.scheduled_event_id_counter += 1;
+
+    let event_vec = &mut locals.scheduled_events;
+
+    let event = AcceptedScheduledEvent { event, id };
+
+    let insert_pos = event_vec
+        .binary_search_by_key(&event.event.time, |e| e.event.time)
+        .unwrap_or_else(|e| e);
+    event_vec.insert(insert_pos, event);
+    drop(locals);
+    handle_scheduled_events();
+    if previous {
+        enable_interrupts();
+    }
+
+    id
+}
+
+pub fn cancel_scheduled_event(id: u64) -> bool {
+    let previous = disable_interrupts();
+    let mut locals = crate::acpi::cpu_locals::CpuLocals::get_mut();
+
+    let event_vec = &mut locals.scheduled_events;
+
+    if let Some(pos) = event_vec.iter().position(|e| e.id == id) {
+        event_vec.remove(pos);
+        drop(locals);
+        handle_scheduled_events();
+        if previous {
+            enable_interrupts();
+        }
+        true
+    } else {
+        drop(locals);
+        if previous {
+            enable_interrupts();
+        }
+        false
+    }
+}
+
 pub fn set_timeout(duration: Duration) {
     let seconds = duration.as_secs();
     let nanos = duration.subsec_nanos() as u64;
@@ -121,4 +178,36 @@ pub fn set_timeout(duration: Duration) {
     let lapic_registers = unsafe { super::LAPIC_REGISTERS.assume_init_mut() };
     lapic_registers.divide_configuration().bytes().write(division);
     lapic_registers.initial_count().bytes().write(ticks as u32);
+}
+
+pub extern "C" fn apic_interrupt_handler(_proc_data: &mut InterruptProcessorState) {
+    handle_scheduled_events();
+    apic_eoi();
+}
+
+pub fn handle_scheduled_events() {
+    let mut now = Instant::now();
+
+    let previous = disable_interrupts();
+
+    let mut locals = crate::acpi::cpu_locals::CpuLocals::get_mut();
+    while let Some(event) = locals.scheduled_events.first() {
+        if event.event.time > now {
+            break;
+        }
+        let event = locals.scheduled_events.remove(0);
+        (event.event.callback)();
+        now = Instant::now();
+    }
+
+    if let Some(next_event) = locals.scheduled_events.first() {
+        let time_until_next = next_event.event.time - now;
+        set_timeout(time_until_next);
+    }
+
+    drop(locals);
+
+    if previous {
+        enable_interrupts();
+    }
 }
