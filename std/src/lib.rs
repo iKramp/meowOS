@@ -13,7 +13,7 @@ fn panic(info: &PanicInfo) -> ! {
         let mut lock = crate::print::PRINT.as_mut().unwrap().force_get_lock();
         print::_print_colored_locked((0, 0, 255), &mut lock, format_args!("{}", info), print::LogLevel::Error);
         loop {
-            crate::thread::sleep(crate::time::Duration::from_secs(10));
+            core::arch::asm!("hlt");
         }
     }
 }

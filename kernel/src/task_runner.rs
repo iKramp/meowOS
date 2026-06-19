@@ -131,7 +131,7 @@ pub extern "C" fn add_task(task: AsyncTask, pid: PidOption) {
 }
 
 pub fn wake_task(task_id: u64, apic_id: u8) {
-    assert_eq!(apic_id, 0);
+    assert_eq!(apic_id, 0); //this code is very broken lmao, cpu locals aren't in an array
     let locals = CpuLocals::get();
     let locals_start = locals.self_addr.0 - (locals.apic_id as u64 * core::mem::size_of::<CpuLocals>() as u64);
     let target_locals = locals_start + (apic_id as u64 * core::mem::size_of::<CpuLocals>() as u64);
@@ -144,7 +144,6 @@ pub fn wake_task(task_id: u64, apic_id: u8) {
 fn sleep_task(task: AsyncTaskWrapper) {
     let locals = CpuLocals::get();
     let mut waiting_lock = lock_w_info!(locals.async_task_data.waiting_tasks);
-    // waiting_lock.insert(task.id, task);
     waiting_lock.push((task.id, task));
     drop(waiting_lock);
     drop(locals);
@@ -173,9 +172,10 @@ fn wake_tasks_in_list(locals: &mut CpuLocals) {
 
 pub fn process_tasks() {
     let mut locals = CpuLocals::get_mut();
-    locals.lock_info.assert_no_locks();
     wake_tasks_in_list(&mut locals);
     drop(locals);
+
+    unsafe { CpuLocals::get_lock_info().assert_no_locks() };
 
     loop {
         let locals = CpuLocals::get_mut();

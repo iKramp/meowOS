@@ -2,7 +2,10 @@ use core::time::Duration;
 use std::{boxed::Box, println};
 
 use crate::{
-    acpi::{ScheduledEvent, cpu_locals::PageFaultHandleMode},
+    acpi::{
+        ScheduledEvent,
+        cpu_locals::{CpuLocals, PageFaultHandleMode},
+    },
     interrupts::{InterruptProcessorState, disable_interrupts},
     memory,
 };
@@ -44,16 +47,17 @@ pub(super) fn dispatch(new_proc: &ProcessData) -> ! {
     };
     let event_id = crate::acpi::schedule_event(scheduled_event);
 
-    let mut locals = crate::acpi::cpu_locals::CpuLocals::get_mut();
+    let mut locals = CpuLocals::get_mut();
     disable_interrupts();
     let cpu_state = new_proc.take_cpu_state();
     println!("Dispatching process with state: {:x?}", cpu_state);
 
     locals.int_depth -= 1;
-    locals.lock_info.assert_no_locks();
     locals.page_fault_handle_mode = PageFaultHandleMode::User;
     locals.preemtion_id = Some(event_id);
     drop(locals);
+
+    unsafe { CpuLocals::get_lock_info().assert_no_locks() };
 
     core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
 

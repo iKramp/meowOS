@@ -6,7 +6,10 @@ use super::{
     scheduler::{release_current_proc, save_cpu_state},
 };
 use crate::{
-    acpi::{self, cpu_locals::PageFaultHandleMode},
+    acpi::{
+        self,
+        cpu_locals::{CpuLocals, PageFaultHandleMode},
+    },
     interrupts::enable_interrupts,
     memory, msr,
     proc::{
@@ -166,7 +169,7 @@ extern "C" fn handler(saved_regs_ptr: u64) -> ! {
 
     let saved_regs = unsafe { &mut *(saved_regs_ptr as *mut SyscallCpuState) };
 
-    let mut locals = crate::acpi::cpu_locals::CpuLocals::get_mut();
+    let mut locals = CpuLocals::get_mut();
     unsafe { core::ptr::addr_of_mut!(locals.int_depth).write_volatile(1) };
     locals.page_fault_handle_mode = PageFaultHandleMode::KernelPanic;
     let curr_proc = locals
@@ -176,11 +179,12 @@ extern "C" fn handler(saved_regs_ptr: u64) -> ! {
         .clone();
 
     let preemption_id = locals.preemtion_id.take();
+    drop(locals);
+
     if let Some(preemption_id) = preemption_id {
         acpi::cancel_scheduled_event(preemption_id);
     }
 
-    drop(locals);
     enable_interrupts();
 
     save_cpu_state(&StackCpuStateData::Syscall(saved_regs), &curr_proc);

@@ -1,6 +1,7 @@
 pub mod arc;
 pub mod async_lock;
 pub mod async_rw_lock;
+pub mod local_lock;
 pub mod lock_info;
 pub mod no_int_spinlock;
 pub mod once_lock;

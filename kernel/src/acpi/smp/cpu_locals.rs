@@ -1,13 +1,12 @@
-use core::{
-    mem::MaybeUninit,
-    sync::atomic::{AtomicBool, AtomicU16, Ordering},
-};
+use core::mem::MaybeUninit;
 use std::{
     boxed::Box,
+    local_lock_read_w_info, local_lock_write_w_info,
     mem_utils::{VirtAddr, get_at_virtual_addr},
     println,
     sync::{
         arc::Arc,
+        local_lock::{LocalLock, LocalLockReadGuard, LocalLockWriteGuard},
         lock_info::{LockInfo, set_lock_info_func},
     },
     vec::Vec,
@@ -22,63 +21,6 @@ use crate::{
 };
 
 pub static mut CPU_LOCALS: MaybeUninit<Box<[VirtAddr]>> = MaybeUninit::uninit();
-
-struct CpuLocalGetState {
-    mut_borrow: AtomicBool,
-    immut_borrow: AtomicU16,
-}
-
-#[repr(transparent)]
-pub struct CpuLocalBinding {
-    cpu_locals: &'static mut CpuLocals,
-}
-
-#[repr(transparent)]
-pub struct CpuLocalBindingMut {
-    cpu_locals: &'static mut CpuLocals,
-}
-
-impl Drop for CpuLocalBinding {
-    fn drop(&mut self) {
-        self.cpu_locals.get_state.immut_borrow.fetch_sub(1, Ordering::AcqRel);
-    }
-}
-impl Drop for CpuLocalBindingMut {
-    fn drop(&mut self) {
-        self.cpu_locals.get_state.mut_borrow.store(false, Ordering::Release);
-    }
-}
-
-impl<'a> CpuLocalBinding {
-    pub fn get(&'a self) -> &'a CpuLocals {
-        self.cpu_locals
-    }
-}
-impl<'a> CpuLocalBindingMut {
-    pub fn get(&'a mut self) -> &'a mut CpuLocals {
-        self.cpu_locals
-    }
-}
-
-impl std::ops::Deref for CpuLocalBinding {
-    type Target = CpuLocals;
-    fn deref(&self) -> &Self::Target {
-        self.get()
-    }
-}
-
-impl std::ops::DerefMut for CpuLocalBindingMut {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.get()
-    }
-}
-
-impl std::ops::Deref for CpuLocalBindingMut {
-    type Target = CpuLocals;
-    fn deref(&self) -> &Self::Target {
-        self.cpu_locals
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PageFaultHandleMode {
@@ -110,7 +52,7 @@ pub struct CpuLocals {
     pub async_task_data: AsyncTaskData,
     pub lock_info: LockInfo,
     pub page_fault_handle_mode: PageFaultHandleMode,
-    get_state: CpuLocalGetState,
+    lock_addr: VirtAddr,
 
     pub scheduled_event_id_counter: u64,
     pub scheduled_events: Vec<AcceptedScheduledEvent>,
@@ -151,22 +93,32 @@ pub fn init_dummy_cpu_locals() {
     println!(level:info, "BSP stack ptr: {:016X}, size: {:X}", bsp_stack_ptr.0, KERNEL_STACK_SIZE_PAGES as u64 * 4096);
     let bsp_gdt = interrupts::create_new_gdt(bsp_stack_ptr);
     interrupts::load_gdt(bsp_gdt);
-    let bsp_local = super::cpu_locals::CpuLocals::new(bsp_stack_ptr, KERNEL_STACK_SIZE_PAGES as u64, 0, 0, bsp_gdt);
+    let bsp_local = CpuLocals::new(bsp_stack_ptr, KERNEL_STACK_SIZE_PAGES as u64, 0, 0, bsp_gdt);
     let bsp_local_ptr = add_cpu_locals(bsp_local);
     crate::msr::set_msr(0xC0000101, bsp_local_ptr.0);
 
     set_lock_info_func(|| unsafe { CpuLocals::get_lock_info() });
 }
 
-pub fn add_cpu_locals(locals: super::cpu_locals::CpuLocals) -> VirtAddr {
-    unsafe {
-        let apic_id = locals.apic_id;
-        let cpu_locals = CPU_LOCALS.assume_init_mut();
-        let ptr = std::Box::leak(std::Box::new(locals)) as *mut _ as *mut u64;
-        ptr.write_volatile(ptr as u64); //write self pointer
+pub fn add_cpu_locals(locals: CpuLocals) -> VirtAddr {
+    let apic_id = locals.apic_id;
 
-        cpu_locals[apic_id as usize] = VirtAddr(ptr as u64);
-        VirtAddr(cpu_locals[apic_id as usize].0)
+    let mut locals_on_heap = Box::new(locals);
+    let locals_addr = locals_on_heap.as_ref() as *const CpuLocals as u64;
+    locals_on_heap.self_addr = VirtAddr(locals_addr);
+
+    let locked_locals = Box::new(LocalLock::new(locals_on_heap));
+    let lock_addr = Box::leak(locked_locals) as *const _ as u64;
+
+    unsafe {
+        let cpu_locals_arr = CPU_LOCALS.assume_init_mut();
+
+        let locals_ptr = locals_addr as *mut CpuLocals;
+        let lock_addr_ptr = (locals_ptr.byte_add(core::mem::offset_of!(CpuLocals, lock_addr))) as *mut VirtAddr;
+        lock_addr_ptr.write(VirtAddr(lock_addr));
+
+        cpu_locals_arr[apic_id as usize] = VirtAddr(locals_addr);
+        VirtAddr(cpu_locals_arr[apic_id as usize].0)
     }
 }
 
@@ -190,16 +142,13 @@ impl CpuLocals {
             async_task_data: AsyncTaskData::new(),
             lock_info: LockInfo::new(),
             page_fault_handle_mode: PageFaultHandleMode::KernelPanic,
-            get_state: CpuLocalGetState {
-                mut_borrow: AtomicBool::new(false),
-                immut_borrow: AtomicU16::new(0),
-            },
+            lock_addr: VirtAddr(0),
             scheduled_event_id_counter: 0,
             scheduled_events: Vec::new(),
         }
     }
 
-    pub fn get() -> CpuLocalBinding {
+    pub fn get() -> LocalLockReadGuard<'static, Box<CpuLocals>> {
         unsafe {
             let cpu_locals: *mut Self;
             core::arch::asm!(
@@ -207,16 +156,14 @@ impl CpuLocals {
                 cpu_locals = out(reg) cpu_locals
             );
             let immut_ref = &mut *cpu_locals;
-            immut_ref.get_state.immut_borrow.fetch_add(1, Ordering::AcqRel);
-            assert!(
-                !immut_ref.get_state.mut_borrow.load(Ordering::Acquire),
-                "CpuLocals already mutably borrowed"
-            );
-            CpuLocalBinding { cpu_locals: immut_ref }
+
+            let lock_addr = immut_ref.lock_addr;
+            let lock = get_at_virtual_addr::<LocalLock<Box<CpuLocals>>>(lock_addr);
+            local_lock_read_w_info!(lock)
         }
     }
 
-    pub fn get_mut() -> CpuLocalBindingMut {
+    pub fn get_mut() -> LocalLockWriteGuard<'static, Box<CpuLocals>> {
         unsafe {
             let cpu_locals: *mut Self;
             core::arch::asm!(
@@ -224,17 +171,17 @@ impl CpuLocals {
                 cpu_locals = out(reg) cpu_locals
             );
             let mut_ref = &mut *cpu_locals;
-            let prev_mut_borrow = mut_ref.get_state.mut_borrow.swap(true, Ordering::AcqRel);
-            assert!(
-                !prev_mut_borrow && mut_ref.get_state.immut_borrow.load(Ordering::Acquire) == 0,
-                "CpuLocals already borrowed"
-            );
-            CpuLocalBindingMut { cpu_locals: mut_ref }
+
+            let lock_addr = mut_ref.lock_addr;
+            let lock = get_at_virtual_addr::<LocalLock<Box<CpuLocals>>>(lock_addr);
+            local_lock_write_w_info!(lock)
         }
     }
 
     ///# Safety
     /// Ensure only 1 mutable reference at a time
+    /// NEVER get a lock when calling this, because this is called when Cpu locals lock is being
+    /// acquired. Interrupts are already disabled when get_lock_info is called
     pub unsafe fn get_lock_info() -> &'static mut LockInfo {
         unsafe {
             let cpu_locals: *mut Self;

@@ -84,7 +84,8 @@ impl<T: ?Sized> NoIntSpinlock<T> {
     ///function to get a poitner to read only data in T
     /// # Safety
     ///
-    /// This is unsafe as the caller must ensure that data is never modified
+    /// This is unsafe as the caller must ensure that data is never modified and there are no issues
+    /// with out of sync reads
     pub unsafe fn get_read_ptr(&self) -> &T {
         unsafe { &*self.data.get() }
     }

@@ -213,9 +213,9 @@ pub extern "C" fn general_interrupt_handler(
     main_handler(proc_data);
 
     //proc is depth 0, root int is depth 1
+
     let mut locals = CpuLocals::get_mut();
     if locals.int_depth > 1 || locals.atomic_context {
-        disable_interrupts();
         locals.int_depth -= 1;
         locals.atomic_context = prev_atomic;
         locals.page_fault_handle_mode = prev_mode;
@@ -227,16 +227,21 @@ pub extern "C" fn general_interrupt_handler(
         release_current_proc(curr_proc);
     }
     drop(locals);
+
     interrupt_context_switch();
 
     //did not context switch -> PROC not initialized or some other "error"
+
     disable_interrupts();
+
     let mut locals = CpuLocals::get_mut();
     locals.int_depth -= 1;
     locals.atomic_context = prev_atomic;
-    locals.lock_info.assert_no_locks();
     locals.page_fault_handle_mode = prev_mode;
     drop(locals);
+
+    unsafe { CpuLocals::get_lock_info().assert_no_locks() };
+
     core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
 }
 
