@@ -97,23 +97,21 @@ impl VgaText {
         unsafe {
             let top_ptr = VGA_BINDING.buffer;
             let diff = VGA_BINDING.stride * CHAR_HEIGHT;
-            let limit = top_ptr.add(diff * (self.height_lines - 1) - 1);
+
+            let bytes = diff * (self.height_lines - 1);
+            let qwords = bytes / 8;
 
             asm!(
-                "2:",
-                "mov r8, [r10 + r9]",
-                "mov qword ptr [r10], r8",
-                "add r10, 8",
-                "cmp r10, r11",
-                "jle 2b",
-                in("r9") diff,
-                in("r10") top_ptr,
-                in("r11") limit,
-                lateout("r9") _,
-                lateout("r10") _,
-                lateout("r11") _,
-                out("r8") _,
-            )
+                "cld",
+                "rep movsq",
+                in("rsi") top_ptr.add(diff),
+                in("rdi") top_ptr,
+                in("rcx") qwords,
+                lateout("rsi") _,
+                lateout("rdi") _,
+                lateout("rcx") _,
+                options(nostack),
+            );
         }
     }
 }
