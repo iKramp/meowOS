@@ -74,8 +74,8 @@ struct NamespaceInfo {
 }
 
 fn lsnamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
-    let namespace_buf_ptr = args.get_arg(0);
-    let namespace_buf_size = args.get_arg(1);
+    let namespace_buf_size = args.get_arg(0);
+    let namespace_buf_ptr = args.get_arg(1);
 
     let mutable = proc.get_mutable();
     let namespaces = mutable.get_namespaces();

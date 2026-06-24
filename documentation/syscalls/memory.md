@@ -16,9 +16,9 @@
 ### Syscall 0: make_region
 #### Args:
 1. u64 address - starting address of the region
-2. u64 order
-3. u64 permissions
-4. u64 region_type
+2. u8  order
+3. u8  permissions
+4. u8  region_type
 5. u64 management_mode
 6. u64 region_name_len
 7. u64 region_name_ptr - utf8 valid

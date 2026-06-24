@@ -14,7 +14,7 @@
 ### Syscall 0: lsgroups
 #### Args:
 1. buf_size: u64 - size of the buffer in count of elements
-2. buf_ptr: u64 - pointer to a buffer of group_info structures to be filled by the kernel
+2. buf_ptr: *mut MappedGroupInfo - pointer to a buffer of group_info structures to be filled by the kernel
 #### Return value:
 - Returns the number of groups filled into the buffer in return arg 0 and the total number of mapped groups in return arg 1.
 #### Description:
@@ -31,7 +31,7 @@ struct MappedGroupInfo {
 ### Syscall 1: lsallgroups
 #### Args:
 1. buf_size: u64 - size of the buffer in count of elements
-2. buf_ptr: u64 - pointer to a buffer of group_info structures to be filled by the kernel
+2. buf_ptr: *mut GroupInfo - pointer to a buffer of group_info structures to be filled by the kernel
 #### Return value:
 - Returns the number of groups filled into the buffer in return arg 0 and the total number of available groups in return arg 1.
 #### Description:
@@ -48,13 +48,14 @@ struct GroupInfo {
 #### Args:
 1. name_len: u64 - length of the group name in bytes
 2. name_ptr: u64 - pointer to the group name string (utf8 valid)
-3. offset: u64 - offset to map the group to in the process's syscall namespace
+3. offset: u32 - offset to map the group to in the process's syscall namespace
 #### Return value:
 - On success, returns 0
 - On failure, returns -1
 #### Description:
 Maps the group with the given name to the process's syscall namespace at the specified offset.
-The offset must be smaller than 2^32, and the group name must be valid and available in the system (see lsallgroups).
+The group name must be valid and available in the system (see lsallgroups).
+The offset must be smaller or equal to 2^32 - 32 (to fit all syscalls)
 If the same group is already mapped in the current namespace, restrictions carry over. Otherwise, all syscalls are unrestricted
 
 ### Syscall 3: unmapgroup

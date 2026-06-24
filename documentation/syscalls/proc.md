@@ -19,8 +19,9 @@ struct NamespaceIds {
 }
 
 //This changes based on the architecture
+#[cfg(target_arch = "x86_64")]
 #[repr(C)]
-struct X86RegisterState {
+struct RegisterState {
     rax: u64,
     rbx: u64,
     rcx: u64,
@@ -37,12 +38,6 @@ struct X86RegisterState {
     r13: u64,
     r14: u64,
     r15: u64,
-}
-
-#[repr(C)]
-union RegisterState {
-    x86: X86RegisterState,
-    //other architectures here
 }
 
 #[repr(C)]

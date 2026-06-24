@@ -19,9 +19,10 @@ pub fn init_proc_syscalls() {
     crate::proc::syscall::register_syscall_pack("exec".into(), Arc::new(exec_syscall_pack));
 }
 
+#[cfg(target_arch = "x86_64")]
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
-pub struct X86RegisterState {
+pub struct RegisterState {
     pub rax: u64,
     pub rbx: u64,
     pub rcx: u64,
@@ -38,12 +39,6 @@ pub struct X86RegisterState {
     pub r13: u64,
     pub r14: u64,
     pub r15: u64,
-}
-
-#[repr(C)]
-union RegisterState {
-    x86: X86RegisterState,
-    //other architectures here
 }
 
 #[repr(C)]
@@ -96,7 +91,7 @@ fn exec(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         return;
     };
 
-    let Ok(pid) = create_process_from_parts(unsafe { exec_args.registers.x86 }, exec_args.start_ptr, namespaces, name) else {
+    let Ok(pid) = create_process_from_parts(exec_args.registers, exec_args.start_ptr, namespaces, name) else {
         proc.set_syscall_return(&[u64::MAX]);
         return;
     };
@@ -105,7 +100,7 @@ fn exec(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
 }
 
 pub fn create_process_from_parts(
-    register_states: X86RegisterState,
+    register_states: RegisterState,
     start_ptr: u64,
     namespaces: ProcNamespaces,
     name: &str,

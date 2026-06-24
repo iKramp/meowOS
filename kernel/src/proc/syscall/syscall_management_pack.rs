@@ -120,6 +120,11 @@ fn map_group(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let group_name_ptr = args.get_arg(1);
     let base_index = args.get_arg(2);
 
+    if base_index + 32 > u32::MAX as u64 {
+        proc.set_syscall_return(&[u64::MAX]);
+        return;
+    }
+
     let Some(group_name) = syscall::string_from_args(group_name_ptr, group_name_len) else {
         proc.set_syscall_return(&[u64::MAX]);
         return;

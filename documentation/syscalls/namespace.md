@@ -18,7 +18,7 @@ Some namespaces may be shared between processes
 
 ### Syscall 0: mknamespace
 #### Args:
-1. type: u64 - type of the namespace to create (defined in documentation/namespaces/general.md)
+1. type: u32 - type of the namespace to create (defined in documentation/namespaces/general.md)
 1. existing_id: u64 - if 0, an empty namespace is created. If non-zero, the new namespace is initialized as a copy of the existing namespace with the given ID. The process must be an owner of the existing namespace.
 #### Return Value:
  - On success, returns the ID of the created namespace
@@ -47,8 +47,8 @@ Sets the process's current namespace of the same type as id to the namespace ide
 
 ### Syscall 3: lsnamespace
 #### Args:
-1. buf: u64 - pointer to a buffer of namespace_info structures to be filled by the kernel
 2. buf_size: u64 - size of the buffer in count of elements
+1. buf: *mut NamespaceInfo - pointer to a buffer of namespace_info structures to be filled by the kernel
 #### Return Value:
  - On success, returns the number of namespaces filled into the buffer in the first return arg and total number of namespaces in the second.
  - On failure, returns -1
@@ -58,7 +58,7 @@ Fills the provided buffer with information about the namespaces owned by the pro
 #[repr(C)]
 struct NamespaceInfo {
     id: u64,
-    type: NamespaceType, //32 bit
+    type: NamespaceType, //documented in documentation/namespaces/general.md
     currently_used: bool;
 }
 ```
