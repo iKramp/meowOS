@@ -13,7 +13,6 @@ pub fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let fd = args.get_legacy_syscall_arg(1);
     let size = args.get_legacy_syscall_arg(2);
     let buffer_ptr = args.get_legacy_syscall_arg(3) as *const u8;
-    let proc = proc.clone();
     let pid = proc.pid();
 
     if size == 0 {
@@ -63,9 +62,12 @@ pub fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         }
 
         let buffers = (0..pages).map(|i| buffer_alloc + (i * 4096)).collect::<Vec<PhysAddr>>();
+        let proc_weak = proc.downgrade();
+        drop(proc);
 
         let write_result = crate::vfs::write_file(f_handle.get(), &buffers, size).await;
-        let Some(proc) = crate::proc::get_proc(proc.pid()) else {
+
+        let Some(proc) = proc_weak.upgrade() else {
             //free
             for i in 0..pages {
                 unsafe { crate::memory::physical_allocator::deallocate_frame(buffer_alloc + (i * 4096)) };

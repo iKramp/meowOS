@@ -69,10 +69,11 @@ fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
 
     let pid = proc.pid();
 
+    let proc_clone = proc.downgrade();
     let task = async move {
         let resolved_path = vfs::resolve_path(&path);
         let handle = vfs::open_file((&resolved_path).into(), Some(file_source), flags).await;
-        let Some(proc) = crate::proc::get_proc(pid) else {
+        let Some(proc) = proc_clone.upgrade() else {
             return; //proc was killed
         };
         match handle {
@@ -149,6 +150,7 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         }
     };
 
+    let proc_clone = proc.downgrade();
     let task = async move {
         let f_handle = file_handle; //get to local
         let pages = size.div_ceil(4096);
@@ -156,7 +158,7 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let buffers = (0..pages).map(|i| buffer_alloc + (i * 4096)).collect::<Vec<PhysAddr>>();
 
         let read_result = crate::vfs::read_file(f_handle.get(), &buffers, size).await;
-        let Some(proc) = crate::proc::get_proc(proc.pid()) else {
+        let Some(proc) = proc_clone.upgrade() else {
             return; //proc was killed
         };
         let Ok(bytes_read) = read_result else {
@@ -221,6 +223,7 @@ fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         }
     };
 
+    let proc_clone = proc.downgrade();
     let task = async move {
         let f_handle = file_handle; //get to local
         let pages = size.div_ceil(4096);
@@ -242,7 +245,7 @@ fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let buffers = (0..pages).map(|i| buffer_alloc + (i * 4096)).collect::<Vec<PhysAddr>>();
 
         let write_result = crate::vfs::write_file(f_handle.get(), &buffers, size).await;
-        let Some(proc) = crate::proc::get_proc(proc.pid()) else {
+        let Some(proc) = proc_clone.upgrade() else {
             //free
             for i in 0..pages {
                 unsafe { physical_allocator::deallocate_frame(buffer_alloc + (i * 4096)) };
@@ -283,7 +286,6 @@ fn fseek(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let fd = args.get_arg(0);
     let offset = args.get_arg(1) as i64;
     let mode_value = args.get_arg(2);
-    let proc = proc.clone();
     let pid = proc.pid();
 
     let Some(mode) = FileSeekMode::from_u64(mode_value) else {
@@ -306,10 +308,8 @@ fn fseek(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         }
     };
 
-    let proc_clone = proc.clone();
-
+    let proc_clone = proc.downgrade();
     let task = async move {
-        let proc = proc_clone;
         let inode = file_handle.open_file.inode.lock().await;
         let f_size = inode.size;
         let current_pos = file_handle.position.load(Ordering::Acquire);
@@ -323,6 +323,9 @@ fn fseek(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let new_pos = new_pos.max(0).min(f_size as i64) as u64;
         file_handle.position.store(new_pos, Ordering::Release);
 
+        let Some(proc) = proc_clone.upgrade() else {
+            return; //proc was killed
+        };
         proc.set_syscall_return(&[new_pos]);
         crate::proc::wake_process(proc.pid())
     };
@@ -366,11 +369,13 @@ fn fcreate(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         return;
     };
 
-    let proc_clone = proc.clone();
-
+    let proc_clone = proc.downgrade();
     let task = async move {
-        let proc = proc_clone;
         let res = vfs::create_file(&parent_dir, &name, type_perms).await;
+
+        let Some(proc) = proc_clone.upgrade() else {
+            return; //proc was killed
+        };
         if let Err(e) = res {
             println!("fcreate: failed to create file: {e}");
             proc.set_syscall_return(&[u64::MAX]);
@@ -419,11 +424,14 @@ fn flink(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         return;
     };
 
-    let proc_clone = proc.clone();
-
+    let proc_clone = proc.downgrade();
     let task = async move {
-        let proc = proc_clone;
         let res = vfs::link_file(&parent_dir, &name, &target_file).await;
+
+        let Some(proc) = proc_clone.upgrade() else {
+            return; //proc was killed
+        };
+
         if let Err(e) = res {
             println!("fcreate: failed to create file: {e}");
             proc.set_syscall_return(&[u64::MAX]);
@@ -466,11 +474,13 @@ fn funlink(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         return;
     };
 
-    let proc_clone = proc.clone();
-
+    let proc_clone = proc.downgrade();
     let task = async move {
-        let proc = proc_clone;
         let res = vfs::unlink_file(&parent_dir, &name).await;
+
+        let Some(proc) = proc_clone.upgrade() else {
+            return; //proc was killed
+        };
         if let Err(e) = res {
             println!("funlink: failed to unlink file: {e}");
             proc.set_syscall_return(&[u64::MAX]);
@@ -504,12 +514,14 @@ fn fstat(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     };
 
     let pid = proc.pid();
-    let proc_clone = proc.clone();
 
+    let proc_clone = proc.downgrade();
     let task = async move {
-        let proc = proc_clone;
         let stat_result = vfs::stat_file(file_handle.get()).await;
 
+        let Some(proc) = proc_clone.upgrade() else {
+            return; //proc was killed
+        };
         let dst = buf_ptr;
         let src = (&raw const stat_result) as u64;
         let valid_copy = safe_memcpy_to_user(dst, src, core::mem::size_of::<vfs::Inode>() as usize);

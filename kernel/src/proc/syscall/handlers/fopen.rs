@@ -43,7 +43,9 @@ pub fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         f_chain
     };
 
+    let proc_clone = proc.downgrade();
     let task = async move {
+        let proc = proc_clone;
         let resolved_path = vfs::resolve_path(&path);
         let file_flags = FileFlags(flags as u8);
 
@@ -55,7 +57,7 @@ pub fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
             .set_append(file_flags.append());
 
         let handle = vfs::open_file((&resolved_path).into(), Some(file_source), open_flags).await;
-        let Some(proc) = crate::proc::get_proc(pid) else {
+        let Some(proc) = proc.upgrade() else {
             return; //proc was killed
         };
         match handle {

@@ -13,7 +13,6 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let fd = args.get_legacy_syscall_arg(1);
     let size = args.get_legacy_syscall_arg(2);
     let buffer_ptr = args.get_legacy_syscall_arg(3) as *mut u8;
-    let proc = proc.clone();
     let pid = proc.pid();
 
     if size == 0 {
@@ -41,7 +40,7 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         }
     };
 
-    let proc_clone = proc.clone();
+    let proc_clone = proc.downgrade();
     let task = async move {
         let proc = proc_clone;
         let f_handle = file_handle; //get to local
@@ -50,7 +49,7 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let buffers = (0..pages).map(|i| buffer_alloc + (i * 4096)).collect::<Vec<PhysAddr>>();
 
         let read_result = crate::vfs::read_file(f_handle.get(), &buffers, size).await;
-        let Some(proc) = crate::proc::get_proc(proc.pid()) else {
+        let Some(proc) = proc.upgrade() else {
             return; //proc was killed
         };
         let Ok(bytes_read) = read_result else {
