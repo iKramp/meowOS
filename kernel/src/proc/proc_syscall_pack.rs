@@ -16,7 +16,7 @@ pub fn init_proc_syscalls() {
     let handlers: [SyscallHandler; _] = [exec, exit, sleep];
 
     let exec_syscall_pack = SyscallPack::new(Box::new(handlers));
-    crate::proc::syscall::register_syscall_pack("exec".into(), Arc::new(exec_syscall_pack));
+    crate::proc::syscall::register_syscall_pack("proc".into(), Arc::new(exec_syscall_pack));
 }
 
 #[cfg(target_arch = "x86_64")]
