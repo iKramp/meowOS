@@ -45,6 +45,11 @@ fn main() {
     cmd.arg("-device").arg("ahci,id=ahci");
     cmd.arg("-device").arg("ide-hd,drive=test_disk,bus=ahci.0");
 
+    //snapshot for transfering files in
+    cmd.arg("-drive")
+        .arg("id=fat_disk,format=raw,file=assets/fat_disk.img,if=none,snapshot=on");
+    cmd.arg("-device").arg("ide-hd,drive=fat_disk,bus=ahci.1");
+
     if net {
         //networking
         cmd.arg("-netdev")

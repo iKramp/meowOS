@@ -30,3 +30,5 @@ iso/
 result
 
 ahci_disk.img.bak
+
+fat_disk.img
