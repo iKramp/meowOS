@@ -106,6 +106,10 @@ impl Drop for WorkingBlock {
     }
 }
 
+pub(super) fn init_rfs2() {
+    crate::vfs::register_filesystem_driver_factory(Arc::new(Rfs2Factory));
+}
+
 pub struct Rfs2Factory;
 
 impl Rfs2Factory {
@@ -116,6 +120,10 @@ impl Rfs2Factory {
 impl FileSystemFactory for Rfs2Factory {
     async fn mount(&self, partition: MountedPartition) -> Arc<dyn FileSystem + Send> {
         Arc::new(Rfs2::new(partition).await)
+    }
+
+    fn uuid(&self) -> Uuid {
+        Rfs2Factory::UUID
     }
 }
 

@@ -4,10 +4,7 @@ use std::{
 };
 use uuid::Uuid;
 
-use crate::drivers::{
-    block_device::disk::{BlockDevice, Partition},
-    filesystem::rfs2::Rfs2Factory,
-};
+use crate::drivers::block_device::disk::{BlockDevice, Partition};
 
 mod adapters;
 mod dtmpfs;
@@ -91,12 +88,12 @@ impl Vfs {
 }
 
 pub fn init() {
-    let mut vfs = lock_w_info!(VFS);
-    vfs.filesystem_driver_factories
-        .insert(DtmpfsFactory::UUID, Arc::new(DtmpfsFactory {}));
-    vfs.filesystem_driver_factories
-        .insert(Rfs2Factory::UUID, Arc::new(Rfs2Factory {}));
-    drop(vfs);
+    dtmpfs::init_dtmpfs();
 
     fs_syscall_pack::init_fs_syscall_pack();
+}
+
+pub fn register_filesystem_driver_factory(factory: Arc<dyn FileSystemFactory + Send>) {
+    let mut vfs = lock_w_info!(VFS);
+    vfs.filesystem_driver_factories.insert(factory.uuid(), factory.clone());
 }

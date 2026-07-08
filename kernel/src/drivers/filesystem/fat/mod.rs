@@ -49,6 +49,10 @@ struct FullFatHeader {
     signature: [u8; 2],
 }
 
+pub(super) fn init_fat() {
+    crate::vfs::register_filesystem_driver_factory(Arc::new(FatFactory));
+}
+
 pub struct FatFactory;
 
 impl FatFactory {
@@ -59,6 +63,10 @@ impl FatFactory {
 impl FileSystemFactory for FatFactory {
     async fn mount(&self, partition: MountedPartition) -> Arc<dyn FileSystem + Send> {
         Arc::new(FatDriver::new(partition).await)
+    }
+
+    fn uuid(&self) -> Uuid {
+        Self::UUID
     }
 }
 

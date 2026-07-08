@@ -33,6 +33,7 @@
         pkgs.clippy
         pkgs.xorriso
         pkgs.cargo-expand
+        pkgs.gptfdisk
       ];
 
       shellHook = ''

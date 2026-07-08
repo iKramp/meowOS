@@ -38,6 +38,10 @@ struct DtmpfsNode {
     children: Vec<(String, u64)>, // (name, inode)
 }
 
+pub(super) fn init_dtmpfs() {
+    crate::vfs::register_filesystem_driver_factory(Arc::new(DtmpfsFactory));
+}
+
 pub(super) struct DtmpfsFactory;
 
 impl DtmpfsFactory {
@@ -57,6 +61,10 @@ impl FileSystemFactory for DtmpfsFactory {
             }),
         };
         Arc::new(fs)
+    }
+
+    fn uuid(&self) -> Uuid {
+        DtmpfsFactory::UUID
     }
 }
 

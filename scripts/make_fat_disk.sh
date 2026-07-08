@@ -3,7 +3,7 @@ set -e
 
 INPUT_DIR=fat_disk
 OUTPUT_IMG=assets/fat_disk.img
-SIZE="${3:-512M}"
+SIZE="${3:-32M}"
 
 if [ -z "$INPUT_DIR" ] || [ -z "$OUTPUT_IMG" ]; then
     echo "Usage: $0 <input_folder> <output.img> [size]"
@@ -14,6 +14,8 @@ truncate -s "$SIZE" "$OUTPUT_IMG"
 
 parted -s "$OUTPUT_IMG" mklabel gpt
 parted -s "$OUTPUT_IMG" mkpart primary fat32 1MiB 100%
+
+sgdisk --partition-guid=1:e9a75ddc-0587-45af-963f-ebbc44c99083 "$OUTPUT_IMG"
 
 LOOP=$(losetup --find --show -P "$OUTPUT_IMG")
 
