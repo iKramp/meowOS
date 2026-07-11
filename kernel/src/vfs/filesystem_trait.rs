@@ -13,6 +13,7 @@ use super::{Inode, InodeIndex, InodeTypeAndPerms};
 #[async_trait::async_trait]
 pub trait FileSystemFactory: Send + Sync {
     fn uuid(&self) -> Uuid;
+    fn name(&self) -> &str;
     async fn mount(&self, partition: MountedPartition) -> Arc<dyn FileSystem + Send>;
 }
 
@@ -25,8 +26,8 @@ pub trait FileSystem: Debug + Send + Sync {
     async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, ErrorCode>;
     ///Offset must be page aligned. Returns the new inode
     async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), ErrorCode>;
-    async fn stat(&self, inode: InodeIndex) -> Result<Inode, ErrorCode>;
-    async fn set_stat(&self, inode_index: InodeIndex, inode_data: Inode) -> Result<(), ErrorCode>;
+    async fn stat(&self, inode: InodeIndex, parent: InodeIndex) -> Result<Inode, ErrorCode>;
+    async fn set_stat(&self, inode_index: InodeIndex, parent: InodeIndex, inode_data: Inode) -> Result<(), ErrorCode>;
     ///returns the new parent inode in the first field and the new inode in the second
     async fn create(
         &self,

@@ -1,9 +1,18 @@
-use std::{mem_utils::PhysAddr, sync::arc::Arc};
+use bitfield::bitfield;
+use core::{mem::MaybeUninit, slice};
+use std::{
+    mem_utils::{PhysAddr, translate_phys_virt_addr},
+    println,
+    string::{String, ToString},
+    sync::arc::Arc,
+    vec::Vec,
+};
 
 use uuid::Uuid;
 
 use crate::{
     drivers::block_device::disk::MountedPartition,
+    memory::physical_allocator,
     vfs::{DeviceId, FileSystem, FileSystemFactory, Inode, InodeIndex, InodeTypeAndPerms},
 };
 
@@ -13,6 +22,7 @@ use crate::drivers::block_device::disk::DirEntry;
 
 #[allow(non_snake_case)]
 #[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
 struct FatHeader {
     BS_JmpBoot: [u8; 3],
     BS_OEMName: [u8; 8],
@@ -49,6 +59,54 @@ struct FullFatHeader {
     signature: [u8; 2],
 }
 
+bitfield! {
+    struct DirAttrs(u8);
+    impl Debug;
+    read_only, _: 0;
+    hidden, _: 1;
+    system, _: 2;
+    volume_id, _: 3;
+    directory, _: 4;
+    archive, _: 5;
+}
+
+impl DirAttrs {
+    fn has_long_file_name(&self) -> bool {
+        self.0 & 0x0F == 0x0F
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+struct FatDirEntry {
+    dir_name: [u8; 11],
+    dir_attr: DirAttrs,
+    useless: u8,
+    crt_time_subsecond: u8,
+    crt_time: u16,
+    crt_date: u16,
+    useless_2: u16,
+    first_cluster_high: u16,
+    useless_3: u16,
+    useless_4: u16,
+    first_cluster_low: u16,
+    file_size: u32,
+}
+
+impl FatDirEntry {
+    fn is_used(&self) -> bool {
+        self.dir_name[0] != 0x00 && self.dir_name[0] != 0xE5
+    }
+
+    fn has_entries_later(&self) -> bool {
+        self.dir_name[0] != 0x00
+    }
+
+    fn has_long_name(&self) -> bool {
+        self.dir_attr.read_only() && self.dir_attr.hidden() && self.dir_attr.system() && self.dir_attr.volume_id()
+    }
+}
+
 pub(super) fn init_fat() {
     crate::vfs::register_filesystem_driver_factory(Arc::new(FatFactory));
 }
@@ -56,7 +114,7 @@ pub(super) fn init_fat() {
 pub struct FatFactory;
 
 impl FatFactory {
-    pub const UUID: Uuid = Uuid::from_u128(0x2477786763f94f0391447b0cad53daad);
+    pub const UUID: Uuid = Uuid::from_u128(0xebd0a0a2b9e5443387c068b6b72699c7);
 }
 
 #[async_trait::async_trait]
@@ -68,19 +126,178 @@ impl FileSystemFactory for FatFactory {
     fn uuid(&self) -> Uuid {
         Self::UUID
     }
+
+    fn name(&self) -> &str {
+        "FAT32"
+    }
 }
 
 #[derive(Debug)]
 struct FatDriver {
     //write once
     partition: MountedPartition,
+    header: FatHeader,
+    fat_start_sector: u32,
+    fat_sectors: u32,
+    root_dir_start_sector: u32,
+    root_dir_sectors: u32,
+    data_start_sector: u32,
+    data_sectors: u32,
 }
 
 unsafe impl Sync for FatDriver {}
 
 impl FatDriver {
     async fn new(partition: MountedPartition) -> Self {
-        Self { partition }
+        let page = physical_allocator::allocate_frame();
+        partition.read(0, 1, &[page]).await;
+
+        let mut header = MaybeUninit::uninit();
+
+        unsafe {
+            let header_ptr = header.as_mut_ptr();
+            let page_virt = translate_phys_virt_addr(page);
+            let src_ptr = page_virt.0 as *const FatHeader;
+            *header_ptr = *src_ptr;
+
+            let header_ref = header.assume_init_ref();
+
+            let fat_size = if header_ref.BPB_FATSize16 != 0 {
+                header_ref.BPB_FATSize16 as u32
+            } else {
+                header_ref.BPB_FATSize32
+            };
+            let total_sectors = if header_ref.BPB_TotalSectors16 != 0 {
+                header_ref.BPB_TotalSectors16 as u32
+            } else {
+                header_ref.BPB_TotalSectors32
+            };
+
+            let fat_start_sector = header_ref.BPB_ReservedSectorCount as u32;
+            let fat_sectors = fat_size * header_ref.BPB_NumFATs as u32;
+
+            let root_cluster = header_ref.BPB_RootCluster;
+            let root_dir_sectors = (32 * header_ref.BPB_RootEntryCount as u32 + header_ref.BPB_BytesPerSector as u32 - 1)
+                .div_ceil(header_ref.BPB_BytesPerSector as u32);
+
+            let data_start_sector = header_ref.BPB_ReservedSectorCount as u32 + (header_ref.BPB_NumFATs as u32 * fat_size);
+            let data_sectors = total_sectors - data_start_sector;
+
+            let root_dir_start_sector = data_start_sector + ((root_cluster - 2) * header_ref.BPB_SectorsPerCluster as u32);
+
+            let count_of_clusters = data_sectors / header_ref.BPB_SectorsPerCluster as u32;
+
+            if count_of_clusters <= 4085 {
+                panic!("FAT12 is not supported");
+            } else if count_of_clusters <= 65525 {
+                panic!("FAT16 is not supported");
+            }
+
+            let part = Self {
+                partition,
+                header: header.assume_init(),
+                fat_start_sector,
+                fat_sectors,
+                root_dir_start_sector,
+                root_dir_sectors,
+                data_start_sector,
+                data_sectors,
+            };
+
+            println!("fat_start_sector: {}", fat_start_sector);
+            println!("fat_sectors: {}", fat_sectors);
+            println!("root_dir_start_sector: {}", root_dir_start_sector);
+            println!("root_dir_sectors: {}", root_dir_sectors);
+            println!("data_start_sector: {}", data_start_sector);
+            println!("data_sectors: {}", data_sectors);
+            println!("header: {:#?}", header_ref);
+
+            physical_allocator::deallocate_frame(page);
+
+            part
+        }
+    }
+
+    fn get_sector_from_cluster(&self, cluster: u32) -> u32 {
+        self.data_start_sector + ((cluster - 2) * self.header.BPB_SectorsPerCluster as u32)
+    }
+
+    fn get_entry_sec_offset(&self, entry: u32) -> (u32, u32) {
+        let sec_num = self.header.BPB_ReservedSectorCount as u32 + (entry * 4 / self.header.BPB_BytesPerSector as u32);
+        let offset = (entry * 4) % self.header.BPB_BytesPerSector as u32;
+        (sec_num, offset)
+    }
+
+    async fn read_sector(&self, sector: u32) -> Box<[u8; 512]> {
+        let page = physical_allocator::allocate_frame();
+        let page_virt = translate_phys_virt_addr(page);
+        self.partition.read(sector as usize, 1, &[page]).await;
+        let mut data = Box::new([0_u8; 512]);
+        let data_src = page_virt.0 as *const u8;
+        let data_dest = data.as_mut_ptr();
+        unsafe {
+            data_dest.copy_from(data_src, 512);
+            physical_allocator::deallocate_frame(page);
+        }
+        data
+    }
+
+    async fn read_fat_entry(&self, entry: u32) -> u32 {
+        let (sector, offset) = self.get_entry_sec_offset(entry);
+        let data = self.read_sector(sector).await;
+        let data_ptr = data.as_ptr() as *const u32;
+        let entry_val = unsafe { data_ptr.byte_add(offset as usize).read() };
+        entry_val & 0x0FFFFFFF
+    }
+
+    fn entry_is_final(entry_val: u32) -> bool {
+        (0x0FFFFFF8..=0x0FFFFFFF).contains(&entry_val)
+    }
+
+    async fn read_file_sector(&self, sector: u32, file_cluster_start: u32) -> Option<Box<[u8; 512]>> {
+        let nth_entry = sector / self.header.BPB_SectorsPerCluster as u32;
+        let mut curr_cluster = file_cluster_start;
+        for _ in 0..nth_entry {
+            if curr_cluster == 0 {
+                return None;
+            }
+            if Self::entry_is_final(curr_cluster) {
+                return None;
+            }
+            curr_cluster = self.read_fat_entry(curr_cluster).await;
+        }
+        let sector_in_cluster = sector & self.header.BPB_SectorsPerCluster as u32;
+        let cluster_start = self.get_sector_from_cluster(curr_cluster);
+        Some(self.read_sector(cluster_start + sector_in_cluster).await)
+    }
+
+    async fn read_dir_internal(&self, inode_index: InodeIndex) -> Result<Box<[FatDirEntry]>, ErrorCode> {
+        let mut sector_offset = 0;
+        let mut buf = Vec::new();
+        loop {
+            let Some(data) = self.read_file_sector(sector_offset, inode_index as u32).await else {
+                return Ok(buf.into_boxed_slice());
+            };
+            sector_offset += 1;
+
+            let src_ptr = data.as_ptr() as *const FatDirEntry;
+            let len = 512 / core::mem::size_of::<FatDirEntry>();
+            let entry_slice = unsafe { slice::from_raw_parts(src_ptr, len) };
+            for (i, entry) in entry_slice.iter().enumerate() {
+                if entry.has_long_name() {
+                    println!("entry {} has long name, skipping", i);
+                    continue;
+                }
+                if entry.is_used() {
+                    println!("adding entry {} {:?}", i, entry.dir_name);
+                    buf.push(entry.clone());
+                }
+                if !entry.has_entries_later() {
+                    println!("entry {} has no entries later, returning", i);
+                    return Ok(buf.into_boxed_slice());
+                }
+            }
+        }
     }
 }
 
@@ -94,19 +311,108 @@ impl FileSystem for FatDriver {
     }
     ///Offset must be page aligned
     async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, ErrorCode> {
-        todo!()
+        if !offset_bytes.is_multiple_of(512) {
+            return Err(ErrorCode::IllegalValue);
+        }
+
+        let size_sectors = size_bytes.div_ceil(512);
+
+        let start_sector = offset_bytes / 512;
+
+        for i in start_sector..(start_sector + size_sectors) {
+            let Some(data) = self.read_file_sector(i as u32, inode as u32).await else {
+                return Ok(i - start_sector * 512);
+            };
+            let buffer_phys = buffer[i as usize / 8];
+            let in_buffer_offset = (i % 8) * 512;
+            let ptr_dest = (translate_phys_virt_addr(buffer_phys) + in_buffer_offset).0 as *mut u8;
+            let ptr_src = data.as_ptr();
+            unsafe {
+                ptr_dest.copy_from(ptr_src, 512);
+            }
+        }
+
+        return Ok(size_sectors * 512);
     }
     async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, ErrorCode> {
-        todo!()
+        let entries = self.read_dir_internal(inode).await?;
+        let vfs_entries: Vec<DirEntry> = entries
+            .iter()
+            .map(|entry| {
+                let entry_cluster = entry.first_cluster_low as u32 | ((entry.first_cluster_high as u32) << 16);
+
+                let base = unsafe { str::from_utf8_unchecked(&entry.dir_name[..8]).trim() };
+                let extension = unsafe { str::from_utf8_unchecked(&entry.dir_name[8..]).trim() };
+                let mut final_string = String::new();
+                final_string.push_str(base);
+                if !extension.is_empty() {
+                    final_string.push('.');
+                    final_string.push_str(extension);
+                }
+                final_string.make_ascii_lowercase();
+                println!("returning entry {}", &final_string);
+                DirEntry {
+                    inode: entry_cluster as u64,
+                    name: final_string.into_boxed_str(),
+                }
+            })
+            .collect();
+
+        return Ok(vfs_entries.into_boxed_slice());
     }
     ///Offset must be page aligned. Returns the new inode
-    async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), ErrorCode> {
+    async fn write(&self, _inode: InodeIndex, _offset: u64, _size: u64, _buffer: &[PhysAddr]) -> Result<(Inode, u64), ErrorCode> {
         return Err(ErrorCode::UnsupportedOperation);
     }
-    async fn stat(&self, inode: InodeIndex) -> Result<Inode, ErrorCode> {
-        todo!()
+    async fn stat(&self, inode: InodeIndex, parent: InodeIndex) -> Result<Inode, ErrorCode> {
+        if inode == self.header.BPB_RootCluster as u64 {
+            return Ok(Inode {
+                index: inode,
+                device: self.device_id(),
+                type_mode: InodeTypeAndPerms::new_dir(0o555),
+                link_cnt: 1,
+                uid: 0,
+                gid: 0,
+                size: 0,
+                access_time: 0,
+                modification_time: 0,
+                stat_change_time: 0,
+            });
+        }
+
+        let parent_entries = self.read_dir_internal(parent).await?;
+        for entry in &parent_entries {
+            println!("in stat, potential entry: {:?}", entry)
+        }
+        println!("trying to find inode {}", inode);
+        let Some(entry_to_find) = parent_entries
+            .iter()
+            .find(|e| (e.first_cluster_low as u32 | ((e.first_cluster_high as u32) << 16)) == inode as u32)
+        else {
+            return Err(ErrorCode::NoEntry);
+        };
+
+        let is_dir = entry_to_find.dir_attr.directory();
+        let type_perms = if is_dir {
+            InodeTypeAndPerms::new_dir(0o555) //r-wr-wr-w
+        } else {
+            InodeTypeAndPerms::new_file(0o555) //r-wr-wr-w
+        };
+
+        Ok(Inode {
+            index: inode,
+            device: self.device_id(),
+            type_mode: type_perms,
+            link_cnt: 1,
+            uid: 0,
+            gid: 0,
+            size: entry_to_find.file_size as u64,
+            access_time: 0,
+            modification_time: 0,
+            stat_change_time: 0,
+        })
     }
-    async fn set_stat(&self, _inode_index: InodeIndex, _inode_data: Inode) -> Result<(), ErrorCode> {
+    async fn set_stat(&self, _inode_index: InodeIndex, _parent: InodeIndex, _inode_data: Inode) -> Result<(), ErrorCode> {
         return Err(ErrorCode::UnsupportedOperation);
     }
     ///returns the new parent inode in the first field and the new inode in the second

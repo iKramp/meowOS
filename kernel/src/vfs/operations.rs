@@ -128,6 +128,9 @@ pub async fn mount_blkdev_partition(part_id: Uuid, mountpoint: ResolvedPath) -> 
     };
     let disk_cloned = disk.0.clone();
 
+    println!(level:info, "Mounting partition with fs type {}", partition.fs_type);
+    vfs.print_available_fs_driver_types();
+
     let Some(fs_factory) = vfs.filesystem_driver_factories.get(&partition.fs_type).cloned() else {
         return Err(ErrorCode::UnsupportedFilesystem);
     };
@@ -237,7 +240,7 @@ pub async fn open_file(
     }
 
     let (inode_index, inode_chain) = fs_tree::get_inode_chain(path, from).await?;
-    let open_file = get_file(inode_index).await?;
+    let open_file = get_file(inode_index, *inode_chain.last().expect("parent chain has at least 1 element")).await?;
     let is_dir = unsafe { open_file.inode.get_read_ptr().type_mode.is_dir() };
     let file_flags = FileFlags::new_with_flags(open_flags.read(), open_flags.write(), open_flags.append(), is_dir);
     //TODO: check permissions
@@ -359,10 +362,16 @@ pub async fn unlink_file(parent_dir: &FileHandle, name: &str) -> Result<(), Erro
     let _ = fs_tree::unlink_inode(parent_dir.inode, name);
 
     parent_inode.update_from(&new_parent_inode);
-    let child_file = get_file(InodeIdentifier {
-        device_id: parent_inode.device,
-        index: new_child_inode.index,
-    })
+    let child_file = get_file(
+        InodeIdentifier {
+            device_id: parent_inode.device,
+            index: new_child_inode.index,
+        },
+        InodeIdentifier {
+            device_id: parent_inode.device,
+            index: parent_inode.index,
+        },
+    )
     .await?;
     let mut child_inode = child_file.inode.lock().await;
     child_inode.link_cnt -= 1;

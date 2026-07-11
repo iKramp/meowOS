@@ -68,7 +68,7 @@ impl<T: VfsAdapterTrait> FileSystem for T {
         VfsAdapterTrait::write(self, inode, offset, size, buffer).await
     }
 
-    async fn stat(&self, inode: InodeIndex) -> Result<Inode, ErrorCode> {
+    async fn stat(&self, inode: InodeIndex, _parent: InodeIndex) -> Result<Inode, ErrorCode> {
         VfsAdapterTrait::stat(self, inode).await
     }
 
@@ -76,7 +76,7 @@ impl<T: VfsAdapterTrait> FileSystem for T {
         Err(ErrorCode::UnsupportedOperation)
     }
 
-    async fn set_stat(&self, _inode_index: InodeIndex, _inode_data: Inode) -> Result<(), ErrorCode> {
+    async fn set_stat(&self, _inode_index: InodeIndex, _parent: InodeIndex, _inode_data: Inode) -> Result<(), ErrorCode> {
         Err(ErrorCode::UnsupportedOperation)
     }
 

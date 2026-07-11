@@ -129,7 +129,7 @@ impl InodeTypeAndPerms {
     }
 
     pub fn new_dir(perms: u32) -> Self {
-        InodeTypeAndPerms(0o40000 | perms)
+        InodeTypeAndPerms((InodeType::Directory.to_id() << 24) | perms)
     }
 
     pub fn new_file(perms: u32) -> Self {

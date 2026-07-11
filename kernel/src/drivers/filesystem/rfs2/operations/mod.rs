@@ -250,13 +250,13 @@ impl FileSystem for Rfs2 {
         Ok((file_info.into_vfs(inode as InodeIndex, self), written))
     }
 
-    async fn stat(&self, inode: VfsInodeIndex) -> Result<VfsInode, ErrorCode> {
+    async fn stat(&self, inode: VfsInodeIndex, _parent: VfsInodeIndex) -> Result<VfsInode, ErrorCode> {
         let file_root = self.get_file_root_block(inode as InodeIndex).await?;
         let inode_info = self.get_file_info(file_root).await;
         Ok(inode_info.into_vfs(inode as InodeIndex, self))
     }
 
-    async fn set_stat(&self, inode_index: VfsInodeIndex, inode_data: VfsInode) -> Result<(), ErrorCode> {
+    async fn set_stat(&self, inode_index: VfsInodeIndex, _parent: VfsInodeIndex, inode_data: VfsInode) -> Result<(), ErrorCode> {
         let lock = self.get_file_lock(inode_index as InodeIndex);
         let locked = lock.lock();
 

@@ -3,8 +3,8 @@ use std::{boxed::Box, sync::arc::Arc};
 use crate::{
     memory::safe_memcpy_to_user,
     proc::{
-        syscall::{self, syscall_registry, SyscallCpuState, SyscallPack},
         ProcessData, SyscallNamespace,
+        syscall::{self, SyscallCpuState, SyscallPack, syscall_registry},
     },
 };
 

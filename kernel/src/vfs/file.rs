@@ -3,7 +3,7 @@ use std::{
     boxed::Box,
     collections::btree_map::BTreeMap,
     error::ErrorCode,
-    ffi_future, lock_w_info,
+    ffi_future, lock_w_info, println,
     sync::{self, arc::Arc, async_lock::AsyncSpinlock, no_int_spinlock::NoIntSpinlock},
 };
 
@@ -110,7 +110,7 @@ impl FileFlags {
     }
 }
 
-async fn open_file(inode_id: InodeIdentifier) -> Result<Arc<OpenFile>, ErrorCode> {
+async fn open_file(inode_id: InodeIdentifier, parent_id: InodeIdentifier) -> Result<Arc<OpenFile>, ErrorCode> {
     let vfs = lock_w_info!(VFS);
     let device = vfs.devices.get(&inode_id.device_id).ok_or(ErrorCode::NoEntry)?;
     let partition = vfs
@@ -119,7 +119,7 @@ async fn open_file(inode_id: InodeIdentifier) -> Result<Arc<OpenFile>, ErrorCode
         .ok_or(ErrorCode::NoEntry)?
         .clone();
     drop(vfs);
-    let inode = partition.stat(inode_id.index).await?;
+    let inode = partition.stat(inode_id.index, parent_id.index).await?;
 
     let open_file = Arc::new(OpenFile {
         inode: AsyncSpinlock::new(inode),
@@ -128,7 +128,7 @@ async fn open_file(inode_id: InodeIdentifier) -> Result<Arc<OpenFile>, ErrorCode
     Ok(open_file)
 }
 
-pub(in crate::vfs) async fn get_file(inode_id: InodeIdentifier) -> Result<Arc<OpenFile>, ErrorCode> {
+pub(in crate::vfs) async fn get_file(inode_id: InodeIdentifier, parent_id: InodeIdentifier) -> Result<Arc<OpenFile>, ErrorCode> {
     let mut file_storage = lock_w_info!(FILE_STORAGE);
     if let Some(open_file) = file_storage.open_files.get(&inode_id) {
         if let Some(open_file) = open_file.upgrade() {
@@ -137,7 +137,7 @@ pub(in crate::vfs) async fn get_file(inode_id: InodeIdentifier) -> Result<Arc<Op
         file_storage.open_files.remove(&inode_id);
     }
     drop(file_storage);
-    open_file(inode_id).await
+    open_file(inode_id, parent_id).await
 }
 
 impl Drop for OpenFile {

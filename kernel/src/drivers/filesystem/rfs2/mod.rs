@@ -125,6 +125,10 @@ impl FileSystemFactory for Rfs2Factory {
     fn uuid(&self) -> Uuid {
         Rfs2Factory::UUID
     }
+
+    fn name(&self) -> &str {
+        "RFS2"
+    }
 }
 
 #[derive(Debug)]

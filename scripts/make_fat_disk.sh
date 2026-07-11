@@ -3,7 +3,7 @@ set -e
 
 INPUT_DIR=fat_disk
 OUTPUT_IMG=assets/fat_disk.img
-SIZE="${3:-32M}"
+SIZE="${3:-64M}"
 
 if [ -z "$INPUT_DIR" ] || [ -z "$OUTPUT_IMG" ]; then
     echo "Usage: $0 <input_folder> <output.img> [size]"

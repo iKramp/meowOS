@@ -66,6 +66,10 @@ impl FileSystemFactory for DtmpfsFactory {
     fn uuid(&self) -> Uuid {
         DtmpfsFactory::UUID
     }
+
+    fn name(&self) -> &str {
+        "dtmpfs"
+    }
 }
 
 #[async_trait::async_trait]
@@ -113,7 +117,7 @@ impl FileSystem for Dtmpfs {
         Err(ErrorCode::UnsupportedOperation)
     }
 
-    async fn stat(&self, inode: InodeIndex) -> Result<super::Inode, ErrorCode> {
+    async fn stat(&self, inode: InodeIndex, _parent: InodeIndex) -> Result<super::Inode, ErrorCode> {
         Ok(super::Inode {
             index: inode,
             device: self.device_id(),
@@ -128,7 +132,7 @@ impl FileSystem for Dtmpfs {
         })
     }
 
-    async fn set_stat(&self, _inode_index: InodeIndex, _inode_data: super::Inode) -> Result<(), ErrorCode> {
+    async fn set_stat(&self, _inode_index: InodeIndex, _parent: InodeIndex, _inode_data: super::Inode) -> Result<(), ErrorCode> {
         Err(ErrorCode::UnsupportedOperation)
     }
 
@@ -151,7 +155,10 @@ impl FileSystem for Dtmpfs {
 
         parent_inode.children.push((name.to_string(), inode_index));
         drop(inner);
-        Ok((self.stat(parent_dir).await?, self.stat(inode_index).await?))
+        Ok((
+            self.stat(parent_dir, parent_dir).await?,
+            self.stat(inode_index, inode_index).await?,
+        ))
     }
 
     async fn unlink(&self, _parent_inode: InodeIndex, _name: &str) -> Result<(super::Inode, super::Inode), ErrorCode> {

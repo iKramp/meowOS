@@ -1,6 +1,9 @@
-use dtmpfs::DtmpfsFactory;
 use std::{
-    boxed::Box, collections::btree_map::BTreeMap, lock_w_info, sync::arc::Arc, sync::no_int_spinlock::NoIntSpinlock, vec::Vec,
+    boxed::Box,
+    collections::btree_map::BTreeMap,
+    lock_w_info, println,
+    sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
+    vec::Vec,
 };
 use uuid::Uuid;
 
@@ -85,6 +88,13 @@ impl Vfs {
         self.device_counter += 1;
         DeviceId::new(id)
     }
+
+    pub fn print_available_fs_driver_types(&self) {
+        println!(level:debug, "Available Fs types: ");
+        for part in self.filesystem_driver_factories.iter() {
+            println!(level:debug, "{} ({})", part.0, part.1.name());
+        }
+    }
 }
 
 pub fn init() {
@@ -96,4 +106,9 @@ pub fn init() {
 pub fn register_filesystem_driver_factory(factory: Arc<dyn FileSystemFactory + Send>) {
     let mut vfs = lock_w_info!(VFS);
     vfs.filesystem_driver_factories.insert(factory.uuid(), factory.clone());
+}
+
+pub fn print_available_fs_driver_types() {
+    let vfs = lock_w_info!(VFS);
+    vfs.print_available_fs_driver_types();
 }
