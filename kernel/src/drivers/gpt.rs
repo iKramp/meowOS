@@ -31,7 +31,7 @@ impl PartitionSchemeDriver for GPTDriver {
         let entry_size = header.size_partition_entry as usize;
         let entry_num_lbas = (num_entries * entry_size).div_ceil(512);
         let entry_num_pages = (entry_num_lbas as u64).div_ceil(8);
-        let phys_addr = physical_allocator::allocate_contiguius_high(entry_num_pages);
+        let phys_addr = physical_allocator::allocate_contiguous(entry_num_pages as u32);
         let physical_addresses = (0..entry_num_pages)
             .map(|i| phys_addr + (i * 4096))
             .collect::<Vec<PhysAddr>>();

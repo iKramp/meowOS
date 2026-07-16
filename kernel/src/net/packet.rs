@@ -186,7 +186,7 @@ impl NetPacket {
         }
         let len = vec.iter().fold(0, |a, b| a + b.length);
         let pages = len.div_ceil(4096);
-        let phys_addr = physical_allocator::allocate_contiguius_high(pages as u64);
+        let phys_addr = physical_allocator::allocate_contiguous(pages);
         let virt_addr = translate_phys_virt_addr(phys_addr);
         let mut curr_offset = 0;
         for chunk in vec.iter() {
@@ -293,7 +293,7 @@ impl NetPacket {
 
     pub fn insert_chunk_front(&mut self, length: u32) -> &mut RawNetDataChunk {
         let pages = length.div_ceil(4096);
-        let phys_addr = physical_allocator::allocate_contiguius_high(pages as u64);
+        let phys_addr = physical_allocator::allocate_contiguous(pages);
         let chunk = RawNetDataChunk::new(phys_addr, length);
         self.chunks.insert(0, chunk);
         self.length += length;
@@ -332,7 +332,7 @@ impl RawNetDataChunk {
 
     pub fn allocate_new(length: u32) -> Self {
         let pages = length.div_ceil(4096);
-        let phys_addr = physical_allocator::allocate_contiguius_high(pages as u64);
+        let phys_addr = physical_allocator::allocate_contiguous(pages);
         RawNetDataChunk { data: phys_addr, length }
     }
 
@@ -393,7 +393,7 @@ impl Clone for RawNetDataChunk {
             };
         }
         let pages = self.length.div_ceil(4096);
-        let new_phys = physical_allocator::allocate_contiguius_high(pages as u64);
+        let new_phys = physical_allocator::allocate_contiguous(pages);
         let old_ptr = translate_phys_virt_addr(self.data).0 as *const u8;
         let new_ptr = translate_phys_virt_addr(new_phys).0 as *mut u8;
         unsafe { core::ptr::copy_nonoverlapping(old_ptr, new_ptr, self.length as usize) };

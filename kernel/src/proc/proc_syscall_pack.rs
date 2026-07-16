@@ -1,10 +1,9 @@
-use core::alloc::{GlobalAlloc, Layout};
 use std::{boxed::Box, error::ErrorCode, lock_w_info, string::ToString, sync::arc::Arc};
 
 use crate::{
     acpi::{ScheduledEvent, schedule_event},
     interrupts::InterruptProcessorState,
-    memory::{heap, safe_memcpy_from_user},
+    memory::safe_memcpy_from_user,
     proc::{
         self, NamespaceIds, PROCESS_ID_COUNTER, Pid, ProcNamespaces, ProcessData, SCHEDULER,
         process_data::CpuStateType,
@@ -53,13 +52,15 @@ struct ExecArgs {
 fn exec(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let exec_args_ptr = args.get_arg(0);
 
-    let exec_args_heap_ptr = unsafe { heap::HEAP.alloc(Layout::new::<ExecArgs>()) as u64 };
+    let exec_args_heap_box = Box::<ExecArgs>::new_uninit();
+    let exec_args_heap_ptr = exec_args_heap_box.as_ptr() as u64;
+
     let valid = safe_memcpy_from_user(exec_args_heap_ptr, exec_args_ptr, core::mem::size_of::<ExecArgs>());
     if !valid {
         proc.set_syscall_return(&[u64::MAX]);
         return;
     }
-    let exec_args = unsafe { Box::from_raw(exec_args_ptr as *mut ExecArgs) };
+    let exec_args = unsafe { exec_args_heap_box.assume_init() };
 
     let name_buf_uninit = Box::new_uninit_slice(exec_args.name_len as usize);
     let valid = safe_memcpy_from_user(

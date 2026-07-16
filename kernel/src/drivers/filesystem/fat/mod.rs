@@ -3,7 +3,7 @@ use core::{mem::MaybeUninit, slice};
 use std::{
     mem_utils::{PhysAddr, translate_phys_virt_addr},
     println,
-    string::{String, ToString},
+    string::String,
     sync::arc::Arc,
     vec::Vec,
 };

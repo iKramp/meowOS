@@ -176,6 +176,8 @@ impl Rfs2 {
             blocks,
             partition,
         };
+
+        // println!("formatting rfs2 partition");
         // fs.format().await.expect("failed to format rfs2 filesystem");
         fs
     }

@@ -18,6 +18,9 @@ fn main() {
         .arg("-no-reboot")
         .arg("-no-shutdown");
 
+    //memory
+    cmd.arg("-m").arg("256M");
+
     //cpu
     cmd.arg("-machine").arg("q35");
     // cmd.arg("-cpu").arg("Skylake-Client,+invtsc");

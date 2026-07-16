@@ -111,7 +111,7 @@ pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &s
     let file_handle = vfs::open_file(path, None, OpenFlags(1)).await?;
     let stat = vfs::stat_file(&file_handle).await;
     let buf_pages = stat.size.div_ceil(4096);
-    let phys_buf = physical_allocator::allocate_contiguius_high(buf_pages);
+    let phys_buf = physical_allocator::allocate_contiguous(buf_pages as u32);
     let buf = translate_phys_virt_addr(phys_buf);
 
     let phys_buf_vec = (0..buf_pages).map(|i| phys_buf + i * 4096).collect::<Vec<_>>();

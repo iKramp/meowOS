@@ -1,7 +1,7 @@
 use crate::{
     memory,
     proc::{self, Pid},
-    shell::{cmd_cat::cmd_cat, cmd_ls::cmd_ls},
+    shell::{cmd_cat::cmd_cat, cmd_ls::cmd_ls, cmd_mkdir::cmd_mkdir, cmd_mount::cmd_mount},
     task_runner::PidOption,
     tty::TTY,
     vfs::{self, ResolvedPath, ResolvedPathBorrowed},
@@ -14,6 +14,8 @@ use std::{
 
 mod cmd_cat;
 mod cmd_ls;
+mod cmd_mkdir;
+mod cmd_mount;
 
 pub struct ShellState {
     current_dir: Option<ResolvedPath>,
@@ -77,6 +79,44 @@ impl ShellState {
                         Ok(()) => lock_w_info!(SHELL_STATE).command_finished(),
                         Err(e) => {
                             lock_w_info!(TTY).print(&format!("Error executing cat command: {:?}\n", e));
+                            lock_w_info!(SHELL_STATE).command_finished();
+                        }
+                    }
+                };
+                let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
+                crate::task_runner::add_task(ffi_safe_task, PidOption::None);
+            }
+            "mount" => {
+                println!("mount command executed");
+                let path = chunks.next().unwrap_or_else(|| ".".to_string());
+                let part_id = chunks.next().unwrap_or_else(|| "no_uuid_provided".to_string());
+                self.started_proc = true;
+                let task = async move {
+                    let res = cmd_mount(&path, &part_id).await;
+                    match res {
+                        Ok(()) => lock_w_info!(SHELL_STATE).command_finished(),
+                        Err(e) => {
+                            lock_w_info!(TTY).print(&format!(
+                                "Error executing mount command: {:?} with args {} {}\n",
+                                e, path, part_id
+                            ));
+                            lock_w_info!(SHELL_STATE).command_finished();
+                        }
+                    }
+                };
+                let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
+                crate::task_runner::add_task(ffi_safe_task, PidOption::None);
+            }
+            "mkdir" => {
+                println!("mkdir command executed");
+                let path = chunks.next().unwrap_or_else(|| ".".to_string());
+                self.started_proc = true;
+                let task = async move {
+                    let res = cmd_mkdir(&path).await;
+                    match res {
+                        Ok(()) => lock_w_info!(SHELL_STATE).command_finished(),
+                        Err(e) => {
+                            lock_w_info!(TTY).print(&format!("Error executing mkdir command: {:?} with args {}\n", e, path));
                             lock_w_info!(SHELL_STATE).command_finished();
                         }
                     }

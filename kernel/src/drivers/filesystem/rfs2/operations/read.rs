@@ -128,7 +128,7 @@ impl Rfs2 {
                 }
                 break;
             } else {
-                let new_working_physical = physical_allocator::allocate_contiguius_high(ptrs_to_read as u64);
+                let new_working_physical = physical_allocator::allocate_contiguous(ptrs_to_read as u32);
                 let new_working_blocks = (0..ptrs_to_read)
                     .map(|i| PhysAddr(new_working_physical.0 + i as u64 * 4096))
                     .collect::<Vec<_>>();

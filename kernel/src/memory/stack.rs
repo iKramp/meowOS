@@ -8,7 +8,7 @@ pub const KERNEL_STACK_SIZE_PAGES: u8 = 16;
 ///Pushes an illegal return address of 0 (and aligns to 16)
 pub fn prepare_kernel_stack(stack_size_pages: u8) -> VirtAddr {
     unsafe {
-        let phys_addr = physical_allocator::allocate_contiguius_high(stack_size_pages as u64 + 1);
+        let phys_addr = physical_allocator::allocate_contiguous(stack_size_pages as u32 + 1);
         let (addr, lowest_entry) = memory::kernel_manual_map(phys_addr, stack_size_pages as u64 + 1, None);
         lowest_entry.set_writeable(false);
         let highest_addr = addr + (stack_size_pages as u64 + 1) * 0x1000;

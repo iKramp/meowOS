@@ -1,7 +1,7 @@
 use std::boxed::Box;
 use std::error::ErrorCode;
-use std::lock_w_info;
 use std::sync::no_int_spinlock::NoIntSpinlock;
+use std::{lock_w_info, println};
 
 use crate::tty;
 use crate::vfs::{DeviceId, Inode, InodeIndex, InodeTypeAndPerms};
@@ -16,6 +16,7 @@ pub struct TtyAdapter {
 
 impl TtyAdapter {
     pub fn new(device_id: DeviceId) -> Self {
+        println!("tty adapter created with device_id: {:?}", device_id);
         TtyAdapter {
             device_id,
             write_lock: NoIntSpinlock::new(()),

@@ -20,12 +20,16 @@ impl Rfs2 {
         let mut working_block = WorkingBlock::new();
         *working_block.get_as_mut::<[u8; 4096]>() = [0; 4096];
 
+        println!("whole blocks: {}", whole_blocks);
+
         //----------clear disk----------
         for i in 0..whole_blocks {
             self.partition
                 .write(i * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys])
                 .await;
         }
+
+        println!("disk cleared");
 
         //----------initialize free block tables----------
 

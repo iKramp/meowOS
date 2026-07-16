@@ -198,7 +198,7 @@ impl FileSystem for Rfs2 {
         let file_info = self.get_file_info(file_root).await;
         let size_pages = file_info.size.div_ceil(4096);
 
-        let buf = physical_allocator::allocate_contiguius_high(size_pages);
+        let buf = physical_allocator::allocate_contiguous(size_pages as u32);
         let buf_vec = (0..size_pages).map(|n| buf + n * 4096).collect::<Vec<_>>();
         let res = self
             .read_locked(file_root, 0, file_info.size, &buf_vec)
@@ -281,12 +281,19 @@ impl FileSystem for Rfs2 {
         uid: u16,
         gid: u16,
     ) -> Result<(VfsInode, VfsInode), ErrorCode> {
+        crate::memory::print_mem_mapping();
+        println!("BBBBB");
         let new_block = self.allocate_block().await;
         let new_inode = self.allocate_inode().await;
+        crate::memory::print_mem_mapping();
+        println!("CCCCC");
 
         let inode_lock = self.inode_lock.lock().await;
         BTreeNode::insert_inode_root(new_inode, new_block, self).await;
         drop(inode_lock);
+
+        crate::memory::print_mem_mapping();
+        println!("DDDDD");
 
         let since_epoch = std::time::Instant::now().duration_since(std::time::UNIX_EPOCH).as_secs();
         let new_inode_info = InodeInfo {
@@ -300,7 +307,12 @@ impl FileSystem for Rfs2 {
             modification_seconds_since_epoch: since_epoch,
             stat_change_seconds_since_epoch: since_epoch,
         };
+
+        crate::memory::print_mem_mapping();
+        println!("EEEEE");
         self.set_file_info(new_block, new_inode_info.clone()).await;
+        crate::memory::print_mem_mapping();
+        println!("FFFFF");
 
         println!("created new file, linking");
         let res = self.link(new_inode as VfsInodeIndex, parent_dir, name).await;

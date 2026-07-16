@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use std::string::ToString;
 use std::sync::rw_lock::{RWLockModeRead, RWSpinlock, RWSpinlockGuard};
 use std::{boxed::Box, error::ErrorCode, vec::Vec};
-use std::{r_lock_w_info, w_lock_w_info};
+use std::{println, r_lock_w_info, w_lock_w_info};
 
 use crate::drivers::block_device::disk::DirEntry;
 use crate::vfs::adapters::VfsAdapterTrait;
@@ -38,6 +38,7 @@ pub struct NetAdapter {
 
 impl NetAdapter {
     pub fn new(device_id: DeviceId) -> Self {
+        println!("net adapter created with device_id: {:?}", device_id);
         Self {
             ether_devices: RWSpinlock::new(BTreeMap::new()),
             inode_counter: AtomicU64::new(ENTRIES_PER_NIC_DEVICE),

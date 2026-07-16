@@ -257,6 +257,7 @@ pub async fn get_dir_entries(file_handle: &FileHandle) -> Result<Box<[DirEntry]>
     let inode = unsafe { file_handle.open_file.inode.get_read_ptr() };
 
     if !inode.type_mode.is_dir() {
+        println!("file {:?} is not a directory", file_handle.inode);
         return Err(ErrorCode::UnsupportedOperation);
     }
 
@@ -287,6 +288,7 @@ pub async fn create_file(parent_dir: &FileHandle, name: &str, inode_type: InodeT
         .ok_or(ErrorCode::InodeNotPresent)?;
     let fs = fs.clone();
     drop(vfs);
+
     let (new_parent_inode, file_inode) = fs.create(name, parent_inode.index, inode_type, 0, 0).await?;
     println!(
         "create file returned file and parent inodes: {:X?}, {:X?}",

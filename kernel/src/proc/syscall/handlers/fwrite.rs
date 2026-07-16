@@ -45,7 +45,7 @@ pub fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let proc = proc_clone;
         let f_handle = file_handle; //get to local
         let pages = size.div_ceil(4096);
-        let buffer_alloc = crate::memory::physical_allocator::allocate_contiguius_high(pages);
+        let buffer_alloc = crate::memory::physical_allocator::allocate_contiguous(pages as u32);
         let dst = std::mem_utils::translate_phys_virt_addr(buffer_alloc).0 as *mut u8;
         let src = buffer_ptr;
         //copy to user buffer

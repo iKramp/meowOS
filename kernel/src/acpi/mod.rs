@@ -24,6 +24,7 @@ pub use lapic_timer::{ScheduledEvent, cancel_scheduled_event, schedule_event};
 use madt::Madt;
 pub use mcfg::{BaseAddressAllocation, McfgTable};
 use platform_info::PlatformInfo;
+pub use smp::ap_startup::ap_startup;
 pub use smp::cpu_locals;
 
 use crate::{limine::LIMINE_BOOTLOADER_REQUESTS, memory, println, printlnc};

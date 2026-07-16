@@ -1,7 +1,7 @@
 use std::sync::no_int_spinlock::NoIntSpinlock;
 use std::{lock_w_info, mem_utils::*};
 
-use super::physical_allocator;
+use crate::memory::{log2_rounded_up, physical_allocator};
 
 //min allocation is 16 bytes
 //16
@@ -25,7 +25,7 @@ struct HeapPageMetadata {
 }
 
 impl HeapPageMetadata {
-    pub fn populate(&mut self, page_addr: VirtAddr) {
+    fn populate(&mut self, page_addr: VirtAddr) {
         unsafe {
             let size_of_object = u64::pow(2, self.size_order_of_objects as u32);
             let addr_of_first = page_addr + (4096 - size_of_object * self.max_allocations as u64);
@@ -72,7 +72,7 @@ struct HeapAllocationData {
 }
 
 impl HeapAllocationData {
-    pub const fn new() -> Self {
+    const fn new() -> Self {
         Self {
             size_order_of_objects: 0,
             free_objects: 0,
@@ -80,7 +80,7 @@ impl HeapAllocationData {
         }
     }
 
-    pub fn allocate(&mut self) -> VirtAddr {
+    fn allocate(&mut self) -> VirtAddr {
         unsafe {
             if self.free_objects == 0 {
                 let new_page = Heap::allocate_page();
@@ -124,7 +124,7 @@ impl HeapAllocationData {
             allocated
         }
     }
-    pub fn deallocate(&mut self, addr: VirtAddr) {
+    fn deallocate(&mut self, addr: VirtAddr) {
         unsafe {
             let metadata = get_at_virtual_addr::<HeapPageMetadata>(VirtAddr(addr.0 & !0b1111_1111_1111));
 
@@ -188,16 +188,16 @@ impl HeapAllocationData {
     }
 }
 
-pub struct Heap {
+struct Heap {
     allocation_data: [HeapAllocationData; 7],
 }
 
-pub struct HeapWrapper {
+struct HeapWrapper {
     heap: NoIntSpinlock<Heap>,
 }
 
 impl HeapWrapper {
-    pub const fn new() -> Self {
+    const fn new() -> Self {
         Self {
             heap: NoIntSpinlock::new(Heap::new()),
         }
@@ -211,10 +211,10 @@ impl Default for HeapWrapper {
 }
 
 #[global_allocator]
-pub static HEAP: HeapWrapper = HeapWrapper::new();
+static HEAP: HeapWrapper = HeapWrapper::new();
 
 impl Heap {
-    pub const fn new() -> Self {
+    const fn new() -> Self {
         let mut heap = Self {
             allocation_data: [HeapAllocationData::new(); 7],
         };
@@ -228,7 +228,7 @@ impl Heap {
         heap
     }
 
-    pub fn allocate(&mut self, size: u64) -> VirtAddr {
+    fn allocate(&mut self, size: u64) -> VirtAddr {
         if size == 0 {
             VirtAddr(self as *const Heap as u64)
         } else if size > 1024 {
@@ -243,7 +243,7 @@ impl Heap {
         }
     }
 
-    pub fn deallocate(&mut self, addr: VirtAddr, size: u64) {
+    fn deallocate(&mut self, addr: VirtAddr, size: u64) {
         if size == 0 {
             return;
         }
@@ -273,7 +273,7 @@ impl Heap {
     }
 
     fn allocate_contigious(n_pages: u64) -> VirtAddr {
-        let phys_addr = physical_allocator::allocate_contiguius_high(n_pages);
+        let phys_addr = physical_allocator::allocate_contiguous(n_pages as u32);
         translate_phys_virt_addr(phys_addr)
     }
 
@@ -317,7 +317,7 @@ unsafe impl core::alloc::GlobalAlloc for HeapWrapper {
 }
 
 ///WARNING this function only works for numbers <= 1024
-pub fn next_pow_2(mut num: u64) -> u64 {
+fn next_pow_2(mut num: u64) -> u64 {
     let mut first_bit = 0;
     let mut mask = 1_u64 << 9;
     for i in 54..64 {
@@ -333,11 +333,4 @@ pub fn next_pow_2(mut num: u64) -> u64 {
         num = 1 << (63 - first_bit + 1);
     }
     num
-}
-
-pub fn log2_rounded_up(num: u64) -> u64 {
-    if num == 1 {
-        return 0; //special case
-    }
-    (num * 2 - 1).ilog2().into()
 }

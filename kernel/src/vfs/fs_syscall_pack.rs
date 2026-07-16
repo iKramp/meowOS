@@ -154,7 +154,7 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let task = async move {
         let f_handle = file_handle; //get to local
         let pages = size.div_ceil(4096);
-        let buffer_alloc = physical_allocator::allocate_contiguius_high(pages);
+        let buffer_alloc = physical_allocator::allocate_contiguous(pages as u32);
         let buffers = (0..pages).map(|i| buffer_alloc + (i * 4096)).collect::<Vec<PhysAddr>>();
 
         let read_result = crate::vfs::read_file(f_handle.get(), &buffers, size).await;
@@ -227,7 +227,7 @@ fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let task = async move {
         let f_handle = file_handle; //get to local
         let pages = size.div_ceil(4096);
-        let buffer_alloc = physical_allocator::allocate_contiguius_high(pages);
+        let buffer_alloc = physical_allocator::allocate_contiguous(pages as u32);
         let dst = std::mem_utils::translate_phys_virt_addr(buffer_alloc).0 as *mut u8;
         let src = buf_ptr;
         //copy to user buffer

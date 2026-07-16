@@ -1,4 +1,4 @@
-pub mod heap;
+mod heap;
 pub mod physical_allocator;
 pub mod stack;
 mod virt_mem_manager;
@@ -33,6 +33,8 @@ pub fn init_memory() {
     println!(level:info, "initializing memory");
     print_limine_phys_map();
     unsafe {
+        let ap_startup_at = crate::acpi::ap_startup as *const () as u64;
+        println!(level:info, "ap_startup at {:#x?}", ap_startup_at);
         let offset: u64 = (*LIMINE_BOOTLOADER_REQUESTS.higher_half_direct_map_request.info).offset;
         let len = get_hhdm_map_len();
         mem_utils::set_hhdm_addr(mem_utils::PhysOffset(offset));
@@ -43,7 +45,7 @@ pub fn init_memory() {
         std::mem_utils::set_heap_initialized(); //at the same time as physical
 
         //allocates low addresses first, so we reserve this for the trampoline
-        TRAMPOLINE_RESERVED = physical_allocator::allocate_frame_low();
+        TRAMPOLINE_RESERVED = physical_allocator::reserve_low();
         println!(level:info, "initializing pager");
         virt_mem_manager::init_paging();
 
@@ -164,4 +166,11 @@ pub fn probe_ptr_u16(ptr: u64) -> Option<u16> {
 pub fn probe_ptr_u8(ptr: u64) -> Option<u8> {
     let res = unsafe { probe_check_u8(ptr) };
     if res.valid { Some(res.value as u8) } else { None }
+}
+
+pub fn log2_rounded_up(num: u64) -> u64 {
+    if num == 1 {
+        return 0; //special case
+    }
+    (num * 2 - 1).ilog2().into()
 }

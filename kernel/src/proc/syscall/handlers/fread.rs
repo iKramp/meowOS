@@ -45,7 +45,7 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let proc = proc_clone;
         let f_handle = file_handle; //get to local
         let pages = size.div_ceil(4096);
-        let buffer_alloc = crate::memory::physical_allocator::allocate_contiguius_high(pages);
+        let buffer_alloc = crate::memory::physical_allocator::allocate_contiguous(pages as u32);
         let buffers = (0..pages).map(|i| buffer_alloc + (i * 4096)).collect::<Vec<PhysAddr>>();
 
         let read_result = crate::vfs::read_file(f_handle.get(), &buffers, size).await;

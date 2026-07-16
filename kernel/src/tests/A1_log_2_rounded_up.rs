@@ -2,8 +2,6 @@ use crate::println;
 use kernel_test::{kernel_test, kernel_test_mod};
 kernel_test_mod!(crate::tests::A1_log_2_rounded_up);
 
-use crate::memory::heap::log2_rounded_up;
-
 #[kernel_test]
 fn test_log_2_rounded_up() -> bool {
     let mut passed = true;

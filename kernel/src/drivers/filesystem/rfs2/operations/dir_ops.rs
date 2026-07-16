@@ -14,7 +14,7 @@ impl Rfs2 {
         let dir_info = self.get_file_info(dir_root).await;
         let size_pages = (dir_info.size + core::mem::size_of::<DirEntry>() as u64).div_ceil(4096);
 
-        let buf = physical_allocator::allocate_contiguius_high(size_pages);
+        let buf = physical_allocator::allocate_contiguous(size_pages as u32);
         let buf_virt = mem_utils::translate_phys_virt_addr(buf);
         let buf_vec = (0..size_pages).map(|i| buf + i * 4096).collect::<Vec<_>>();
         self.read_locked(dir_root, 0, dir_info.size, &buf_vec)

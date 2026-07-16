@@ -1,7 +1,7 @@
 use crate::vfs::{DeviceId, InodeTypeAndPerms};
 
 use super::{DirEntry, VfsAdapterTrait};
-use std::{boxed::Box, error::ErrorCode};
+use std::{boxed::Box, error::ErrorCode, println};
 
 #[derive(Debug)]
 pub struct ProcAdapter {
@@ -10,6 +10,7 @@ pub struct ProcAdapter {
 
 impl ProcAdapter {
     pub fn new(device_id: crate::vfs::DeviceId) -> Self {
+        println!("proc adapter created with device_id: {:?}", device_id);
         ProcAdapter { device_id }
     }
 }

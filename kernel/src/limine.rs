@@ -2,6 +2,8 @@
 
 use std::mem_utils::{PhysAddr, VirtAddr};
 
+use crate::limine;
+
 static LIMINE_BASE_REVISION: [u64; 3] = [0xf9562b2d5c95a6c8, 0x6a7b384944536bdc, 2];
 
 pub static LIMINE_MEMMAP_USABLE: u64 = 0;
@@ -277,6 +279,16 @@ pub struct MemoryMapEntry {
     pub base: u64,
     pub length: u64,
     pub entry_type: u64,
+}
+
+impl MemoryMapEntry {
+    pub fn is_usable(&self) -> bool {
+        self.entry_type == LIMINE_MEMMAP_USABLE
+    }
+
+    pub fn can_be_usable(&self) -> bool {
+        self.is_usable() || self.entry_type == LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE
+    }
 }
 
 #[repr(C)]

@@ -1,11 +1,12 @@
 use std::lock_w_info;
+use std::mem_utils::{
+    PhysAddr, VirtAddr, get_at_virtual_addr, set_at_physical_addr, set_at_virtual_addr, translate_phys_virt_addr,
+};
 use std::sync::no_int_spinlock::NoIntSpinlock;
 
-use crate::memory::{heap::log2_rounded_up, printlnc};
+use crate::memory::{log2_rounded_up, printlnc};
 
 use crate::{limine, println};
-
-use super::mem_utils::*;
 
 static BUDDY_ALLOCATOR: NoIntSpinlock<BuddyAllocator> = NoIntSpinlock::new(BuddyAllocator {
     n_pages: 0,
@@ -29,14 +30,7 @@ pub struct BuddyAllocator {
     tree_allocator: VirtAddr,
 }
 
-pub fn init() {
-    let memory_regions = unsafe { &mut *(*crate::LIMINE_BOOTLOADER_REQUESTS.memory_map_request.info).memory_map };
-    let memory_regions = unsafe {
-        core::slice::from_raw_parts_mut(
-            memory_regions,
-            (*crate::LIMINE_BOOTLOADER_REQUESTS.memory_map_request.info).memory_map_count as usize,
-        )
-    };
+pub fn init(memory_regions: &mut [&mut limine::MemoryMapEntry]) {
     let n_pages = find_max_ram_address(memory_regions).0 >> 12;
     unsafe { MAX_RAM_ADDR = PhysAddr(n_pages << 12) };
     println!(level:info, "n_pages: {}", n_pages);
@@ -69,7 +63,7 @@ pub fn init() {
         tree_allocator: translate_phys_virt_addr(tree_allocator),
     };
     for entry in memory_regions {
-        if !is_memory_region_usable(entry) {
+        if !entry.is_usable() {
             continue;
         }
         for addr in (entry.base..(entry.base + entry.length)).step_by(0x1000) {
@@ -103,16 +97,12 @@ pub fn allocate_frame() -> PhysAddr {
     lock_w_info!(BUDDY_ALLOCATOR).allocate_frame()
 }
 
-pub fn allocate_frame_low() -> PhysAddr {
-    lock_w_info!(BUDDY_ALLOCATOR).allocate_frame_low()
-}
-
-pub fn allocate_contiguius_high(n_pages: u64) -> PhysAddr {
+pub fn allocate_contiguous(n_pages: u64) -> PhysAddr {
     lock_w_info!(BUDDY_ALLOCATOR).allocate_contiguius_high(n_pages)
 }
 
-pub fn allocate_contiguius_low(n_pages: u64) -> PhysAddr {
-    lock_w_info!(BUDDY_ALLOCATOR).allocate_contiguius_low(n_pages)
+pub fn reserve_low() -> PhysAddr {
+    lock_w_info!(BUDDY_ALLOCATOR).allocate_frame_low()
 }
 
 impl BuddyAllocator {
@@ -358,7 +348,7 @@ impl BuddyAllocator {
 fn find_mem_region_to_shrink(memory_regions: &[&mut limine::MemoryMapEntry], space_needed_bytes: u64) -> usize {
     //we search from the last region, to preserve memory for smp code
     for region in memory_regions.iter().enumerate().rev() {
-        if !is_memory_region_usable(region.1) {
+        if !region.1.is_usable() {
             continue;
         }
         let empty_space = region.1.length;
@@ -373,21 +363,11 @@ fn find_mem_region_to_shrink(memory_regions: &[&mut limine::MemoryMapEntry], spa
 fn find_max_ram_address(memory_regions: &[&mut limine::MemoryMapEntry]) -> PhysAddr {
     let mut highest = 0;
     for region in memory_regions {
-        if can_mem_region_be_usable(region) {
+        if region.can_be_usable() {
             highest = region.base + region.length;
         }
     }
     PhysAddr(highest)
-}
-
-fn is_memory_region_usable(entry: &limine::MemoryMapEntry) -> bool {
-    entry.entry_type == limine::LIMINE_MEMMAP_USABLE
-}
-
-///This function returns if a region can EVER be usable, even if it's currently not (includes
-///bootloader reclaimable memory)
-fn can_mem_region_be_usable(entry: &limine::MemoryMapEntry) -> bool {
-    entry.entry_type == limine::LIMINE_MEMMAP_USABLE || entry.entry_type == limine::LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE
 }
 
 ///rounded up to power of 2

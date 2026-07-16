@@ -97,7 +97,7 @@ pub async fn get_inode_chain(
             continue;
         }
 
-        let current_last = *current.last().expect("current can't be empty");
+        let mut current_last = *current.last().expect("current can't be empty");
         println!(
             "get_inode_chain: current last inode: {:?}, component: {}",
             current_last, component
@@ -109,6 +109,7 @@ pub async fn get_inode_chain(
                 break;
             }
             *current.last_mut().expect("current can't be empty") = *mount_point;
+            current_last = *current.last().expect("current can't be empty");
             println!("get_inode_chain: following mount point to inode: {:?}", *mount_point);
         }
 
@@ -116,6 +117,17 @@ pub async fn get_inode_chain(
         println!("get_inode_chain: found child inode: {:?} for component: {}", child, component);
         current.push(child);
     }
+
+    //print all mountpoints
+    for mp in &cache_lock.as_ref().expect("is some").mount_points {
+        println!("mountpoint at {:?} with value {:?}", mp.0, mp.1);
+    }
+
+    println!(
+        "get_inode_chain: last inode: {:?}",
+        *current.last().expect("current can't be empty")
+    );
+
     while let Some(mount_point) = cache_lock
         .as_ref()
         .expect("is some")
@@ -124,6 +136,12 @@ pub async fn get_inode_chain(
     {
         *current.last_mut().expect("current can't be empty") = *mount_point;
     }
+
+    println!(
+        "get_inode_chain: last inode after mounts: {:?}",
+        *current.last().expect("current can't be empty")
+    );
+
     let file = *current.last().expect("current can't be empty");
     if current.len() > 1 {
         current.pop();

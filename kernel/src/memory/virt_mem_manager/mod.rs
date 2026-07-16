@@ -98,7 +98,7 @@ pub fn kernel_free(addr: VirtAddr) {
 pub fn kernel_map_contiguous(phys_addr: Option<PhysAddr>, n_pages: u64) -> VirtAddr {
     let phys_addr = match phys_addr {
         Some(a) => a,
-        None => physical_allocator::allocate_contiguius_high(n_pages),
+        None => physical_allocator::allocate_contiguous(n_pages as u32),
     };
     translate_phys_virt_addr(phys_addr)
 }
@@ -225,7 +225,7 @@ pub fn prepare_higher_half() {
         if entry.present() {
             continue;
         }
-        let frame = physical_allocator::allocate_frame_low();
+        let frame = physical_allocator::allocate_frame();
         unsafe {
             core::ptr::write_volatile(
                 get_at_physical_addr::<PageTable>(frame),

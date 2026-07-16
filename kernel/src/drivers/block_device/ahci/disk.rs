@@ -298,7 +298,7 @@ impl VirtualPort {
 
     pub fn release_command_index(&self, index: u8) {
         self.commands_issued
-            .fetch_and(!(1 << index), core::sync::atomic::Ordering::AcqRel);
+            .fetch_and(!(1_u32 << index), core::sync::atomic::Ordering::AcqRel);
     }
 
     pub fn init_cmd_list_fis(&mut self, is_64_bit: bool) {
@@ -307,7 +307,7 @@ impl VirtualPort {
         let cmd_list_base = if is_64_bit {
             physical_allocator::allocate_frame()
         } else {
-            physical_allocator::allocate_frame_low()
+            panic!("i do not support 32 bit");
         };
 
         let fis_base = if !FIS_SWITCHING {
@@ -315,7 +315,7 @@ impl VirtualPort {
         } else if is_64_bit {
             physical_allocator::allocate_frame()
         } else {
-            physical_allocator::allocate_frame_low()
+            panic!("i do not support 32 bit");
         };
 
         let lock = lock_w_info!(self.address_lock);
@@ -480,7 +480,7 @@ impl VirtualPort {
         let cmd_table_page = if self.is_64_bit {
             physical_allocator::allocate_frame()
         } else {
-            physical_allocator::allocate_frame_low()
+            panic!("i do not support 32 bit");
         };
 
         let mut cmd_header = CmdHeader(0);
@@ -632,6 +632,8 @@ impl BlockDevice for VirtualPort {
 
     ///Returns the virtual address of the read data and the command index used
     async fn write(&self, start_sec_index: usize, sec_count: usize, buffer: &[PhysAddr]) {
+        println!("writing to disk at sector {} with sec count {}", start_sec_index, sec_count);
+
         OPERATIONS.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
         assert!(sec_count <= self.sectors as usize);
         let prdt_entries = sec_count.div_ceil(8); //8 sectors in one physical frame
@@ -670,6 +672,8 @@ impl BlockDevice for VirtualPort {
             ..H2DRegisterFis::default()
         };
 
+        println!("created fis");
+
         let write_cmd_index = loop {
             match self.get_command_index() {
                 Some(cmd_index) => break cmd_index,
@@ -678,7 +682,12 @@ impl BlockDevice for VirtualPort {
                 }
             }
         };
+
+        println!("got cmd index {}", write_cmd_index);
+
         self.build_command(false, (&cfis).into(), &prdt, write_cmd_index);
+
+        println!("dispatched command");
 
         CommandWaiter {
             port: self,
@@ -688,6 +697,8 @@ impl BlockDevice for VirtualPort {
 
         self.clean_command(write_cmd_index);
         self.release_command_index(write_cmd_index);
+
+        println!("released cmd index");
     }
 }
 

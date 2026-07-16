@@ -3,7 +3,7 @@ use std::{
     boxed::Box,
     collections::btree_map::BTreeMap,
     error::ErrorCode,
-    ffi_future, lock_w_info, println,
+    ffi_future, lock_w_info,
     sync::{self, arc::Arc, async_lock::AsyncSpinlock, no_int_spinlock::NoIntSpinlock},
 };
 
