@@ -1,12 +1,8 @@
 use bitfield::bitfield;
 use core::ops::RangeTo;
-use std::{
-    collections::btree_set::BTreeSet,
-    lock_w_info,
-    mem_utils::{VirtAddr, extend_addr, trim_addr_extension},
-    println,
-    sync::no_int_spinlock::NoIntSpinlock,
-};
+use std::{collections::btree_set::BTreeSet, lock_w_info, println, sync::no_int_spinlock::NoIntSpinlock};
+
+use crate::memory::addresses::*;
 
 //match impl with the one below
 bitfield! {

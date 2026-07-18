@@ -5,7 +5,8 @@ use crate::drivers::pci::{
     device_class::PciClass,
     port_access::{get_dword, set_dword},
 };
-use std::{mem_utils::PhysAddr, println, vec::Vec};
+use crate::memory::addresses::*;
+use std::{println, vec::Vec};
 
 pub fn get_vendor_id(dev: &PciDeviceLocation) -> u16 {
     get_dword(0, dev) as u16

@@ -1,8 +1,7 @@
+use crate::memory::addresses::*;
 use std::{
     boxed::Box,
-    lock_w_info,
-    mem_utils::{PhysAddr, get_at_physical_addr, translate_phys_virt_addr},
-    println,
+    lock_w_info, println,
     string::{String, ToString},
     vec::Vec,
 };
@@ -22,7 +21,7 @@ impl PartitionSchemeDriver for GPTDriver {
         let first_lba = physical_allocator::allocate_frame();
 
         disk.read(1, 1, &[first_lba]).await;
-        let header = unsafe { get_at_physical_addr::<GptHeader>(first_lba) };
+        let header = unsafe { get_at_addr::<GptHeader, _>(first_lba) };
 
         assert_eq!(header.signature, *b"EFI PART", "Not a GPT disk");
 
@@ -35,7 +34,7 @@ impl PartitionSchemeDriver for GPTDriver {
         let physical_addresses = (0..entry_num_pages)
             .map(|i| phys_addr + (i * 4096))
             .collect::<Vec<PhysAddr>>();
-        let virt_addr = translate_phys_virt_addr(phys_addr);
+        let virt_addr = VirtAddr::from(phys_addr);
 
         disk.read(start_entries, entry_num_lbas, &physical_addresses).await;
 
@@ -121,7 +120,7 @@ impl PartitionSchemeDriver for GPTDriver {
     async fn guid(&self, disk: &dyn BlockDevice) -> Uuid {
         let first_lba = physical_allocator::allocate_frame();
         disk.read(1, 1, &[first_lba]).await;
-        let header = unsafe { get_at_physical_addr::<GptHeader>(first_lba) };
+        let header = unsafe { get_at_addr::<GptHeader, _>(first_lba) };
         let guid = header.disk_guid;
         unsafe { physical_allocator::deallocate_frame(first_lba) };
         Uuid::from_fields(

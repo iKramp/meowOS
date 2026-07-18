@@ -1,9 +1,7 @@
 #![allow(dead_code)]
 
-use std::{
-    Vec,
-    mem_utils::{VirtAddr, get_at_virtual_addr},
-};
+use crate::memory::addresses::*;
+use std::Vec;
 
 #[repr(C, packed)]
 pub struct Madt {
@@ -19,23 +17,23 @@ impl Madt {
         let mut ptr = VirtAddr((self as *const Madt as u64) + 0x2C);
         while ptr.0 < (self as *const Madt as u64 + self.header.length as u64) {
             unsafe {
-                let entry_header = get_at_virtual_addr::<MadtEntryHeader>(ptr);
+                let entry_header = get_at_addr::<MadtEntryHeader, _>(ptr);
                 match entry_header.entry_type {
                     0 => {
-                        entries.push(MadtEntryType::ProcessorLocalAPIC(get_at_virtual_addr::<ProcessorLocalApic>(
-                            ptr,
-                        )));
+                        entries.push(MadtEntryType::ProcessorLocalAPIC(get_at_addr::<ProcessorLocalApic, _>(ptr)));
                     }
-                    1 => entries.push(MadtEntryType::IoApic(get_at_virtual_addr::<IoApic>(ptr))),
-                    2 => entries.push(MadtEntryType::InterruptSourceOverride(get_at_virtual_addr::<
+                    1 => entries.push(MadtEntryType::IoApic(get_at_addr::<IoApic, _>(ptr))),
+                    2 => entries.push(MadtEntryType::InterruptSourceOverride(get_at_addr::<
                         InterruptSourceOverride,
+                        _,
                     >(ptr))),
                     3 => {
-                        entries.push(MadtEntryType::NMISource(get_at_virtual_addr::<NMISource>(ptr)));
+                        entries.push(MadtEntryType::NMISource(get_at_addr::<NMISource, _>(ptr)));
                     }
-                    4 => entries.push(MadtEntryType::LocalApicNMI(get_at_virtual_addr::<LocalApicNMI>(ptr))),
-                    5 => entries.push(MadtEntryType::LocalApicAddressOverride(get_at_virtual_addr::<
+                    4 => entries.push(MadtEntryType::LocalApicNMI(get_at_addr::<LocalApicNMI, _>(ptr))),
+                    5 => entries.push(MadtEntryType::LocalApicAddressOverride(get_at_addr::<
                         LocalApicAddressOverride,
+                        _,
                     >(ptr))),
                     9 => crate::println!("x2apic not supported because idk how to parse the dsdt/ssdt"),
                     _ => entries.push(MadtEntryType::Other),

@@ -1,13 +1,8 @@
 use core::ops::Range;
-use std::{
-    error::ErrorCode,
-    lock_w_info,
-    mem_utils::{PhysAddr, VirtAddr, get_at_physical_addr, translate_phys_virt_addr, translate_virt_phys_addr},
-    println,
-    sync::no_int_spinlock::NoIntSpinlock,
-};
+use std::{error::ErrorCode, lock_w_info, println, sync::no_int_spinlock::NoIntSpinlock};
 
 use crate::memory::{
+    addresses::*,
     physical_allocator,
     virt_mem_manager::{allocation_area::AllocationAreaFlags, page_table::PageTable},
 };
@@ -26,7 +21,7 @@ pub(super) fn init_paging() {
     prepare_higher_half();
 
     let root = current_root();
-    let page_table = unsafe { get_at_physical_addr::<PageTable>(root) };
+    let page_table = unsafe { get_at_addr::<PageTable, _>(root) };
 
     let ranges = page_table.get_free_ranges(VirtAddr(0), 4);
     println!("current paging empty areas:");
@@ -85,7 +80,7 @@ pub fn kernel_map(phys_addr: Option<PhysAddr>) -> VirtAddr {
         Some(a) => a,
         None => physical_allocator::allocate_frame(),
     };
-    translate_phys_virt_addr(phys_addr)
+    phys_addr.into()
 }
 
 #[inline]
@@ -100,7 +95,7 @@ pub fn kernel_map_contiguous(phys_addr: Option<PhysAddr>, n_pages: u64) -> VirtA
         Some(a) => a,
         None => physical_allocator::allocate_contiguous(n_pages as u32),
     };
-    translate_phys_virt_addr(phys_addr)
+    phys_addr.into()
 }
 
 #[inline]
@@ -130,7 +125,7 @@ pub unsafe fn kernel_manual_map(
 
     let _lock = lock_w_info!(MANUAL_MAP_LOCK);
     let page_table_root = page_tree_root.unwrap_or_else(current_root);
-    let page_table = unsafe { get_at_physical_addr::<PageTable>(page_table_root) };
+    let page_table = unsafe { get_at_addr::<PageTable, _>(page_table_root) };
     let res = unsafe { page_table.kernel_manual_map(phys_addr, virt_addr, pages, VirtAddr(0), 4) };
     drop(_lock);
     (virt_addr, res.0)
@@ -144,7 +139,7 @@ pub unsafe fn kernel_manual_unmap(virt_addr: VirtAddr, pages: u64, page_tree_roo
 
     let _lock = lock_w_info!(MANUAL_MAP_LOCK);
     let page_table_root = page_tree_root.unwrap_or_else(current_root);
-    let page_table = unsafe { get_at_physical_addr::<PageTable>(page_table_root) };
+    let page_table = unsafe { get_at_addr::<PageTable, _>(page_table_root) };
     unsafe { page_table.kernel_manual_unmap(virt_addr, pages, VirtAddr(0), 4) };
     drop(_lock);
 }
@@ -158,7 +153,7 @@ pub fn userspace_map(
 ) -> Result<(), ErrorCode> {
     assert!((1..=3).contains(&table_level));
 
-    let table = unsafe { get_at_physical_addr::<PageTable>(table_phys) };
+    let table = unsafe { get_at_addr::<PageTable, _>(table_phys) };
     table.userspace_map(page_range, permissions, table_level, table_page_index);
     Ok(())
 }
@@ -166,7 +161,7 @@ pub fn userspace_map(
 pub fn userspace_unmap(pages: Range<u32>, table_phys: PhysAddr, table_level: u8, table_page_index: u32) -> Result<(), ErrorCode> {
     assert!((1..=3).contains(&table_level));
 
-    let table = unsafe { get_at_physical_addr::<PageTable>(table_phys) };
+    let table = unsafe { get_at_addr::<PageTable, _>(table_phys) };
     table.userspace_unmap(pages, table_level, table_page_index);
     Ok(())
 }
@@ -179,7 +174,7 @@ pub fn set_prot(
     table_addr: VirtAddr,
 ) {
     assert!((1..=4).contains(&table_level));
-    let page_table = unsafe { get_at_physical_addr::<PageTable>(table_phys) };
+    let page_table = unsafe { get_at_addr::<PageTable, _>(table_phys) };
     page_table.set_prot(addr_range, permissions, table_level, table_addr);
 }
 
@@ -195,13 +190,13 @@ pub fn get_page_table_entry_at_level(
     allocate_missing: bool,
 ) -> Option<&'static mut PageTableEntry> {
     assert!((1..=4).contains(&level));
-    let page_table = unsafe { get_at_physical_addr::<PageTable>(root) };
+    let page_table = unsafe { get_at_addr::<PageTable, _>(root) };
     page_table.get_page_table_entry(virt_addr, VirtAddr(0), 4, level, allocate_missing)
 }
 
 pub fn unmap_lower_half() {
     let page_tree_root = current_root();
-    let page_table = unsafe { get_at_physical_addr::<PageTable>(page_tree_root) };
+    let page_table = unsafe { get_at_addr::<PageTable, _>(page_tree_root) };
     for entry in &mut page_table.entries[..256] {
         if !entry.present() {
             continue;
@@ -220,7 +215,7 @@ pub fn delete_page_table(root: PhysAddr, level: u8, unmap_phys: bool) {
 
 pub fn prepare_higher_half() {
     let page_tree_root = current_root();
-    let page_table = unsafe { get_at_physical_addr::<PageTable>(page_tree_root) };
+    let page_table = unsafe { get_at_addr::<PageTable, _>(page_tree_root) };
     for entry in &mut page_table.entries[256..] {
         if entry.present() {
             continue;
@@ -228,7 +223,7 @@ pub fn prepare_higher_half() {
         let frame = physical_allocator::allocate_frame();
         unsafe {
             core::ptr::write_volatile(
-                get_at_physical_addr::<PageTable>(frame),
+                get_at_addr::<PageTable, _>(frame),
                 PageTable {
                     entries: [PageTableEntry(0); 512],
                 },
@@ -240,8 +235,8 @@ pub fn prepare_higher_half() {
 
 pub fn copy_higher_half(existing_tree: PhysAddr, new_tree: PhysAddr) {
     unsafe {
-        let existing_page_table = get_at_physical_addr::<PageTable>(existing_tree);
-        let new_page_table = get_at_physical_addr::<PageTable>(new_tree);
+        let existing_page_table = get_at_addr::<PageTable, _>(existing_tree);
+        let new_page_table = get_at_addr::<PageTable, _>(new_tree);
         for i in 256..512 {
             new_page_table.entries[i] = existing_page_table.entries[i];
         }

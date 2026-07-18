@@ -1,7 +1,7 @@
 use core::{fmt::Debug, sync::atomic::AtomicU32};
-use std::{boxed::Box, error::ErrorCode, mem_utils::PhysAddr};
+use std::{boxed::Box, error::ErrorCode};
 
-use crate::drivers::block_device::disk::DirEntry;
+use crate::{drivers::block_device::disk::DirEntry, memory::addresses::PhysAddr};
 
 use super::{DeviceDetails, DeviceId, Inode, InodeIndex, Vfs, filesystem_trait::FileSystem};
 

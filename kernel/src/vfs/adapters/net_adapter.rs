@@ -8,6 +8,7 @@ use std::{boxed::Box, error::ErrorCode, vec::Vec};
 use std::{println, r_lock_w_info, w_lock_w_info};
 
 use crate::drivers::block_device::disk::DirEntry;
+use crate::memory::addresses::*;
 use crate::vfs::adapters::VfsAdapterTrait;
 use crate::vfs::{DeviceId, Inode, InodeIndex, InodeTypeAndPerms, inode};
 
@@ -65,7 +66,7 @@ impl VfsAdapterTrait for NetAdapter {
         _inode: crate::vfs::InodeIndex,
         _offset_bytes: u64,
         size_bytes: u64,
-        buffer: &[std::mem_utils::PhysAddr],
+        buffer: &[PhysAddr],
     ) -> Result<u64, ErrorCode> {
         if size_bytes == 0 {
             return Ok(0);
@@ -85,7 +86,8 @@ impl VfsAdapterTrait for NetAdapter {
                 let mac_address = device.get_mac_address();
                 let read_size = size_bytes.min(6);
                 let first_buffer = buffer[0];
-                let ptr = std::mem_utils::translate_phys_virt_addr(first_buffer).0 as *mut u8;
+                let first_buffer_virt: VirtAddr = first_buffer.into();
+                let ptr = first_buffer_virt.0 as *mut u8;
                 unsafe { core::ptr::copy_nonoverlapping(addr_of!(mac_address) as *const u8, ptr, read_size as usize) };
                 Ok(read_size)
             }
@@ -93,7 +95,8 @@ impl VfsAdapterTrait for NetAdapter {
                 let mtu = device.mtu() as u32;
                 let read_size = size_bytes.min(4);
                 let first_buffer = buffer[0];
-                let ptr = std::mem_utils::translate_phys_virt_addr(first_buffer).0 as *mut u8;
+                let first_buffer_virt: VirtAddr = first_buffer.into();
+                let ptr = first_buffer_virt.0 as *mut u8;
                 unsafe { core::ptr::copy_nonoverlapping(addr_of!(mtu) as *const u8, ptr, read_size as usize) };
                 Ok(read_size)
             }
@@ -134,13 +137,7 @@ impl VfsAdapterTrait for NetAdapter {
         };
     }
 
-    async fn write(
-        &self,
-        inode: InodeIndex,
-        _offset: u64,
-        size: u64,
-        buffer: &[std::mem_utils::PhysAddr],
-    ) -> Result<(Inode, u64), ErrorCode> {
+    async fn write(&self, inode: InodeIndex, _offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), ErrorCode> {
         if size == 0 {
             return Ok((self.stat(inode).await?, 0));
         }
@@ -166,7 +163,8 @@ impl VfsAdapterTrait for NetAdapter {
                     return Err(ErrorCode::InvalidArgument);
                 }
 
-                let ptr = std::mem_utils::translate_phys_virt_addr(buffer[0]).0 as *const u8;
+                let virt: VirtAddr = buffer[0].into();
+                let ptr = virt.0 as *const u8;
                 let slice = unsafe { core::slice::from_raw_parts(ptr, size as usize) };
                 device.send_packet(slice)?;
 

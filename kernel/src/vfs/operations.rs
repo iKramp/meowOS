@@ -2,9 +2,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use std::{
     boxed::Box,
     error::ErrorCode,
-    lock_w_info,
-    mem_utils::PhysAddr,
-    println, printlnc,
+    lock_w_info, println, printlnc,
     string::ToString,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlockGuard},
     vec::Vec,
@@ -17,6 +15,7 @@ use crate::{
         block_device::disk::{BlockDevice, DirEntry, MountedPartition, PartitionSchemeDriver},
         gpt::GPTDriver,
     },
+    memory::addresses::PhysAddr,
     vfs::{
         Inode, InodeIdentifier,
         file::{OpenFlags, get_file},
@@ -382,7 +381,6 @@ pub async fn unlink_file(parent_dir: &FileHandle, name: &str) -> Result<(), Erro
 }
 
 pub async fn write_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, ErrorCode> {
-    // let inode = fs_tree::get_inode(file_handle.inode).ok_or(ErrorCode::InodeNotPresent)?;
     let mut inode = file_handle.open_file.inode.lock().await;
 
     let desired_offset = if file_handle.file_flags.append() {

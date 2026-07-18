@@ -1,8 +1,8 @@
 #![allow(clippy::unusual_byte_groupings, static_mut_refs)]
 
+use crate::memory::addresses::*;
 use crate::{interrupts::disable_pic_completely, memory};
 use core::mem::MaybeUninit;
-use std::mem_utils::PhysAddr;
 
 use reg_map::RegMap;
 use unroll::unroll_for_loops;

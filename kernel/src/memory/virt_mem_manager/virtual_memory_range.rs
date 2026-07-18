@@ -1,13 +1,8 @@
 use bitfield::bitfield;
 use core::{ops::Range, sync::atomic::AtomicU32};
-use std::{
-    error::ErrorCode,
-    lock_w_info,
-    mem_utils::{PhysAddr, VirtAddr, get_at_physical_addr},
-    sync::no_int_spinlock::NoIntSpinlock,
-};
+use std::{error::ErrorCode, lock_w_info, sync::no_int_spinlock::NoIntSpinlock};
 
-use crate::memory::{self, physical_allocator, virt_mem_manager::page_table::PageTable};
+use crate::memory::{self, addresses::*, physical_allocator, virt_mem_manager::page_table::PageTable};
 
 #[derive(Debug, Clone, Copy)]
 pub enum VirtualMemoryRangeCapacity {
@@ -126,7 +121,7 @@ impl VirtualMemoryRange {
         mem_range_management_mode: VirtualMemoryRangeManagementMode,
     ) -> Self {
         let table_addr = physical_allocator::allocate_frame();
-        let table = unsafe { get_at_physical_addr::<PageTable>(table_addr) };
+        let table = unsafe { get_at_addr::<PageTable, _>(table_addr) };
         table.clear();
 
         Self {

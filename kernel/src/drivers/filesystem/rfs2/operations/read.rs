@@ -1,9 +1,5 @@
-use std::{
-    error::ErrorCode,
-    mem_utils::{self, PhysAddr},
-    println,
-    vec::Vec,
-};
+use crate::memory::addresses::*;
+use std::{error::ErrorCode, println, vec::Vec};
 
 use crate::{
     drivers::filesystem::rfs2::{BLOCK_SIZE_SECTORS, BlockPtr, Rfs2, operations::PTRS_PER_BLOCK},
@@ -87,8 +83,8 @@ impl Rfs2 {
                 file_root, offset_blocks, size_bytes
             );
 
-            let src_virt = mem_utils::translate_phys_virt_addr(working_block);
-            let dest_virt = mem_utils::translate_phys_virt_addr(buffer[0]);
+            let src_virt = VirtAddr::from(working_block);
+            let dest_virt = VirtAddr::from(buffer[0]);
 
             unsafe { core::ptr::copy_nonoverlapping(src_virt.0 as *const u8, dest_virt.0 as *mut u8, size_bytes as usize) };
 
@@ -114,9 +110,8 @@ impl Rfs2 {
             let last_relevant_ptr = (last_block_to_read - skipped_blocks) / ptr_blocks;
             skipped_blocks += ptr_blocks * first_relevant_ptr;
 
-            let ptr_virt =
-                mem_utils::translate_phys_virt_addr(*current_working_blocks.first().expect("must have at least 1 block"))
-                    + first_relevant_ptr * core::mem::size_of::<BlockPtr>() as u64;
+            let ptr_virt = VirtAddr::from(*current_working_blocks.first().expect("must have at least 1 block"))
+                + first_relevant_ptr * core::mem::size_of::<BlockPtr>() as u64;
             let ptrs_to_read = (last_relevant_ptr - first_relevant_ptr + 1) as usize;
             let ptrs_slice = unsafe { core::slice::from_raw_parts(ptr_virt.0 as *const BlockPtr, ptrs_to_read) };
 

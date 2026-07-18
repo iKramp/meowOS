@@ -1,10 +1,11 @@
 use core::fmt::Debug;
-use std::{boxed::Box, error::ErrorCode, mem_utils::PhysAddr, sync::arc::Arc};
+use std::{boxed::Box, error::ErrorCode, sync::arc::Arc};
 
 use uuid::Uuid;
 
 use crate::{
     drivers::block_device::disk::{DirEntry, MountedPartition},
+    memory::addresses::PhysAddr,
     vfs::DeviceId,
 };
 

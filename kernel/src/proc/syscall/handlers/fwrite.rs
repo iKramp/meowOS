@@ -1,7 +1,7 @@
-use std::{mem_utils::PhysAddr, println, sync::arc::Arc, vec::Vec};
+use std::{println, sync::arc::Arc, vec::Vec};
 
 use crate::{
-    memory::safe_memcpy_from_user,
+    memory::{addresses::*, safe_memcpy_from_user},
     proc::{
         ProcessData,
         syscall::{self, SyscallCpuState},
@@ -46,7 +46,7 @@ pub fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let f_handle = file_handle; //get to local
         let pages = size.div_ceil(4096);
         let buffer_alloc = crate::memory::physical_allocator::allocate_contiguous(pages as u32);
-        let dst = std::mem_utils::translate_phys_virt_addr(buffer_alloc).0 as *mut u8;
+        let dst = VirtAddr::from(buffer_alloc).0 as *mut u8;
         let src = buffer_ptr;
         //copy to user buffer
         let copy_valid = safe_memcpy_from_user(dst as u64, src as u64, size as usize);

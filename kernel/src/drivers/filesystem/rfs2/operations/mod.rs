@@ -1,12 +1,6 @@
+use crate::memory::addresses::*;
 use core::str::{self};
-use std::{
-    boxed::Box,
-    error::ErrorCode,
-    mem_utils::{PhysAddr, translate_phys_virt_addr},
-    println,
-    string::ToString,
-    vec::Vec,
-};
+use std::{boxed::Box, error::ErrorCode, println, string::ToString, vec::Vec};
 
 use super::InodeIndex;
 use crate::vfs::InodeIndex as VfsInodeIndex;
@@ -207,7 +201,7 @@ impl FileSystem for Rfs2 {
 
         drop(locked);
 
-        let buf_virt = translate_phys_virt_addr(buf);
+        let buf_virt = VirtAddr::from(buf);
         let num_dir_entries = res as usize / core::mem::size_of::<DirEntry>();
         let direntry_slice = unsafe { core::slice::from_raw_parts(buf_virt.0 as *const DirEntry, num_dir_entries) };
 

@@ -1,15 +1,11 @@
 use core::fmt::Display;
-use std::{
-    mem_utils::{PhysAddr, VirtAddr, get_at_physical_addr},
-    println,
-    string::String,
-};
+use std::{println, string::String};
 
-use crate::memory::{self, LiminePat, virt_mem_manager::PageTable};
+use crate::memory::{self, LiminePat, addresses::*, virt_mem_manager::PageTable};
 
 pub(in crate::memory) fn print_mem_mapping() {
     let top_level_table_phys = memory::current_root();
-    let top_level_table = unsafe { get_at_physical_addr(top_level_table_phys) };
+    let top_level_table = unsafe { get_at_addr(top_level_table_phys) };
     if let Some(range) = print_range(top_level_table, None, 4, VirtAddr(0)) {
         println!("{range}");
     }
@@ -33,7 +29,7 @@ fn print_range(
                 println!("{range}");
                 current_range = None;
             }
-            self_virt_addr += 1 << (3 + level * 9);
+            self_virt_addr += 1_u64 << (3 + level * 9);
             continue;
         }
         if level == 1 || entry.huge_page() {
@@ -70,11 +66,11 @@ fn print_range(
                 current_range = Some(new_range);
             }
         } else {
-            let lower_level_table = unsafe { get_at_physical_addr::<PageTable>(entry.address()) };
+            let lower_level_table = unsafe { get_at_addr::<PageTable, _>(entry.address()) };
             let new_range = print_range(lower_level_table, current_range.clone(), level - 1, self_virt_addr);
             current_range = new_range;
         }
-        self_virt_addr += 1 << (3 + level * 9);
+        self_virt_addr += 1_u64 << (3 + level * 9);
     }
     current_range
 }

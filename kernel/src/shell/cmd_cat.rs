@@ -1,7 +1,7 @@
-use std::{error::ErrorCode, lock_w_info, mem_utils, vec::Vec};
+use std::{error::ErrorCode, lock_w_info, vec::Vec};
 
 use crate::{
-    memory::physical_allocator,
+    memory::{addresses::VirtAddr, physical_allocator},
     tty::TTY,
     vfs::{self, file::OpenFlags},
 };
@@ -26,7 +26,7 @@ pub(super) async fn cmd_cat(path: &str) -> Result<(), ErrorCode> {
 
     for frame in buffer {
         let to_read = (file_size - read_data).min(4096);
-        let virt_addr = mem_utils::translate_phys_virt_addr(frame);
+        let virt_addr: VirtAddr = frame.into();
         let ptr = virt_addr.0 as *const u8;
         let data = unsafe { core::slice::from_raw_parts(ptr, to_read as usize) };
         let string = unsafe { str::from_utf8_unchecked(data) };

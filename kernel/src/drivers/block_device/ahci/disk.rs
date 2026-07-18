@@ -1,13 +1,12 @@
 #![allow(non_snake_case)]
 #![allow(clippy::identity_op)]
 
+use crate::memory::addresses::*;
 use core::{array, fmt::Debug, mem::MaybeUninit, ops::DerefMut, sync::atomic::AtomicU32, task::Waker, time::Duration};
 use std::{
     boxed::Box,
     error::ErrorCode,
-    ffi_future, lock_w_info,
-    mem_utils::{PhysAddr, VirtAddr, get_at_physical_addr, get_at_virtual_addr, memset_virtual_addr},
-    println,
+    ffi_future, lock_w_info, println,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
     vec::Vec,
     w_lock_w_info,
@@ -327,12 +326,12 @@ impl VirtualPort {
 
         let clb_virt = memory::kernel_map(Some(cmd_list_base));
 
-        unsafe { memset_virtual_addr(clb_virt, 0, 0x1000) };
+        unsafe { memset_at_addr(clb_virt, 0, 0x1000) };
         let fis_virt = if !FIS_SWITCHING {
-            clb_virt + 0x400
+            clb_virt + 0x400_u64
         } else {
             let tmp_virt = memory::kernel_map(Some(fis_base));
-            unsafe { memset_virtual_addr(tmp_virt, 0, 0x1000) };
+            unsafe { memset_at_addr(tmp_virt, 0, 0x1000) };
             tmp_virt
         };
 
@@ -410,8 +409,8 @@ impl VirtualPort {
         self.set_property(0x14, 1);
 
         unsafe {
-            let register_fis = &raw const *get_at_virtual_addr::<D2HRegisterFis>(self.fis + 0x40);
-            let _pio_setup_fis = &raw const *get_at_virtual_addr::<PioSetupFis>(self.fis + 0x20);
+            let register_fis = &raw const *get_at_addr::<D2HRegisterFis, _>(self.fis + 0x40_u64);
+            let _pio_setup_fis = &raw const *get_at_addr::<PioSetupFis, _>(self.fis + 0x20_u64);
             self.set_property(0x10, 3);
             self.device = register_fis.read_volatile().device;
             //use them?
@@ -462,7 +461,7 @@ impl VirtualPort {
         self.release_command_index(identify_cmd_index);
 
         unsafe {
-            let data = &raw const *get_at_physical_addr::<IdentifyStructure>(fis_recv_area);
+            let data = &raw const *get_at_addr::<IdentifyStructure, _>(fis_recv_area);
             let data = data.read_volatile();
 
             self.sectors = data.total_usr_sectors();

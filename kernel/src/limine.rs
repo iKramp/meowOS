@@ -1,8 +1,6 @@
 #![allow(dead_code)]
 
-use std::mem_utils::{PhysAddr, VirtAddr};
-
-use crate::limine;
+use crate::memory::addresses::{PhysAddr, VirtAddr};
 
 static LIMINE_BASE_REVISION: [u64; 3] = [0xf9562b2d5c95a6c8, 0x6a7b384944536bdc, 2];
 

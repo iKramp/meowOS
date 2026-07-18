@@ -1,4 +1,4 @@
-use std::mem_utils::{PhysAddr, VirtAddr, ensure_aligned};
+use crate::memory::addresses::*;
 
 pub enum Rsdp {
     V1(&'static RsdpV1),
@@ -131,7 +131,7 @@ pub struct RsdpV2 {
 //first do memory allocation and mapping, then i can map rsdp memory and do this
 pub fn get_rsdp_table(rsdp_addr: u64) -> Option<Rsdp> {
     //guard against misaligned tables...
-    let rsdp_addr = unsafe { ensure_aligned::<RsdpV2>(VirtAddr(rsdp_addr)).0 };
+    let rsdp_addr = unsafe { align::<RsdpV2>(VirtAddr(rsdp_addr)).0 };
 
     let rsdp_table = unsafe { &mut *(rsdp_addr as *mut RsdpV1) };
     let revision = rsdp_table.revision;

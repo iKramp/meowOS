@@ -1,6 +1,7 @@
 // E1000e Network Device Driver
 // Follows the 82574 specification
 
+use crate::memory::addresses::*;
 use core::{
     cell::UnsafeCell,
     mem::MaybeUninit,
@@ -9,7 +10,6 @@ use core::{
 use std::{
     boxed::Box,
     error::ErrorCode,
-    mem_utils::{PhysAddr, VirtAddr},
     println, r_lock_w_info,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
     vec::Vec,

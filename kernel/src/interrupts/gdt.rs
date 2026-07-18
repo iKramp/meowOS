@@ -1,4 +1,5 @@
-use std::{boxed::Box, mem_utils::VirtAddr};
+use crate::memory::addresses::*;
+use std::boxed::Box;
 
 use crate::memory::stack::{KERNEL_STACK_SIZE_PAGES, prepare_kernel_stack};
 

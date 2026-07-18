@@ -1,6 +1,4 @@
-use std::mem_utils::VirtAddr;
-
-use crate::memory::{self, physical_allocator};
+use crate::memory::{self, addresses::VirtAddr, physical_allocator};
 
 pub const KERNEL_STACK_SIZE_PAGES: u8 = 16;
 
@@ -17,6 +15,6 @@ pub fn prepare_kernel_stack(stack_size_pages: u8) -> VirtAddr {
             byte_ptr.write(0);
         }
 
-        highest_addr - 16
+        highest_addr - 16_u64
     }
 }

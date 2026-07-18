@@ -1,18 +1,12 @@
 use bitfield::bitfield;
 use core::{mem::MaybeUninit, slice};
-use std::{
-    mem_utils::{PhysAddr, translate_phys_virt_addr},
-    println,
-    string::String,
-    sync::arc::Arc,
-    vec::Vec,
-};
+use std::{println, string::String, sync::arc::Arc, vec::Vec};
 
 use uuid::Uuid;
 
 use crate::{
     drivers::block_device::disk::MountedPartition,
-    memory::physical_allocator,
+    memory::{addresses::*, physical_allocator},
     vfs::{DeviceId, FileSystem, FileSystemFactory, Inode, InodeIndex, InodeTypeAndPerms},
 };
 
@@ -156,7 +150,7 @@ impl FatDriver {
 
         unsafe {
             let header_ptr = header.as_mut_ptr();
-            let page_virt = translate_phys_virt_addr(page);
+            let page_virt = VirtAddr::from(page);
             let src_ptr = page_virt.0 as *const FatHeader;
             *header_ptr = *src_ptr;
 
@@ -177,7 +171,7 @@ impl FatDriver {
             let fat_sectors = fat_size * header_ref.BPB_NumFATs as u32;
 
             let root_cluster = header_ref.BPB_RootCluster;
-            let root_dir_sectors = (32 * header_ref.BPB_RootEntryCount as u32 + header_ref.BPB_BytesPerSector as u32 - 1)
+            let root_dir_sectors = (32_u32 * header_ref.BPB_RootEntryCount as u32 + header_ref.BPB_BytesPerSector as u32 - 1)
                 .div_ceil(header_ref.BPB_BytesPerSector as u32);
 
             let data_start_sector = header_ref.BPB_ReservedSectorCount as u32 + (header_ref.BPB_NumFATs as u32 * fat_size);
@@ -230,7 +224,7 @@ impl FatDriver {
 
     async fn read_sector(&self, sector: u32) -> Box<[u8; 512]> {
         let page = physical_allocator::allocate_frame();
-        let page_virt = translate_phys_virt_addr(page);
+        let page_virt: VirtAddr = page.into();
         self.partition.read(sector as usize, 1, &[page]).await;
         let mut data = Box::new([0_u8; 512]);
         let data_src = page_virt.0 as *const u8;
@@ -324,8 +318,9 @@ impl FileSystem for FatDriver {
                 return Ok(i - start_sector * 512);
             };
             let buffer_phys = buffer[i as usize / 8];
+            let buffer_virt: VirtAddr = buffer_phys.into();
             let in_buffer_offset = (i % 8) * 512;
-            let ptr_dest = (translate_phys_virt_addr(buffer_phys) + in_buffer_offset).0 as *mut u8;
+            let ptr_dest = (buffer_virt + in_buffer_offset).0 as *mut u8;
             let ptr_src = data.as_ptr();
             unsafe {
                 ptr_dest.copy_from(ptr_src, 512);

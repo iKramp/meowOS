@@ -1,6 +1,8 @@
 use bitfield::bitfield;
 use core::{fmt::Debug, str::Chars};
-use std::{boxed::Box, mem_utils::VirtAddr, string::String, vec::Vec};
+use std::{boxed::Box, string::String, vec::Vec};
+
+use crate::memory::addresses::VirtAddr;
 
 pub const MAX_PROC_STACK_SIZE_PAGES: usize = 0x4; // 16KB
 

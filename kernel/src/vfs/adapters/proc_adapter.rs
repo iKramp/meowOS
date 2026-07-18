@@ -1,4 +1,7 @@
-use crate::vfs::{DeviceId, InodeTypeAndPerms};
+use crate::{
+    memory::addresses::*,
+    vfs::{DeviceId, InodeTypeAndPerms},
+};
 
 use super::{DirEntry, VfsAdapterTrait};
 use std::{boxed::Box, error::ErrorCode, println};
@@ -26,7 +29,7 @@ impl VfsAdapterTrait for ProcAdapter {
         _inode: crate::vfs::InodeIndex,
         _offset_bytes: u64,
         _size_bytes: u64,
-        _buffer: &[std::mem_utils::PhysAddr],
+        _buffer: &[PhysAddr],
     ) -> Result<u64, ErrorCode> {
         todo!()
     }
@@ -40,7 +43,7 @@ impl VfsAdapterTrait for ProcAdapter {
         _inode: crate::vfs::InodeIndex,
         _offset: u64,
         _size: u64,
-        _buffer: &[std::mem_utils::PhysAddr],
+        _buffer: &[PhysAddr],
     ) -> Result<(crate::vfs::Inode, u64), ErrorCode> {
         todo!()
     }

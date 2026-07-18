@@ -1,11 +1,6 @@
+use crate::memory::addresses::*;
 use core::{cell::UnsafeCell, sync::atomic::Ordering};
-use std::{
-    lock_w_info,
-    mem_utils::{PhysAddr, translate_virt_phys_addr},
-    println,
-    vec::Vec,
-    w_lock_w_info,
-};
+use std::{lock_w_info, println, vec::Vec, w_lock_w_info};
 
 use crate::{
     drivers::net_device::e1000e::E1000eDevice,

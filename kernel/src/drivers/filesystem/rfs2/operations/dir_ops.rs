@@ -1,7 +1,5 @@
-use std::{
-    mem_utils::{self, PhysAddr},
-    vec::Vec,
-};
+use crate::memory::addresses::*;
+use std::vec::Vec;
 
 use crate::{
     drivers::filesystem::rfs2::{BlockPtr, InodeIndex, Rfs2, operations::DirEntry},
@@ -15,7 +13,7 @@ impl Rfs2 {
         let size_pages = (dir_info.size + core::mem::size_of::<DirEntry>() as u64).div_ceil(4096);
 
         let buf = physical_allocator::allocate_contiguous(size_pages as u32);
-        let buf_virt = mem_utils::translate_phys_virt_addr(buf);
+        let buf_virt = VirtAddr::from(buf);
         let buf_vec = (0..size_pages).map(|i| buf + i * 4096).collect::<Vec<_>>();
         self.read_locked(dir_root, 0, dir_info.size, &buf_vec)
             .await

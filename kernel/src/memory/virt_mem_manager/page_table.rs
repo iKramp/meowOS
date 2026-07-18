@@ -1,12 +1,10 @@
 use core::{mem::MaybeUninit, ops::Range};
-use std::{
-    mem_utils::{PhysAddr, VirtAddr, get_at_physical_addr, memset_physical_addr, set_static_lifetime_mut},
-    println,
-    vec::Vec,
-};
+use std::{println, vec::Vec};
 
 use crate::memory::{
-    VirtualMemoryRangePermissions, physical_allocator,
+    VirtualMemoryRangePermissions,
+    addresses::*,
+    physical_allocator,
     virt_mem_manager::{flush_tlb, page_table_entry::PageTableEntry},
 };
 
@@ -30,7 +28,7 @@ impl PageTable {
     ///Level 1 is the lowest valid level
     pub fn delete(self_phys: PhysAddr, level: u8, dealloc_phys: bool) {
         if level != 1 || dealloc_phys {
-            let self_obj = unsafe { get_at_physical_addr::<Self>(self_phys) };
+            let self_obj = unsafe { get_at_addr::<Self, _>(self_phys) };
 
             for entry in self_obj.entries {
                 if !entry.present() {
@@ -109,7 +107,7 @@ impl PageTable {
             let lower_table_phys;
             if !entry.present() {
                 let new_frame = physical_allocator::allocate_frame();
-                unsafe { memset_physical_addr(new_frame, 0, 4096) };
+                unsafe { memset_at_addr(new_frame, 0, 4096) };
                 *entry = PageTableEntry::new(new_frame, false);
                 lower_table_phys = new_frame;
             } else {
@@ -120,7 +118,7 @@ impl PageTable {
                 panic!("not dealing with huge pages");
             }
 
-            let new_table = unsafe { get_at_physical_addr::<PageTable>(lower_table_phys) };
+            let new_table = unsafe { get_at_addr::<PageTable, _>(lower_table_phys) };
             let new_node_virt = current_node_virt + (index << (12 + 9 * (current_node_level - 1)));
 
             let left_to_alloc = n_pages - allocated;
@@ -188,7 +186,7 @@ impl PageTable {
             }
 
             let lower_table_phys = entry.address();
-            let lower_table = unsafe { get_at_physical_addr::<PageTable>(lower_table_phys) };
+            let lower_table = unsafe { get_at_addr::<PageTable, _>(lower_table_phys) };
             let new_node_virt = current_node_virt + (index << (12 + 9 * (current_node_level - 1)));
 
             let left_to_alloc = n_pages - freed;
@@ -249,7 +247,7 @@ impl PageTable {
             //not lowest level
             if !entry.present() {
                 let new_frame = physical_allocator::allocate_frame();
-                unsafe { memset_physical_addr(new_frame, 0, 4096) };
+                unsafe { memset_at_addr(new_frame, 0, 4096) };
                 *entry = PageTableEntry::new(new_frame, true);
             } else if entry.huge_page() {
                 panic!("no huge pages in userspace for now")
@@ -258,7 +256,7 @@ impl PageTable {
             entry.set_writeable(entry.writeable() || permissions.write());
             entry.set_no_execute(entry.no_execute() && !permissions.execute());
 
-            let lower_table = unsafe { get_at_physical_addr::<PageTable>(entry.address()) };
+            let lower_table = unsafe { get_at_addr::<PageTable, _>(entry.address()) };
             let lower_table_page_index = table_page_index + (i as u32) * pages_per_entry;
             lower_table.userspace_map(page_range.clone(), permissions, table_level - 1, lower_table_page_index);
         }
@@ -295,7 +293,7 @@ impl PageTable {
             }
 
             let lower_table_phys = entry.address();
-            let lower_table = unsafe { get_at_physical_addr::<PageTable>(lower_table_phys) };
+            let lower_table = unsafe { get_at_addr::<PageTable, _>(lower_table_phys) };
             let lower_table_page_index = table_page_index + (i as u32) * pages_per_entry;
             lower_table.userspace_unmap(page_range.clone(), table_level - 1, lower_table_page_index);
 
@@ -355,7 +353,7 @@ impl PageTable {
             println!("setting prot at level {}, entry after: {:?}", table_level, entry);
 
             let lower_table_phys = entry.address();
-            let lower_table = unsafe { get_at_physical_addr::<PageTable>(lower_table_phys) };
+            let lower_table = unsafe { get_at_addr::<PageTable, _>(lower_table_phys) };
             let lower_table_addr = table_addr + i * pages_per_entry as u64 * 4096;
             println!(
                 "recursively setting prot for lower table at level {}, page addr: {:?}",
@@ -385,7 +383,7 @@ impl PageTable {
         if !entry.present() {
             if allocate_missing {
                 let new_frame = physical_allocator::allocate_frame();
-                unsafe { memset_physical_addr(new_frame, 0, 4096) };
+                unsafe { memset_at_addr(new_frame, 0, 4096) };
                 let user_mode = virt_addr.0 < (1 << 48);
                 *entry = PageTableEntry::new(new_frame, user_mode);
                 entry.set_writeable(true);
@@ -401,7 +399,7 @@ impl PageTable {
         }
 
         let lower_table_phys = entry.address();
-        let new_table = unsafe { get_at_physical_addr::<PageTable>(lower_table_phys) };
+        let new_table = unsafe { get_at_addr::<PageTable, _>(lower_table_phys) };
         let new_node_virt = current_node_virt + (index << (12 + 9 * (current_node_level - 1)));
 
         new_table.get_page_table_entry(
@@ -438,7 +436,7 @@ impl PageTable {
 
         let lower_table_phys = entry.address();
         let new_node_virt = current_node_virt + (index << (12 + 9 * (current_node_level - 1)));
-        let new_node = unsafe { get_at_physical_addr::<PageTable>(lower_table_phys) };
+        let new_node = unsafe { get_at_addr::<PageTable, _>(lower_table_phys) };
         if current_node_level == wanted_node_level + 1 {
             Some(new_node)
         } else {
@@ -470,7 +468,7 @@ impl PageTable {
             }
 
             //entry is present and has lower node
-            let lower_table = unsafe { get_at_physical_addr::<PageTable>(entry.address()) };
+            let lower_table = unsafe { get_at_addr::<PageTable, _>(entry.address()) };
             let mut lower_ranges = lower_table.get_free_ranges(addr, current_node_level - 1);
             if let Some(range) = &curr_range
                 && let Some(first) = lower_ranges.first()

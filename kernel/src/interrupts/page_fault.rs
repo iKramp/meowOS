@@ -1,4 +1,5 @@
-use std::{mem_utils::VirtAddr, println, printlnc};
+use crate::memory::addresses::*;
+use std::{println, printlnc};
 
 use crate::{acpi::cpu_locals::PageFaultHandleMode, interrupts::InterruptProcessorState, memory};
 

@@ -1,4 +1,6 @@
-use std::{boxed::Box, mem_utils::memset_physical_addr};
+use std::boxed::Box;
+
+use crate::memory::addresses::*;
 
 use crate::{
     drivers::filesystem::rfs2::{
@@ -94,7 +96,7 @@ impl Rfs2 {
                 return 0;
             }
             let frame = physical_allocator::allocate_frame();
-            unsafe { memset_physical_addr(frame, 0, 4096) };
+            unsafe { memset_at_addr(frame, 0, 4096) };
             self.partition
                 .write(working_block_ptr as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[frame])
                 .await;
@@ -114,7 +116,7 @@ impl Rfs2 {
                 )
                 .await;
         } else {
-            unsafe { memset_physical_addr(working_block.phys, 0, 4096) };
+            unsafe { memset_at_addr(working_block.phys, 0, 4096) };
         }
 
         let pointers = working_block.get_as_mut::<[BlockPtr; PTRS_PER_BLOCK]>();

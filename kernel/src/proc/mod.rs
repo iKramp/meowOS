@@ -5,16 +5,14 @@ use core::{
 use scheduler::Scheduler;
 use std::{
     error::ErrorCode,
-    lock_w_info,
-    mem_utils::{PhysAddr, translate_phys_virt_addr},
-    println,
+    lock_w_info, println,
     string::ToString,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
     vec::Vec,
 };
 
 use crate::{
-    memory::{self, physical_allocator},
+    memory::{self, addresses::*, physical_allocator},
     proc::{context::builder::create_process_from_context, namespaces::*},
     vfs::{self, ResolvedPathBorrowed, file::OpenFlags},
 };
@@ -112,7 +110,7 @@ pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &s
     let stat = vfs::stat_file(&file_handle).await;
     let buf_pages = stat.size.div_ceil(4096);
     let phys_buf = physical_allocator::allocate_contiguous(buf_pages as u32);
-    let buf = translate_phys_virt_addr(phys_buf);
+    let buf = VirtAddr::from(phys_buf);
 
     let phys_buf_vec = (0..buf_pages).map(|i| phys_buf + i * 4096).collect::<Vec<_>>();
     let read_res = vfs::read_file(&file_handle, &phys_buf_vec, stat.size).await?;

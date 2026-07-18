@@ -1,8 +1,7 @@
+use crate::memory::addresses::*;
 use core::cell::Cell;
 use std::boxed::Box;
-use std::mem_utils::translate_phys_virt_addr;
 use std::{
-    mem_utils::{self, PhysAddr, VirtAddr},
     println, r_lock_w_info,
     sync::{arc::Arc, async_lock::AsyncSpinlock, rw_lock::RWSpinlock},
     vec::Vec,
@@ -42,7 +41,7 @@ struct WorkingBlock {
 impl WorkingBlock {
     fn new() -> Self {
         let phys = physical_allocator::allocate_frame();
-        let virt = translate_phys_virt_addr(phys);
+        let virt = phys.into();
         //no need for UC because of x86 cache coherency
         Self {
             virt,
@@ -55,13 +54,13 @@ impl WorkingBlock {
     pub fn get_as<T: 'static>(&self) -> &T {
         assert!(size_of::<T>() <= 4096);
 
-        unsafe { mem_utils::get_at_virtual_addr(self.virt) }
+        unsafe { get_at_addr(self.virt) }
     }
 
     pub fn get_as_mut<T: 'static>(&mut self) -> &mut T {
         assert!(size_of::<T>() <= 4096);
         self.changed = true;
-        unsafe { mem_utils::get_at_virtual_addr(self.virt) }
+        unsafe { get_at_addr(self.virt) }
     }
 
     fn assign_to_disk_block(&mut self, block: u64, changed: bool) {

@@ -35,8 +35,6 @@ mod proc;
 mod rand;
 mod shell;
 mod task_runner;
-#[allow(unused_imports)]
-mod tests;
 mod tty;
 mod utils;
 mod vfs;

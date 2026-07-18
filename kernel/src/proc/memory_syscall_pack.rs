@@ -1,7 +1,7 @@
-use std::{boxed::Box, mem_utils::VirtAddr, println, sync::arc::Arc};
+use std::{boxed::Box, println, sync::arc::Arc};
 
 use crate::{
-    memory::{self, VirtualMemoryRangeManagementMode},
+    memory::{self, VirtualMemoryRangeManagementMode, addresses::VirtAddr},
     proc::{
         MemoryNamespace, MemoryRangeType, ProcessData,
         syscall::{self, SyscallCpuState},

@@ -1,4 +1,4 @@
-use std::mem_utils::VirtAddr;
+use crate::memory::addresses::*;
 
 use bitfield::bitfield;
 use reg_map::RegMap;

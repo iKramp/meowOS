@@ -1,8 +1,5 @@
-use std::{
-    error::ErrorCode,
-    mem_utils::{self, PhysAddr},
-    vec::Vec,
-};
+use crate::memory::addresses::*;
+use std::{error::ErrorCode, vec::Vec};
 
 use crate::{
     drivers::filesystem::rfs2::{BLOCK_SIZE_SECTORS, BlockPtr, Rfs2, operations::PTRS_PER_BLOCK},
@@ -58,9 +55,8 @@ impl Rfs2 {
             let first_relevant_ptr = first_block_to_write / (PTRS_PER_BLOCK.pow(level_diff as u32) as u64);
             let last_relevant_ptr = last_block_to_write / (PTRS_PER_BLOCK.pow(level_diff as u32) as u64);
 
-            let ptr_virt =
-                mem_utils::translate_phys_virt_addr(*current_working_blocks.first().expect("must have at least 1 block"))
-                    + first_relevant_ptr * core::mem::size_of::<BlockPtr>() as u64;
+            let ptr_virt = VirtAddr::from(*current_working_blocks.first().expect("must have at least 1 block"))
+                + first_relevant_ptr * core::mem::size_of::<BlockPtr>() as u64;
             let ptrs_to_read = (last_relevant_ptr - first_relevant_ptr + 1) as usize;
             let ptrs_slice = unsafe { core::slice::from_raw_parts(ptr_virt.0 as *const BlockPtr, ptrs_to_read) };
 

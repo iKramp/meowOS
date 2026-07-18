@@ -1,10 +1,5 @@
-use std::{
-    ffi_future::future::into_ffi_future,
-    mem_utils::{get_at_physical_addr, translate_phys_virt_addr},
-    println, printlnc,
-    string::String,
-    vec::Vec,
-};
+use crate::memory::addresses::*;
+use std::{ffi_future::future::into_ffi_future, println, printlnc, string::String, vec::Vec};
 
 use crate::{
     memory::physical_allocator,
@@ -135,7 +130,7 @@ impl WriteFileOperation {
         for _ in 0..(content.len().div_ceil(4096)) {
             let frame = physical_allocator::allocate_frame();
             frames.push(frame);
-            let frame_binding = translate_phys_virt_addr(frame);
+            let frame_binding = VirtAddr::from(frame);
             frame_bindings.push(frame_binding);
         }
         for i in 0..(content.len().div_ceil(4096)) {
@@ -254,7 +249,7 @@ impl ReadFileOperation {
             } else {
                 4096
             };
-            let data = unsafe { get_at_physical_addr::<[u8; 4096]>(*frame) };
+            let data = unsafe { get_at_addr::<[u8; 4096], _>(*frame) };
             while frame_ptr < limit + frame_ptr_start {
                 final_data.push(data[frame_ptr & 0xFFF]);
                 frame_ptr += 1;

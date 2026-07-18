@@ -1,9 +1,7 @@
 use std::lock_w_info;
-use std::mem_utils::{
-    PhysAddr, VirtAddr, get_at_virtual_addr, set_at_physical_addr, set_at_virtual_addr, translate_phys_virt_addr,
-};
 use std::sync::no_int_spinlock::NoIntSpinlock;
 
+use crate::memory::addresses::*;
 use crate::memory::{log2_rounded_up, printlnc};
 
 use crate::{limine, println};
@@ -47,7 +45,7 @@ pub fn init(memory_regions: &mut [&mut limine::MemoryMapEntry]) {
     for i in 0..space_needed_bytes {
         //set all bits to 1 to set everything as used
         unsafe {
-            set_at_physical_addr(tree_allocator + PhysAddr(i), 0xFF_u8);
+            set_at_addr(tree_allocator + PhysAddr(i), 0xFF_u8);
             allocated_pages += 4;
         }
     }
@@ -60,7 +58,7 @@ pub fn init(memory_regions: &mut [&mut limine::MemoryMapEntry]) {
         n_pages,
         binary_tree_size: binary_tree_size_elements * 2,
         allocated_pages,
-        tree_allocator: translate_phys_virt_addr(tree_allocator),
+        tree_allocator: tree_allocator.into(),
     };
     for entry in memory_regions {
         if !entry.is_usable() {
@@ -317,7 +315,7 @@ impl BuddyAllocator {
 
     fn get_at_index(&self, index: u64) -> bool {
         unsafe {
-            let num = *get_at_virtual_addr::<u8>(self.tree_allocator + (index >> 3));
+            let num = *get_at_addr::<u8, _>(self.tree_allocator + (index >> 3));
             num & (1 << (index & 0b111)) > 0
         }
     }
@@ -325,7 +323,7 @@ impl BuddyAllocator {
     fn set_at_index(&self, index: u64, allocated: bool) {
         //still ugly code
         unsafe {
-            let mut num = *get_at_virtual_addr::<u8>(self.tree_allocator + (index >> 3));
+            let mut num = *get_at_addr::<u8, _>(self.tree_allocator + (index >> 3));
             match allocated {
                 true => {
                     num |= 1 << (index & 0b111);
@@ -334,7 +332,7 @@ impl BuddyAllocator {
                     num &= !(1 << (index & 0b111));
                 }
             }
-            set_at_virtual_addr(self.tree_allocator + (index >> 3), num);
+            set_at_addr(self.tree_allocator + (index >> 3), num);
         }
     }
 

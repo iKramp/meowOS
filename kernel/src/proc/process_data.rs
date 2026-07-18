@@ -2,12 +2,12 @@ use core::sync::atomic::{AtomicBool, AtomicU64};
 use std::{
     boxed::Box,
     lock_w_info,
-    mem_utils::PhysAddr,
     sync::no_int_spinlock::{NoIntSpinlock, NoIntSpinlockGuard},
 };
 
 use crate::{
     interrupts::InterruptProcessorState,
+    memory::addresses::PhysAddr,
     proc::{ProcNamespaces, syscall::SyscallCpuState},
 };
 

@@ -1,3 +1,4 @@
+pub mod addresses;
 mod heap;
 pub mod physical_allocator;
 pub mod stack;
@@ -7,7 +8,7 @@ pub use virt_mem_manager::*;
 use crate::LIMINE_BOOTLOADER_REQUESTS;
 use crate::interrupts::{disable_interrupts, enable_interrupts};
 use crate::{println, printlnc};
-use std::mem_utils::{self, PhysAddr, VirtAddr, is_userspace_ptr};
+use addresses::*;
 
 pub static mut TRAMPOLINE_RESERVED: PhysAddr = PhysAddr(0);
 
@@ -37,12 +38,11 @@ pub fn init_memory() {
         println!(level:info, "ap_startup at {:#x?}", ap_startup_at);
         let offset: u64 = (*LIMINE_BOOTLOADER_REQUESTS.higher_half_direct_map_request.info).offset;
         let len = get_hhdm_map_len();
-        mem_utils::set_hhdm_addr(mem_utils::PhysOffset(offset));
-        mem_utils::set_hhdm_len(len);
+        set_hhdm_addr(PhysOffset(offset));
+        set_hhdm_len(len);
         println!(level:info, "offset: {:#x?}", offset);
         println!(level:info, "initializing physical allocator");
         physical_allocator::init();
-        std::mem_utils::set_heap_initialized(); //at the same time as physical
 
         //allocates low addresses first, so we reserve this for the trampoline
         TRAMPOLINE_RESERVED = physical_allocator::reserve_low();

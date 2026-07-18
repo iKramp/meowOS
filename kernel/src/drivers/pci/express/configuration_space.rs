@@ -1,4 +1,5 @@
-use std::{mem_utils::PhysAddr, println, vec::Vec};
+use crate::memory::addresses::*;
+use std::{println, vec::Vec};
 
 use bitfield::bitfield;
 use reg_map::RegMap;

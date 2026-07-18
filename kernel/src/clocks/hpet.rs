@@ -1,8 +1,6 @@
+use crate::memory::addresses::*;
 use core::{mem::MaybeUninit, sync::atomic::AtomicU64};
-use std::{
-    mem_utils::{PhysAddr, VirtAddr, get_at_virtual_addr},
-    printlnc,
-};
+use std::printlnc;
 
 use bitfield::bitfield;
 use reg_map::RegMap;
@@ -117,7 +115,7 @@ impl Timer for HpetWrapper {
             let Some(hpet_table_phys_addr) = acpi::ACPI_TABLE_MAP.get("HPET") else {
                 return false;
             };
-            hpet_table = get_at_virtual_addr::<acpi::HpetTable>(*hpet_table_phys_addr);
+            hpet_table = get_at_addr::<acpi::HpetTable, _>(*hpet_table_phys_addr);
         }
         let hpet_regs = hpet_table.get_addr();
         if !self.get_registers(hpet_regs) {

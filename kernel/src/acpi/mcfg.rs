@@ -1,4 +1,5 @@
-use std::{boxed::Box, mem_utils::PhysAddr, println, vec::Vec};
+use crate::memory::addresses::*;
+use std::{boxed::Box, println, vec::Vec};
 
 #[derive(Debug)]
 #[repr(C)]

@@ -1,5 +1,6 @@
+use crate::memory::addresses::*;
 use core::fmt::Debug;
-use std::{boxed::Box, mem_utils::PhysAddr, string::String, sync::arc::Arc, vec::Vec};
+use std::{boxed::Box, string::String, sync::arc::Arc, vec::Vec};
 
 use uuid::Uuid;
 

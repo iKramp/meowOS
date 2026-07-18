@@ -1,8 +1,5 @@
-use std::{
-    mem_utils::{PhysAddr, VirtAddr},
-    sync::once_lock::OnceLock,
-    vec::Vec,
-};
+use crate::memory::addresses::*;
+use std::{sync::once_lock::OnceLock, vec::Vec};
 
 use crate::memory;
 

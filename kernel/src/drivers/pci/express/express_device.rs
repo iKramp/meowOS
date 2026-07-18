@@ -1,5 +1,6 @@
+use crate::memory::addresses::*;
 use core::fmt::Debug;
-use std::{mem_utils::VirtAddr, println, vec::Vec};
+use std::{println, vec::Vec};
 
 use crate::drivers::pci::{
     InterruptType, MemoryBar, PciClass, PciDeviceLocation, PciDeviceNumericId,

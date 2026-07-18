@@ -1,6 +1,7 @@
-use std::{mem_utils::VirtAddr, println, vec::Vec};
+use std::{println, vec::Vec};
 
 use crate::{
+    memory::addresses::VirtAddr,
     parsers::elf,
     proc::context::info::{ContextInfo, MemoryRegionDescriptor, MemoryRegionFlags},
 };

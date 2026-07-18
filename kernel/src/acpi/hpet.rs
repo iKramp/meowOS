@@ -1,4 +1,4 @@
-use std::mem_utils::PhysAddr;
+use crate::memory::addresses::*;
 
 use bitfield::bitfield;
 

@@ -1,3 +1,4 @@
+use crate::memory::addresses::*;
 use crate::{
     acpi::{LAPIC_REGISTERS, cpu_locals::CpuLocals},
     drivers::ps2,
@@ -7,10 +8,7 @@ use crate::{
 };
 #[allow(unused_imports)] //they are used in macros
 use core::arch::asm;
-use std::{
-    mem_utils::{VirtAddr, get_at_virtual_addr},
-    println, printlnc,
-};
+use std::{println, printlnc};
 
 use super::macros::InterruptProcessorState;
 
@@ -46,7 +44,7 @@ pub extern "C" fn general_protection_fault(proc_data: &mut InterruptProcessorSta
     //print GDT
     let cpu_locals = CpuLocals::get();
     let gdt_ptr = cpu_locals.gdt_ptr;
-    let gdt = unsafe { get_at_virtual_addr::<GlobalDescriptorTable>(VirtAddr(gdt_ptr.base)) };
+    let gdt = unsafe { get_at_addr::<GlobalDescriptorTable, _>(VirtAddr(gdt_ptr.base)) };
     println!(level:error,"gdt: {:#x?}", gdt);
     unsafe {
         loop {

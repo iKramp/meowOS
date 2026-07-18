@@ -18,7 +18,7 @@ fn panic(info: &PanicInfo) -> ! {
     }
 }
 
-extern crate alloc;
+pub extern crate alloc;
 
 pub mod print;
 pub use print::Print;
@@ -27,7 +27,7 @@ pub use print::set_print;
 pub mod double_map;
 pub mod error;
 pub mod ffi_future;
-pub mod mem_utils;
+mod mem_utils;
 pub mod queue;
 
 pub mod cow;
@@ -73,8 +73,6 @@ pub use core::num;
 pub use core::ops;
 pub use core::option;
 //os
-pub mod eh;
-pub use eh::panic;
 //path
 pub use core::pin;
 pub use core::prelude;

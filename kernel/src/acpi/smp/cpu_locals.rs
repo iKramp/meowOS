@@ -1,9 +1,7 @@
 use core::mem::MaybeUninit;
 use std::{
     boxed::Box,
-    local_lock_read_w_info, local_lock_write_w_info,
-    mem_utils::{VirtAddr, get_at_virtual_addr},
-    println,
+    local_lock_read_w_info, local_lock_write_w_info, println,
     sync::{
         arc::Arc,
         local_lock::{LocalLock, LocalLockReadGuard, LocalLockWriteGuard},
@@ -11,6 +9,8 @@ use std::{
     },
     vec::Vec,
 };
+
+use crate::memory::addresses::*;
 
 use crate::{
     acpi::{lapic_timer::AcceptedScheduledEvent, platform_info::PlatformInfo},
@@ -71,7 +71,7 @@ pub fn init(platform_info: &PlatformInfo) {
         let cpu_locals = CPU_LOCALS.assume_init_mut();
         let apic_id = platform_info.boot_processor.apic_id;
         cpu_locals[apic_id as usize] = old_bsp_local;
-        let bsp_local = get_at_virtual_addr::<CpuLocals>(old_bsp_local); //same addr
+        let bsp_local = get_at_addr::<CpuLocals, _>(old_bsp_local); //same addr
         bsp_local.apic_id = apic_id;
         bsp_local.processor_id = platform_info.boot_processor.processor_id;
         let bsp_local_ptr_addr = VirtAddr(cpu_locals[apic_id as usize].0);
@@ -158,7 +158,7 @@ impl CpuLocals {
             let immut_ref = &mut *cpu_locals;
 
             let lock_addr = immut_ref.lock_addr;
-            let lock = get_at_virtual_addr::<LocalLock<Box<CpuLocals>>>(lock_addr);
+            let lock = get_at_addr::<LocalLock<Box<CpuLocals>>, _>(lock_addr);
             local_lock_read_w_info!(lock)
         }
     }
@@ -173,7 +173,7 @@ impl CpuLocals {
             let mut_ref = &mut *cpu_locals;
 
             let lock_addr = mut_ref.lock_addr;
-            let lock = get_at_virtual_addr::<LocalLock<Box<CpuLocals>>>(lock_addr);
+            let lock = get_at_addr::<LocalLock<Box<CpuLocals>>, _>(lock_addr);
             local_lock_write_w_info!(lock)
         }
     }

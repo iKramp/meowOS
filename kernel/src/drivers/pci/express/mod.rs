@@ -1,9 +1,5 @@
-use std::{
-    error::ErrorCode,
-    mem_utils::{PhysAddr, VirtAddr, translate_phys_virt_addr},
-    println,
-    vec::Vec,
-};
+use crate::memory::addresses::*;
+use std::{error::ErrorCode, println, vec::Vec};
 
 use crate::{
     acpi::{BaseAddressAllocation, McfgTable},
@@ -71,7 +67,7 @@ fn scan_pcie_bus(allocations: &[&'static BaseAddressAllocation]) -> Vec<PcieDevi
 fn check_pcie_device(allocation: &BaseAddressAllocation, bus: u8, device: u8, function: u8) -> Option<PcieDevice> {
     //get config space
     let phys_addr = allocation.base_address() + ((bus as u64 * 256) + (device as u64 * 8) + function as u64) * 0x1000;
-    let addr = translate_phys_virt_addr(phys_addr);
+    let addr = VirtAddr::from(phys_addr);
     let config_space_ptr = unsafe { LegacyConfigSpaceT0Ptr::from_ptr(addr.0 as *mut LegacyConfigSpaceT0) };
     if config_space_ptr.vendor_id().read() == 0xFFFF {
         return None;

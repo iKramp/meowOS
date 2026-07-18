@@ -14,7 +14,7 @@ use std::{
 
 use uuid::Uuid;
 
-use crate::drivers::block_device::disk::DirEntry;
+use crate::{drivers::block_device::disk::DirEntry, memory::addresses::*};
 
 use super::{
     DeviceId, InodeIndex, InodeTypeAndPerms, ROOT_INODE_INDEX,
@@ -87,7 +87,7 @@ impl FileSystem for Dtmpfs {
         _inode: InodeIndex,
         _offset_bytes: u64,
         _size_bytes: u64,
-        _buffer: &[std::mem_utils::PhysAddr],
+        _buffer: &[PhysAddr],
     ) -> Result<u64, ErrorCode> {
         Err(ErrorCode::UnsupportedOperation)
     }
@@ -112,7 +112,7 @@ impl FileSystem for Dtmpfs {
         _inode: InodeIndex,
         _offset: u64,
         _size: u64,
-        _buffer: &[std::mem_utils::PhysAddr],
+        _buffer: &[PhysAddr],
     ) -> Result<(super::Inode, u64), ErrorCode> {
         Err(ErrorCode::UnsupportedOperation)
     }

@@ -3,6 +3,7 @@ use crate::memory::VirtualMemoryRange;
 use crate::memory::VirtualMemoryRangeGrowDirection;
 use crate::memory::VirtualMemoryRangeManagementMode;
 use crate::memory::VirtualMemoryRangePermissions;
+use crate::memory::addresses::VirtAddr;
 use crate::memory::current_root;
 use crate::proc::MemoryRangeType;
 use crate::proc::PROCESS_ID_COUNTER;
@@ -17,9 +18,9 @@ use crate::proc::process_data::CpuStateType;
 use crate::vfs::file::FileHandle;
 use std::error::ErrorCode;
 use std::lock_w_info;
+use std::println;
 use std::string::ToString;
 use std::sync::arc::Arc;
-use std::{mem_utils::VirtAddr, println};
 
 use crate::{memory, proc::Pid};
 

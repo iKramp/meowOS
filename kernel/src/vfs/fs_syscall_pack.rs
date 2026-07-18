@@ -1,10 +1,10 @@
 use core::sync::atomic::Ordering;
 use std::boxed::Box;
-use std::mem_utils::PhysAddr;
 use std::println;
 use std::sync::arc::Arc;
 use std::vec::Vec;
 
+use crate::memory::addresses::*;
 use crate::memory::{physical_allocator, safe_memcpy_from_user, safe_memcpy_to_user};
 use crate::proc::namespaces::FilesystemNamespace;
 use crate::proc::syscall::{SyscallCpuState, SyscallPack, register_syscall_pack, string_from_args};
@@ -167,7 +167,8 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         };
         //copy to user buffer
         let dst = buf_ptr;
-        let src = std::mem_utils::translate_phys_virt_addr(buffer_alloc).0;
+        let buffer_alloc_virt: VirtAddr = buffer_alloc.into();
+        let src = buffer_alloc_virt.0;
         let valid_copy = safe_memcpy_to_user(dst, src, size as usize);
         if !valid_copy {
             proc.set_syscall_return(&[u64::MAX]);
@@ -228,7 +229,8 @@ fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let f_handle = file_handle; //get to local
         let pages = size.div_ceil(4096);
         let buffer_alloc = physical_allocator::allocate_contiguous(pages as u32);
-        let dst = std::mem_utils::translate_phys_virt_addr(buffer_alloc).0 as *mut u8;
+        let buffer_alloc_virt: VirtAddr = buffer_alloc.into();
+        let dst = buffer_alloc_virt.0 as *mut u8;
         let src = buf_ptr;
         //copy to user buffer
         let copy_valid = safe_memcpy_from_user(dst as u64, src, size as usize);

@@ -1,7 +1,7 @@
+use std::lock_w_info;
 use std::sync::no_int_spinlock::NoIntSpinlock;
-use std::{lock_w_info, mem_utils::*};
 
-use crate::memory::{log2_rounded_up, physical_allocator};
+use crate::memory::{addresses::*, log2_rounded_up, physical_allocator};
 
 //min allocation is 16 bytes
 //16
@@ -30,7 +30,7 @@ impl HeapPageMetadata {
             let size_of_object = u64::pow(2, self.size_order_of_objects as u32);
             let addr_of_first = page_addr + (4096 - size_of_object * self.max_allocations as u64);
             for i in (addr_of_first.0..(page_addr.0 + 4096)).step_by(size_of_object as usize) {
-                let empty_block = get_at_virtual_addr::<EmptyBlock>(VirtAddr(i));
+                let empty_block = get_at_addr::<EmptyBlock, _>(VirtAddr(i));
                 empty_block.ptr_to_prev = VirtAddr(i - size_of_object);
                 empty_block.ptr_to_next = VirtAddr(i + size_of_object);
                 debug_assert!(
@@ -41,10 +41,10 @@ impl HeapPageMetadata {
                     empty_block.ptr_to_next
                 );
             }
-            get_at_virtual_addr::<EmptyBlock>(addr_of_first).ptr_to_prev = page_addr + 4096 - size_of_object;
-            get_at_virtual_addr::<EmptyBlock>(page_addr + 4096 - size_of_object).ptr_to_next = addr_of_first;
+            get_at_addr::<EmptyBlock, _>(addr_of_first).ptr_to_prev = page_addr + 4096_u64 - size_of_object;
+            get_at_addr::<EmptyBlock, _>(page_addr + 4096_u64 - size_of_object).ptr_to_next = addr_of_first;
             self.ptr_to_first = addr_of_first;
-            self.ptr_to_last = page_addr + 4096 - size_of_object;
+            self.ptr_to_last = page_addr + 4096_u64 - size_of_object;
             debug_assert!(
                 !(self.ptr_to_first.0 < 0x100
                     || self.ptr_to_last.0 < 0x100
@@ -93,30 +93,30 @@ impl HeapAllocationData {
                     ptr_to_last: VirtAddr(0),
                 };
                 metadata.populate(new_page);
-                set_at_virtual_addr(new_page, metadata);
+                set_at_addr(new_page, metadata);
                 self.free_objects = metadata.max_allocations as u64;
                 self.ptr_to_first = metadata.ptr_to_first;
             }
 
             let allocated = self.ptr_to_first;
 
-            let page_metadata = get_at_virtual_addr::<HeapPageMetadata>(VirtAddr(self.ptr_to_first.0 & !0xFFF));
+            let page_metadata = get_at_addr::<HeapPageMetadata, _>(VirtAddr(self.ptr_to_first.0 & !0xFFF));
             page_metadata.number_of_allocations += 1;
             self.free_objects -= 1;
 
             if page_metadata.number_of_allocations < page_metadata.max_allocations {
-                let empty_block = get_at_virtual_addr::<EmptyBlock>(allocated);
+                let empty_block = get_at_addr::<EmptyBlock, _>(allocated);
                 let after = empty_block.ptr_to_next;
                 debug_assert!(after.0 >= 0x100, "current: {:#x?}, next: {:#x?}", allocated, after);
                 page_metadata.ptr_to_first = after;
             }
 
             if self.free_objects > 0 {
-                let empty_block = get_at_virtual_addr::<EmptyBlock>(allocated);
+                let empty_block = get_at_addr::<EmptyBlock, _>(allocated);
                 let before = empty_block.ptr_to_prev;
                 let after = empty_block.ptr_to_next;
-                let before_block = get_at_virtual_addr::<EmptyBlock>(before);
-                let after_block = get_at_virtual_addr::<EmptyBlock>(after);
+                let before_block = get_at_addr::<EmptyBlock, _>(before);
+                let after_block = get_at_addr::<EmptyBlock, _>(after);
                 self.ptr_to_first = after;
                 before_block.ptr_to_next = after;
                 after_block.ptr_to_prev = before;
@@ -126,14 +126,14 @@ impl HeapAllocationData {
     }
     fn deallocate(&mut self, addr: VirtAddr) {
         unsafe {
-            let metadata = get_at_virtual_addr::<HeapPageMetadata>(VirtAddr(addr.0 & !0b1111_1111_1111));
+            let metadata = get_at_addr::<HeapPageMetadata, _>(VirtAddr(addr.0 & !0b1111_1111_1111));
 
             let no_empty_cells = self.free_objects == 0;
             let full_frame = metadata.max_allocations == metadata.number_of_allocations;
 
             if no_empty_cells {
                 self.ptr_to_first = addr;
-                set_at_virtual_addr::<EmptyBlock>(
+                set_at_addr::<EmptyBlock, _>(
                     addr,
                     EmptyBlock {
                         ptr_to_next: addr,
@@ -148,19 +148,19 @@ impl HeapAllocationData {
             }
 
             let (last_block, past_last_block) = if full_frame {
-                let next_block = get_at_virtual_addr::<EmptyBlock>(self.ptr_to_first);
-                let before_next_block = get_at_virtual_addr::<EmptyBlock>(next_block.ptr_to_prev);
+                let next_block = get_at_addr::<EmptyBlock, _>(self.ptr_to_first);
+                let before_next_block = get_at_addr::<EmptyBlock, _>(next_block.ptr_to_prev);
                 (before_next_block, next_block)
             } else {
-                let last_block = get_at_virtual_addr::<EmptyBlock>(metadata.ptr_to_last);
-                let past_last_block = get_at_virtual_addr::<EmptyBlock>(last_block.ptr_to_next);
+                let last_block = get_at_addr::<EmptyBlock, _>(metadata.ptr_to_last);
+                let past_last_block = get_at_addr::<EmptyBlock, _>(last_block.ptr_to_next);
                 (last_block, past_last_block)
             };
 
             metadata.number_of_allocations -= 1;
             self.free_objects += 1;
 
-            set_at_virtual_addr::<EmptyBlock>(
+            set_at_addr::<EmptyBlock, _>(
                 addr,
                 EmptyBlock {
                     ptr_to_next: last_block.ptr_to_next,
@@ -256,7 +256,7 @@ impl Heap {
                     Self::deallocate_page(page_addr + (i * 4096));
                 }
             } else {
-                let metadata = get_at_virtual_addr::<HeapPageMetadata>(page_addr);
+                let metadata = get_at_addr::<HeapPageMetadata, _>(page_addr);
                 debug_assert!(
                     metadata.size_order_of_objects >= 4,
                     "illegal size order: {}",
@@ -269,12 +269,12 @@ impl Heap {
     }
 
     fn allocate_page() -> VirtAddr {
-        translate_phys_virt_addr(physical_allocator::allocate_frame())
+        physical_allocator::allocate_frame().into()
     }
 
     fn allocate_contigious(n_pages: u64) -> VirtAddr {
         let phys_addr = physical_allocator::allocate_contiguous(n_pages as u32);
-        translate_phys_virt_addr(phys_addr)
+        phys_addr.into()
     }
 
     fn deallocate_page(addr: VirtAddr) {

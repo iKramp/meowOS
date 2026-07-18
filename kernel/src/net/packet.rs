@@ -1,12 +1,7 @@
-use std::{
-    cow::Acow,
-    mem_utils::{PhysAddr, translate_phys_virt_addr},
-    println,
-    vec::Vec,
-};
+use std::{cow::Acow, println, vec::Vec};
 
 use crate::{
-    memory::physical_allocator,
+    memory::{addresses::*, physical_allocator},
     net::{
         self, NetLayerType, NicIdentifier, RoutingStep,
         address_pair::AddressPair,
@@ -187,10 +182,10 @@ impl NetPacket {
         let len = vec.iter().fold(0, |a, b| a + b.length);
         let pages = len.div_ceil(4096);
         let phys_addr = physical_allocator::allocate_contiguous(pages);
-        let virt_addr = translate_phys_virt_addr(phys_addr);
+        let virt_addr = VirtAddr::from(phys_addr);
         let mut curr_offset = 0;
         for chunk in vec.iter() {
-            let chunk_virt = translate_phys_virt_addr(chunk.data);
+            let chunk_virt = VirtAddr::from(chunk.data);
             unsafe {
                 core::ptr::copy_nonoverlapping(
                     chunk_virt.0 as *const u8,
@@ -254,7 +249,7 @@ impl NetPacket {
         let to_shift = offset_to_keep - curr_off;
         if to_shift > 0 {
             let first_chunk = self.chunks.first_mut()?;
-            let chunk_virt = translate_phys_virt_addr(first_chunk.data);
+            let chunk_virt = VirtAddr::from(first_chunk.data);
             unsafe {
                 core::ptr::copy(
                     chunk_virt.0 as *const u8,
@@ -345,12 +340,12 @@ impl RawNetDataChunk {
     }
 
     pub fn data(&self) -> &[u8] {
-        let ptr = translate_phys_virt_addr(self.data).0 as *const u8;
+        let ptr = VirtAddr::from(self.data).0 as *const u8;
         unsafe { core::slice::from_raw_parts(ptr, self.length as usize) }
     }
 
     pub fn data_mut(&mut self) -> &mut [u8] {
-        let ptr = translate_phys_virt_addr(self.data).0 as *mut u8;
+        let ptr = VirtAddr::from(self.data).0 as *mut u8;
         unsafe { core::slice::from_raw_parts_mut(ptr, self.length as usize) }
     }
 
@@ -394,8 +389,8 @@ impl Clone for RawNetDataChunk {
         }
         let pages = self.length.div_ceil(4096);
         let new_phys = physical_allocator::allocate_contiguous(pages);
-        let old_ptr = translate_phys_virt_addr(self.data).0 as *const u8;
-        let new_ptr = translate_phys_virt_addr(new_phys).0 as *mut u8;
+        let old_ptr = VirtAddr::from(self.data).0 as *const u8;
+        let new_ptr = VirtAddr::from(new_phys).0 as *mut u8;
         unsafe { core::ptr::copy_nonoverlapping(old_ptr, new_ptr, self.length as usize) };
         Self {
             data: new_phys,

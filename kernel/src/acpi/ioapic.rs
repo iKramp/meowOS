@@ -1,4 +1,4 @@
-use std::mem_utils::{PhysAddr, get_at_virtual_addr};
+use crate::memory::addresses::*;
 
 use super::platform_info::PlatformInfo;
 use crate::memory::{self, LiminePat};
@@ -9,7 +9,7 @@ pub fn init_ioapic(platform_info: &PlatformInfo) {
             let (virt_addr, entry) = memory::kernel_manual_map(PhysAddr(io_apic_info.address.into()), 1, None);
             entry.set_pat(LiminePat::UC, virt_addr);
 
-            let io_apic = get_at_virtual_addr::<IoApicRegisters>(virt_addr);
+            let io_apic = get_at_addr::<IoApicRegisters, _>(virt_addr);
             let (_, entries) = io_apic.get_version_and_entries();
             //println!("got io apic: {:#x?}", io_apic);
             //println!("io apic version: {:#x?}", (version, entries));

@@ -1,4 +1,7 @@
-use std::{error::ErrorCode, mem_utils::VirtAddr, println};
+use std::error::ErrorCode;
+use std::println;
+
+use crate::memory::addresses::*;
 
 use crate::{
     acpi,

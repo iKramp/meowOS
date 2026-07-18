@@ -12,10 +12,7 @@ mod rsdt;
 mod sdt;
 mod smp;
 
-use std::{
-    collections::btree_map::BTreeMap,
-    mem_utils::{PhysAddr, VirtAddr, get_at_virtual_addr},
-};
+use std::collections::btree_map::BTreeMap;
 
 pub use apic::LAPIC_REGISTERS;
 use fadt::Fadt;
@@ -27,7 +24,11 @@ use platform_info::PlatformInfo;
 pub use smp::ap_startup::ap_startup;
 pub use smp::cpu_locals;
 
-use crate::{limine::LIMINE_BOOTLOADER_REQUESTS, memory, println, printlnc};
+use crate::{
+    limine::LIMINE_BOOTLOADER_REQUESTS,
+    memory::{self, addresses::*},
+    println, printlnc,
+};
 
 static mut PLATFORM_INFO: Option<PlatformInfo> = None;
 pub static mut ACPI_TABLE_MAP: BTreeMap<&str, VirtAddr> = BTreeMap::new();
@@ -35,7 +36,7 @@ pub static mut ACPI_TABLE_MAP: BTreeMap<&str, VirtAddr> = BTreeMap::new();
 //this is safe because it's set when only 1 core is active, after that it's read only
 pub fn get_table<T: 'static>(name: &str) -> Option<&T> {
     let addr = unsafe { ACPI_TABLE_MAP.get(name).copied()? };
-    unsafe { Some(get_at_virtual_addr::<T>(addr)) }
+    unsafe { Some(get_at_addr::<T, _>(addr)) }
 }
 
 pub fn get_platform_info() -> &'static PlatformInfo {
@@ -57,11 +58,11 @@ pub fn read_tables() {
     let tables = rsdt.get_tables();
     for table in &tables {
         unsafe {
-            let table_virt = std::mem_utils::translate_phys_virt_addr(*table);
+            let table_virt: VirtAddr = table.clone().into();
             let table_ptr = table_virt.0 as *const sdt::AcpiSdtHeader;
             let table_len = (table_ptr.byte_add(4) as *const u32).read_unaligned();
-            let table_virt = std::mem_utils::ensure_aligned_manual(table_virt, table_len as u64, 8);
-            let header = std::mem_utils::get_at_virtual_addr::<sdt::AcpiSdtHeader>(table_virt);
+            let table_virt = align_manual(table_virt, table_len as u64, 8);
+            let header = get_at_addr::<sdt::AcpiSdtHeader, _>(table_virt);
             let signature = std::str::from_utf8(&header.signature).expect("signatures are ascii, error in mem read");
             println!(level:info, "Found ACPI table: {} at physical address {:X}", signature, table.0);
             ACPI_TABLE_MAP.insert(signature, table_virt);
@@ -75,7 +76,7 @@ pub fn init_acpi() {
     let madt = get_table::<Madt>("APIC").expect("madt should be present");
 
     let entries = madt.get_madt_entries();
-    let platform_info = platform_info::PlatformInfo::new(&entries, std::mem_utils::PhysAddr(madt.local_apic_address as u64));
+    let platform_info = platform_info::PlatformInfo::new(&entries, PhysAddr(madt.local_apic_address as u64));
     //override madt apic address if it exists in entries
     println!(level:info, "initing APIC");
     unsafe {
@@ -104,7 +105,7 @@ pub fn init_acpi() {
         }
     */
 
-    let _dsdt_addr = std::mem_utils::translate_phys_virt_addr(PhysAddr(fadt.dsdt as u64));
+    let _dsdt_addr = VirtAddr::from(PhysAddr(fadt.dsdt as u64));
     //let _aml_code = aml::AmlCode::new(dsdt_addr.0 as *const u8);
 }
 

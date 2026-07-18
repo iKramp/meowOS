@@ -1,4 +1,5 @@
-use std::{error::ErrorCode, mem_utils::VirtAddr, vec::Vec};
+use crate::memory::addresses::*;
+use std::{error::ErrorCode, vec::Vec};
 
 use crate::drivers::pci::{BarTrait, FullPciDevType, MemoryBar, capabilities::CapAddr, legacy, port_access};
 

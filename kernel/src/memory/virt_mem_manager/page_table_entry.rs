@@ -1,7 +1,8 @@
 use core::fmt::Display;
-use std::mem_utils::{PhysAddr, VirtAddr, translate_phys_virt_addr};
 
 use bitfield::bitfield;
+
+use crate::memory::addresses::*;
 
 bitfield! {
     pub struct PageTableEntry(u64);
@@ -109,7 +110,7 @@ impl PageTableEntry {
     }
 
     pub fn get(tree_root: PhysAddr, entry_virt: VirtAddr) -> Option<&'static mut Self> {
-        let mut page_node_addr = translate_phys_virt_addr(tree_root);
+        let mut page_node_addr = VirtAddr::from(tree_root);
         for level in (0..4).rev() {
             let index = (entry_virt.0 >> (12 + level * 9)) & 0b111111111;
             let page_table_entry = unsafe { &mut *(page_node_addr.0 as *mut Self).add(index as usize) };
@@ -119,7 +120,7 @@ impl PageTableEntry {
             if page_table_entry.huge_page() || level == 0 {
                 return Some(page_table_entry);
             }
-            page_node_addr = translate_phys_virt_addr(page_table_entry.address());
+            page_node_addr = page_table_entry.address().into();
         }
         unreachable!()
     }

@@ -6,13 +6,13 @@ use crate::{
     },
     memory::{
         self,
+        addresses::*,
         stack::{KERNEL_STACK_SIZE_PAGES, prepare_kernel_stack},
     },
     msr::{get_msr, get_mtrr_cap, get_mtrr_def_type},
     println,
 };
 use core::sync::atomic::{AtomicBool, AtomicU8};
-use std::mem_utils::VirtAddr;
 
 pub static mut CPU_LOCK: AtomicBool = AtomicBool::new(false);
 pub static mut CPUS_INITIALIZED: AtomicU8 = AtomicU8::new(0);
@@ -97,7 +97,7 @@ fn copy_trampoline() {
         let gdt_ptr = crate::interrupts::STATIC_GDT_PTR;
         let gdt_ptr = TablePointer {
             limit: gdt_ptr.limit,
-            base: std::mem_utils::translate_virt_phys_addr(VirtAddr(gdt_ptr.base), Some(memory::current_root()))
+            base: translate_virt_phys_addr(VirtAddr(gdt_ptr.base), Some(memory::current_root()))
                 .expect("page of a static should be mapped")
                 .0,
         };

@@ -1,12 +1,7 @@
 use super::PhysicalAllocator;
-use std::{
-    lock_w_info,
-    mem_utils::{PhysAddr, get_at_physical_addr, set_at_physical_addr},
-    println,
-    sync::no_int_spinlock::NoIntSpinlock,
-};
+use std::{lock_w_info, println, sync::no_int_spinlock::NoIntSpinlock};
 
-use crate::limine;
+use crate::{limine, memory::addresses::*};
 
 #[derive(Debug, Clone)]
 #[repr(C)]
@@ -23,57 +18,11 @@ static SIMPLE_PHYS_ALLOCATOR: NoIntSpinlock<SimplePhysicalAllocator> = NoIntSpin
     start_region: PhysAddr(0),
 });
 
-impl PhysicalAllocator for SimplePhysicalAllocator {
-    fn allocate(&mut self) -> PhysAddr {
-        self.allocate_contiguous(1)
-    }
-
-    fn allocate_contiguous(&mut self, n_pages: u32) -> PhysAddr {
-        let mut current_base = self.start_region;
-        let mut prev_base = None;
-        loop {
-            let current_metadata = unsafe { get_at_physical_addr::<RegionMetadata>(current_base) };
-            if current_metadata.size_pages >= n_pages as u64 {
-                break;
-            }
-            prev_base = Some(current_base);
-            current_base = current_metadata.next;
-            if current_base == PhysAddr(0) {
-                panic!("OOM");
-            }
-        }
-
-        let current_metadata = unsafe { get_at_physical_addr::<RegionMetadata>(current_base) }.clone();
-        let new_meta = RegionMetadata {
-            size_pages: current_metadata.size_pages - n_pages as u64,
-            next: current_metadata.next,
-        };
-
-        let next_base = if new_meta.size_pages == 0 {
-            new_meta.next
-        } else {
-            let next_base = current_base + 4096 * n_pages as u64;
-            unsafe {
-                set_at_physical_addr(next_base, new_meta);
-            };
-            next_base
-        };
-
-        if let Some(prev_base) = prev_base {
-            unsafe {
-                set_at_physical_addr(prev_base + core::mem::offset_of!(RegionMetadata, next) as u64, next_base);
-            };
-        } else {
-            self.start_region = next_base;
-        }
-
-        current_base
-    }
-
-    fn deallocate(&mut self, addr: PhysAddr) {
+impl SimplePhysicalAllocator {
+    fn deallocate_single(&mut self, addr: PhysAddr) {
         let mut current_base = self.start_region;
         let (next_base, current_metadata) = loop {
-            let current_metadata = unsafe { get_at_physical_addr::<RegionMetadata>(current_base) };
+            let current_metadata = unsafe { get_at_addr::<RegionMetadata, _>(current_base) };
             let next_base = current_metadata.next;
 
             if next_base.0 != 0 && next_base.0 < addr.0 {
@@ -83,11 +32,11 @@ impl PhysicalAllocator for SimplePhysicalAllocator {
             }
         };
 
-        if next_base == addr + 4096 {
-            let next_meta = unsafe { get_at_physical_addr::<RegionMetadata>(next_base) };
+        if next_base == addr + 4096_u64 {
+            let next_meta = unsafe { get_at_addr::<RegionMetadata, _>(next_base) };
 
             unsafe {
-                set_at_physical_addr(
+                set_at_addr(
                     addr,
                     RegionMetadata {
                         size_pages: next_meta.size_pages + 1,
@@ -97,7 +46,7 @@ impl PhysicalAllocator for SimplePhysicalAllocator {
             }
         } else {
             unsafe {
-                set_at_physical_addr(
+                set_at_addr(
                     addr,
                     RegionMetadata {
                         next: next_base,
@@ -108,10 +57,10 @@ impl PhysicalAllocator for SimplePhysicalAllocator {
         }
 
         if current_base + (current_metadata.size_pages * 4096) == addr {
-            let next_meta = unsafe { get_at_physical_addr::<RegionMetadata>(addr) };
+            let next_meta = unsafe { get_at_addr::<RegionMetadata, _>(addr) };
 
             unsafe {
-                set_at_physical_addr(
+                set_at_addr(
                     current_base,
                     RegionMetadata {
                         next: next_meta.next,
@@ -121,7 +70,7 @@ impl PhysicalAllocator for SimplePhysicalAllocator {
             }
         } else {
             unsafe {
-                set_at_physical_addr(
+                set_at_addr(
                     current_base,
                     RegionMetadata {
                         next: addr,
@@ -131,15 +80,70 @@ impl PhysicalAllocator for SimplePhysicalAllocator {
             }
         }
     }
+}
 
-    fn deallocate_contiguous(&mut self, addr: PhysAddr, n_pages: u32) {
-        let start_page = addr.0 / 4096;
-        for page in start_page..(start_page + n_pages as u64) {
-            self.deallocate(PhysAddr(page * 4096));
+impl PhysicalAllocator for SimplePhysicalAllocator {
+    fn allocate(&mut self) -> OwnedPhysAddr {
+        let range = self.allocate_contiguous(1);
+        let addr = OwnedPhysAddr(range.0.start);
+        core::mem::forget(range);
+        addr
+    }
+
+    fn allocate_contiguous(&mut self, n_pages: u32) -> OwnedPhysRange {
+        let mut current_base = self.start_region;
+        let mut prev_base = None;
+        loop {
+            let current_metadata = unsafe { get_at_addr::<RegionMetadata, _>(current_base) };
+            if current_metadata.size_pages >= n_pages as u64 {
+                break;
+            }
+            prev_base = Some(current_base);
+            current_base = current_metadata.next;
+            if current_base == PhysAddr(0) {
+                panic!("OOM");
+            }
+        }
+
+        let current_metadata = unsafe { get_at_addr::<RegionMetadata, _>(current_base) }.clone();
+        let new_meta = RegionMetadata {
+            size_pages: current_metadata.size_pages - n_pages as u64,
+            next: current_metadata.next,
+        };
+
+        let next_base = if new_meta.size_pages == 0 {
+            new_meta.next
+        } else {
+            let next_base = current_base + 4096 * n_pages as u64;
+            unsafe {
+                set_at_addr(next_base, new_meta);
+            };
+            next_base
+        };
+
+        if let Some(prev_base) = prev_base {
+            unsafe {
+                set_at_addr(prev_base + core::mem::offset_of!(RegionMetadata, next) as u64, next_base);
+            };
+        } else {
+            self.start_region = next_base;
+        }
+
+        OwnedPhysRange(PhysRange {
+            start: current_base,
+            n_pages: n_pages as u64,
+        })
+    }
+
+    fn deallocate<T: Into<OwnedPhysRange>>(&mut self, addr: T) {
+        let range: OwnedPhysRange = addr.into();
+        let start_page = range.0.start.0 / 4096;
+        for page in start_page..(start_page + range.0.n_pages as u64) {
+            self.deallocate_single(PhysAddr(page * 4096));
         }
     }
 
-    fn reserve_low(&mut self) -> PhysAddr {
+    fn reserve_low(&mut self) -> OwnedPhysAddr {
         self.allocate() //no special handling
     }
 }
@@ -156,7 +160,7 @@ pub fn init(mem_regions: &mut [&'static mut limine::MemoryMapEntry]) {
             size_pages: region.length.div_ceil(4096),
             next: PhysAddr(0),
         };
-        unsafe { set_at_physical_addr(PhysAddr(region.base), metadata) };
+        unsafe { set_at_addr(PhysAddr(region.base), metadata) };
         println!(
             "Created a region at base {:X?} with size frames {:X}",
             region.base,
@@ -165,7 +169,7 @@ pub fn init(mem_regions: &mut [&'static mut limine::MemoryMapEntry]) {
 
         if let Some(prev_reg) = previous_region {
             unsafe {
-                set_at_physical_addr(
+                set_at_addr(
                     prev_reg + core::mem::offset_of!(RegionMetadata, next) as u64,
                     PhysAddr(region.base),
                 );
@@ -181,22 +185,18 @@ pub fn init(mem_regions: &mut [&'static mut limine::MemoryMapEntry]) {
     println!("set first region to {:X?}", first_region);
 }
 
-pub fn allocate_frame() -> PhysAddr {
+pub fn allocate_frame() -> OwnedPhysAddr {
     lock_w_info!(SIMPLE_PHYS_ALLOCATOR).allocate()
 }
 
-pub fn allocate_contiguous(n_pages: u32) -> PhysAddr {
+pub fn allocate_contiguous(n_pages: u32) -> OwnedPhysRange {
     lock_w_info!(SIMPLE_PHYS_ALLOCATOR).allocate_contiguous(n_pages)
 }
 
-pub fn deallocate_frame(addr: PhysAddr) {
+pub unsafe fn deallocate<T: Into<OwnedPhysRange>>(addr: T) {
     lock_w_info!(SIMPLE_PHYS_ALLOCATOR).deallocate(addr);
 }
 
-pub fn deallocate_contiguous(addr: PhysAddr, n_pages: u32) {
-    lock_w_info!(SIMPLE_PHYS_ALLOCATOR).deallocate_contiguous(addr, n_pages);
-}
-
-pub fn reserve_low() -> PhysAddr {
+pub fn reserve_low() -> OwnedPhysAddr {
     lock_w_info!(SIMPLE_PHYS_ALLOCATOR).reserve_low()
 }
