@@ -120,7 +120,9 @@ impl VirtualMemoryRange {
         perms: VirtualMemoryRangePermissions,
         mem_range_management_mode: VirtualMemoryRangeManagementMode,
     ) -> Self {
-        let table_addr = physical_allocator::allocate_frame();
+        let owned_table_addr = physical_allocator::allocate();
+        let table_addr = owned_table_addr.0;
+        core::mem::forget(owned_table_addr); // Deallocation handled by drop impl
         let table = unsafe { get_at_addr::<PageTable, _>(table_addr) };
         table.clear();
 

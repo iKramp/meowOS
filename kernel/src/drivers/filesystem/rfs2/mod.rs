@@ -30,18 +30,17 @@ const GROUP_SIZE_BLOCKS: usize = 4096 * 8;
 type InodeIndex = u32;
 type BlockPtr = u64;
 
-#[derive(Clone)]
 struct WorkingBlock {
     pub virt: VirtAddr,
-    pub phys: PhysAddr,
+    pub phys: OwnedPhysAddr,
     pub disk_block: Option<u64>,
     pub changed: bool,
 }
 
 impl WorkingBlock {
     fn new() -> Self {
-        let phys = physical_allocator::allocate_frame();
-        let virt = phys.into();
+        let phys = physical_allocator::allocate();
+        let virt = (&phys).into();
         //no need for UC because of x86 cache coherency
         Self {
             virt,
@@ -73,7 +72,7 @@ impl WorkingBlock {
             && self.changed
         {
             rfs.partition
-                .write(block as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[self.phys])
+                .write(block as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[self.phys.0])
                 .await;
         }
         self.dealloc();
@@ -93,8 +92,9 @@ impl WorkingBlock {
         self.dealloc();
     }
 
-    fn dealloc(self) {
-        unsafe { physical_allocator::deallocate_frame(self.phys) };
+    fn dealloc(mut self) {
+        let phys = core::mem::replace(&mut self.phys, OwnedPhysAddr(PhysAddr(0)));
+        drop(phys);
         core::mem::forget(self);
     }
 }
@@ -158,7 +158,7 @@ impl Rfs2 {
         let groups = blocks.div_ceil(GROUP_SIZE_BLOCKS as u32);
 
         let working_block = WorkingBlock::new();
-        partition.read(BLOCK_SIZE_SECTORS, 1, &[working_block.phys]).await;
+        partition.read(BLOCK_SIZE_SECTORS, 1, &[working_block.phys.0]).await;
 
         let superblock = *working_block.get_as::<SuperBlock>();
         working_block.forget_mem_binding();
@@ -192,7 +192,7 @@ impl Rfs2 {
         for i in (0..(self.groups - 1)).step_by(64) {
             let block_index = 1 + i as usize * GROUP_SIZE_BLOCKS;
             self.partition
-                .write(block_index * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys])
+                .write(block_index * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys.0])
                 .await;
         }
         if self.groups % 64 == 1 && //last group is 64 after previous group
@@ -200,7 +200,7 @@ impl Rfs2 {
         {
             let block_index = 1 + (self.groups - 1) as usize * GROUP_SIZE_BLOCKS;
             self.partition
-                .write(block_index * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys])
+                .write(block_index * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys.0])
                 .await;
         }
         drop(lock);
@@ -226,7 +226,7 @@ impl Rfs2 {
         for i in 0..self.groups {
             let block_index = i as usize * GROUP_SIZE_BLOCKS;
             self.partition
-                .read(block_index * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys])
+                .read(block_index * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys.0])
                 .await;
             let bitmask = block.get_as_mut::<bitmask::BlockBitmask>();
             if let Some(empty) = bitmask.find_empty() {
@@ -259,7 +259,7 @@ impl Rfs2 {
         let mut block = WorkingBlock::new();
         let bitmask_block_index = group as usize * GROUP_SIZE_BLOCKS;
         self.partition
-            .read(bitmask_block_index * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys])
+            .read(bitmask_block_index * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys.0])
             .await;
         let bitmask = block.get_as_mut::<bitmask::BlockBitmask>();
         bitmask.clear(block_index as usize);
@@ -283,7 +283,7 @@ impl Rfs2 {
                 .read(
                     superblock.inode_mask_ptr as usize * BLOCK_SIZE_SECTORS,
                     BLOCK_SIZE_SECTORS,
-                    &[block.phys],
+                    &[block.phys.0],
                 )
                 .await;
             block.assign_to_disk_block(superblock.inode_mask_ptr, false);
@@ -302,7 +302,7 @@ impl Rfs2 {
                         .write(
                             block.disk_block.expect("is assigned") as usize * BLOCK_SIZE_SECTORS,
                             BLOCK_SIZE_SECTORS,
-                            &[block.phys],
+                            &[block.phys.0],
                         )
                         .await;
 
@@ -317,13 +317,13 @@ impl Rfs2 {
                             .write(
                                 block.disk_block.expect("is assigned") as usize * BLOCK_SIZE_SECTORS,
                                 BLOCK_SIZE_SECTORS,
-                                &[block.phys],
+                                &[block.phys.0],
                             )
                             .await;
                     }
 
                     self.partition
-                        .read(next_ptr as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys])
+                        .read(next_ptr as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys.0])
                         .await;
                     block.assign_to_disk_block(next_ptr, false);
                 }
@@ -353,7 +353,7 @@ impl Rfs2 {
                 return;
             }
             self.partition
-                .read(current_ptr as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys])
+                .read(current_ptr as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys.0])
                 .await;
             let bitmask = block.get_as::<bitmask::InodeBtmask>();
             current_ptr = bitmask.get_ptr();
@@ -364,7 +364,7 @@ impl Rfs2 {
         }
 
         self.partition
-            .read(current_ptr as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys])
+            .read(current_ptr as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys.0])
             .await;
         let bitmask = block.get_as_mut::<bitmask::InodeBtmask>();
         bitmask.clear(in_bitmask_index);
@@ -387,7 +387,7 @@ impl Rfs2 {
     pub async fn get_disk_block(&self, disk_block: BlockPtr) -> WorkingBlock {
         let mut block = WorkingBlock::new();
         self.partition
-            .read(disk_block as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys])
+            .read(disk_block as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys.0])
             .await;
         block.disk_block = Some(disk_block);
         block
@@ -399,7 +399,7 @@ impl Rfs2 {
         }
         if let Some(disk_block) = block.disk_block {
             self.partition
-                .write(disk_block as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys])
+                .write(disk_block as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[block.phys.0])
                 .await;
             block.changed = false;
         } else {

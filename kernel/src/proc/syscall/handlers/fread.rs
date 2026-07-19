@@ -46,7 +46,7 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let f_handle = file_handle; //get to local
         let pages = size.div_ceil(4096);
         let buffer_alloc = crate::memory::physical_allocator::allocate_contiguous(pages as u32);
-        let buffers = (0..pages).map(|i| buffer_alloc + (i * 4096)).collect::<Vec<PhysAddr>>();
+        let buffers = buffer_alloc.get_range().get_addresses().collect::<Vec<PhysAddr>>();
 
         let read_result = crate::vfs::read_file(f_handle.get(), &buffers, size).await;
         let Some(proc) = proc.upgrade() else {
@@ -59,17 +59,12 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         };
         //copy to user buffer
         let dst = buffer_ptr as u64;
-        let src: VirtAddr = buffer_alloc.into();
+        let src: VirtAddr = buffer_alloc.0.start.into();
         let valid_copy = safe_memcpy_to_user(dst, src.0, size as usize);
         if !valid_copy {
             let proc_lock = proc.get();
             proc_lock.set_legacy_syscall_return(u64::MAX, 1);
             return;
-        }
-
-        //free
-        for i in 0..pages {
-            unsafe { crate::memory::physical_allocator::deallocate_frame(buffer_alloc + (i * 4096)) };
         }
 
         //return

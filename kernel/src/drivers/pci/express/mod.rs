@@ -88,7 +88,7 @@ fn check_pcie_device(allocation: &BaseAddressAllocation, bus: u8, device: u8, fu
     //above is fine from cached data, it's not modifying anything
     let config_space_address = map_config_space(phys_addr);
     pcie_device.config_space_addr =
-        unsafe { LegacyConfigSpaceT0Ptr::from_ptr(config_space_address.0 as *mut LegacyConfigSpaceT0) };
+        unsafe { LegacyConfigSpaceT0Ptr::from_ptr(config_space_address.0.0 as *mut LegacyConfigSpaceT0) };
 
     //get device type
     let class = config_space_ptr.class_code().read();
@@ -115,9 +115,12 @@ fn is_pcie(device: &mut PcieDevice) -> bool {
     true
 }
 
-fn map_config_space(phys_addr: PhysAddr) -> VirtAddr {
-    let (pci_dev_virt, entry) = unsafe { memory::kernel_manual_map(phys_addr, 1, None) };
-    entry.set_pat(memory::LiminePat::UC, pci_dev_virt);
+fn map_config_space(phys_addr: PhysAddr) -> OwnedVirtAddr {
+    let (pci_dev_virt, entry) = unsafe { memory::kernel_manual_map(OwnedPhysAddr(phys_addr).into(), None) };
+    debug_assert!(pci_dev_virt.0.n_pages == 1, "config space mapping should be 1 page");
+    entry.set_pat(memory::LiminePat::UC, pci_dev_virt.0.start); //only 1 page
 
-    pci_dev_virt
+    let addr = pci_dev_virt.0.start;
+    core::mem::forget(pci_dev_virt);
+    OwnedVirtAddr(addr)
 }

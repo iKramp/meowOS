@@ -8,7 +8,7 @@ use simple_phys_allocator as phys_allocator;
 trait PhysicalAllocator {
     fn allocate(&mut self) -> OwnedPhysAddr;
     fn allocate_contiguous(&mut self, n_pages: u32) -> OwnedPhysRange;
-    fn deallocate<T: Into<OwnedPhysRange>>(&mut self, addr: T);
+    fn deallocate<T: OwnedPhysicalRangeData>(&mut self, addr: &T);
     fn reserve_low(&mut self) -> OwnedPhysAddr;
 }
 
@@ -17,7 +17,28 @@ pub fn allocate() -> OwnedPhysAddr {
 }
 
 pub unsafe fn deallocate<T: Into<OwnedPhysRange>>(addr: T) {
+    // unsafe { phys_allocator::deallocate(addr) };
+    drop(addr); //techinaclly unneeded but more explicit
+}
+
+/// Safety:
+/// This should not be called manually, it's used in the drop implementation
+pub unsafe fn _deallocate_by_ref<T: OwnedPhysicalRangeData>(addr: &T) {
+    if addr.get_range().n_pages == 0 || addr.get_range().start.0 == 0 {
+        return;
+    }
     unsafe { phys_allocator::deallocate(addr) };
+}
+
+impl Drop for OwnedPhysAddr {
+    fn drop(&mut self) {
+        let range = PhysRange {
+            start: self.0,
+            n_pages: 1,
+        };
+        let owned_range = OwnedPhysRange(range);
+        drop(owned_range);
+    }
 }
 
 pub fn allocate_contiguous(n_pages: u32) -> OwnedPhysRange {

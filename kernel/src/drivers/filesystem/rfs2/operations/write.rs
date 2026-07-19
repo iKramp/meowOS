@@ -26,9 +26,13 @@ impl Rfs2 {
 
         let file_info = self.get_file_info(file_root).await;
 
-        let working_block = physical_allocator::allocate_frame();
+        let working_block = physical_allocator::allocate_contiguous(1);
         self.partition
-            .read(file_root as usize * BLOCK_SIZE_SECTORS + 1, 7, &[working_block])
+            .read(
+                file_root as usize * BLOCK_SIZE_SECTORS + 1,
+                7,
+                &working_block.0.get_addresses().collect::<Vec<_>>(),
+            )
             .await;
 
         let small_file = file_info.levels == 0;
@@ -42,8 +46,7 @@ impl Rfs2 {
         }
 
         //they must be contiguous both physically and virtually
-        let mut current_working_blocks = Vec::new();
-        current_working_blocks.push(working_block);
+        let mut current_range = working_block;
 
         let first_block_to_write = offset_blocks;
         let last_block_to_write = (offset_blocks + size_bytes / 4096).min(file_info.size / 4096);
@@ -55,8 +58,7 @@ impl Rfs2 {
             let first_relevant_ptr = first_block_to_write / (PTRS_PER_BLOCK.pow(level_diff as u32) as u64);
             let last_relevant_ptr = last_block_to_write / (PTRS_PER_BLOCK.pow(level_diff as u32) as u64);
 
-            let ptr_virt = VirtAddr::from(*current_working_blocks.first().expect("must have at least 1 block"))
-                + first_relevant_ptr * core::mem::size_of::<BlockPtr>() as u64;
+            let ptr_virt = VirtAddr::from(current_range.0.start) + first_relevant_ptr * core::mem::size_of::<BlockPtr>() as u64;
             let ptrs_to_read = (last_relevant_ptr - first_relevant_ptr + 1) as usize;
             let ptrs_slice = unsafe { core::slice::from_raw_parts(ptr_virt.0 as *const BlockPtr, ptrs_to_read) };
 
@@ -66,22 +68,14 @@ impl Rfs2 {
                         .write(*ptr as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[*phys])
                         .await;
                 }
-                for block in current_working_blocks {
-                    unsafe { physical_allocator::deallocate_frame(block) };
-                }
                 break;
             } else {
-                let new_working_physical = physical_allocator::allocate_contiguous(ptrs_to_read as u32);
-                let new_working_blocks = (0..ptrs_to_read)
-                    .map(|i| PhysAddr(new_working_physical.0 + i as u64 * 4096))
-                    .collect::<Vec<_>>();
+                let new_working_range = physical_allocator::allocate_contiguous(ptrs_to_read as u32);
+                current_range = new_working_range;
 
-                self.read_locked_pointers(ptrs_slice, &new_working_blocks).await;
+                self.read_locked_pointers(ptrs_slice, &current_range.0.get_addresses().collect::<Vec<_>>())
+                    .await;
 
-                for block in current_working_blocks {
-                    unsafe { physical_allocator::deallocate_frame(block) };
-                }
-                current_working_blocks = new_working_blocks;
                 current_ptr_level += 1;
             }
         }

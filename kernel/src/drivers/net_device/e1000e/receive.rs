@@ -1,7 +1,7 @@
 use crate::memory::addresses::*;
 use crate::{
     drivers::net_device::e1000e::{E1000eDevice, registers::MRQC},
-    memory::{self, physical_allocator},
+    memory::physical_allocator,
     net::{self, MacAddress, RawNetDataChunk},
     rand,
 };
@@ -13,7 +13,7 @@ pub(super) const RX_DESC_COUNT: usize = 256;
 
 #[repr(C)]
 pub(super) struct ReceiveDescriptor {
-    pub buffer_addr: PhysAddr,
+    pub buffer: OwnedPhysRange,
     pub length: u16,
     pub checksum: u16,
     pub status: RxDescStatus,
@@ -110,19 +110,18 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
     let queue_size_bytes = RX_DESC_COUNT * core::mem::size_of::<ReceiveDescriptor>();
     let queue_size_pages = queue_size_bytes.div_ceil(4096);
 
-    let rx_queue_virt = memory::kernel_map_contiguous(None, queue_size_pages as u64);
+    let rx_queue_phys = physical_allocator::allocate_contiguous(queue_size_pages as u32);
+    let rx_queue_virt = VirtAddr::from(rx_queue_phys.0.start);
     let rx_queue: &mut [UnsafeCell<ReceiveDescriptor>; RX_DESC_COUNT] =
         unsafe { &mut *(rx_queue_virt.0 as *mut [UnsafeCell<ReceiveDescriptor>; RX_DESC_COUNT]) };
-
-    let rx_queue_phys = translate_virt_phys_addr(rx_queue_virt, None).expect("Failed to translate RX queue address");
 
     for descriptor in rx_queue[..RX_DESC_COUNT - 1].iter_mut() {
         let mut default_desc = UnsafeCell::new(ReceiveDescriptor::default());
         core::mem::swap(&mut default_desc, descriptor);
-        core::mem::forget(default_desc);
+        core::mem::forget(default_desc); //uninitialized data from the queue
 
-        let phys_addr = physical_allocator::allocate_frame();
-        descriptor.get_mut().buffer_addr = phys_addr;
+        let phys_addr = physical_allocator::allocate();
+        descriptor.get_mut().buffer = phys_addr.into();
     }
     let last_descriptor = rx_queue.last_mut().expect("?");
     let mut default_desc = UnsafeCell::new(ReceiveDescriptor::default());
@@ -130,13 +129,15 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
     core::mem::forget(default_desc);
 
     core::sync::atomic::fence(Ordering::SeqCst);
-    dev.receive_queue = Some((rx_queue, (rx_queue_virt, rx_queue_phys)));
 
-    registers.rx_descriptor_queue_info().rdbal().write(rx_queue_phys.0 as u32);
+    registers
+        .rx_descriptor_queue_info()
+        .rdbal()
+        .write(rx_queue_phys.0.start.0 as u32);
     registers
         .rx_descriptor_queue_info()
         .rdbah()
-        .write((rx_queue_phys.0 >> 32) as u32);
+        .write((rx_queue_phys.0.start.0 >> 32) as u32);
     registers.rx_descriptor_queue_info().rdlen().write(queue_size_bytes as u32);
     registers.rx_descriptor_queue_info().rdh().write(0);
     registers.rx_descriptor_queue_info().rdt().write((RX_DESC_COUNT - 1) as u32);
@@ -150,17 +151,19 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
             .set_hthresh(32)
             .set_wthresh(1),
     );
+
+    dev.receive_queue = Some((rx_queue, (rx_queue_virt, rx_queue_phys)));
 }
 
 pub(super) fn process_received_packets(dev: &E1000eDevice) {
     let packets = get_received_packets(dev);
     let mut net_packet_list = std::queue::DataQueueHead::<Vec<RawNetDataChunk>>::new(packets.len());
 
-    for packet in packets {
+    for mut packet in packets.into_iter() {
+        let buffer = core::mem::replace(&mut packet.buffer, OwnedPhysRange::empty());
         println!("Received packet with length {}", packet.length);
-        let data_chunk = RawNetDataChunk::new(packet.buffer_addr, packet.length.into());
+        let data_chunk = RawNetDataChunk::new(buffer, packet.length.into());
         //each is a separate packet for now
-        core::mem::forget(packet);
 
         let mut data_vec = Vec::new();
         data_vec.push(data_chunk);
@@ -192,7 +195,7 @@ fn get_received_packets(dev: &E1000eDevice) -> Vec<ReceiveDescriptor> {
     loop {
         //safe because we hold dev.receive_lock
         let curr_descriptor = unsafe { &mut *receive_queue[curr_tail as usize].get() };
-        if curr_descriptor.buffer_addr.0 != 0 {
+        if curr_descriptor.buffer.0.start.0 != 0 {
             //process descriptor
             let mut tmp_desc = ReceiveDescriptor::default();
             core::mem::swap(&mut tmp_desc, curr_descriptor);
@@ -203,8 +206,8 @@ fn get_received_packets(dev: &E1000eDevice) -> Vec<ReceiveDescriptor> {
             break;
         }
 
-        let data_frame = physical_allocator::allocate_frame();
-        curr_descriptor.buffer_addr = data_frame;
+        let data_frame = physical_allocator::allocate();
+        curr_descriptor.buffer = data_frame.into();
         curr_tail += 1;
         curr_tail %= RX_DESC_COUNT as u32;
     }
@@ -243,7 +246,7 @@ pub fn generate_random_mac() -> [u8; 6] {
 impl Default for ReceiveDescriptor {
     fn default() -> Self {
         Self {
-            buffer_addr: PhysAddr(0),
+            buffer: OwnedPhysRange::empty(),
             length: 0,
             checksum: 0,
             status: RxDescStatus(0),
@@ -252,37 +255,29 @@ impl Default for ReceiveDescriptor {
         }
     }
 }
-
-impl Drop for ReceiveDescriptor {
-    fn drop(&mut self) {
-        if self.buffer_addr.0 != 0 {
-            unsafe { physical_allocator::deallocate_frame(self.buffer_addr) };
-        }
-    }
-}
-
-impl Clone for ReceiveDescriptor {
-    fn clone(&self) -> Self {
-        if self.buffer_addr.0 == 0 {
-            Self {
-                buffer_addr: self.buffer_addr,
-                length: self.length,
-                checksum: self.checksum,
-                status: self.status,
-                errors: self.errors,
-                vlan_tag: self.vlan_tag,
-            }
-        } else {
-            //new frame, just copy the data
-            let new_phys_addr = physical_allocator::allocate_frame();
-            Self {
-                buffer_addr: new_phys_addr,
-                length: self.length,
-                checksum: self.checksum,
-                status: self.status,
-                errors: self.errors,
-                vlan_tag: self.vlan_tag,
-            }
-        }
-    }
-}
+//
+// impl Clone for ReceiveDescriptor {
+//     fn clone(&self) -> Self {
+//         if self.buffer.0 == 0 {
+//             Self {
+//                 buffer: self.buffer,
+//                 length: self.length,
+//                 checksum: self.checksum,
+//                 status: self.status,
+//                 errors: self.errors,
+//                 vlan_tag: self.vlan_tag,
+//             }
+//         } else {
+//             //new frame, just copy the data
+//             let new_phys_addr = physical_allocator::allocate_frame();
+//             Self {
+//                 buffer: new_phys_addr,
+//                 length: self.length,
+//                 checksum: self.checksum,
+//                 status: self.status,
+//                 errors: self.errors,
+//                 vlan_tag: self.vlan_tag,
+//             }
+//         }
+//     }
+// }

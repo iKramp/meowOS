@@ -155,7 +155,7 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let f_handle = file_handle; //get to local
         let pages = size.div_ceil(4096);
         let buffer_alloc = physical_allocator::allocate_contiguous(pages as u32);
-        let buffers = (0..pages).map(|i| buffer_alloc + (i * 4096)).collect::<Vec<PhysAddr>>();
+        let buffers = buffer_alloc.get_range().get_addresses().collect::<Vec<PhysAddr>>();
 
         let read_result = crate::vfs::read_file(f_handle.get(), &buffers, size).await;
         let Some(proc) = proc_clone.upgrade() else {
@@ -167,17 +167,12 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         };
         //copy to user buffer
         let dst = buf_ptr;
-        let buffer_alloc_virt: VirtAddr = buffer_alloc.into();
+        let buffer_alloc_virt: VirtAddr = buffer_alloc.0.start.into();
         let src = buffer_alloc_virt.0;
         let valid_copy = safe_memcpy_to_user(dst, src, size as usize);
         if !valid_copy {
             proc.set_syscall_return(&[u64::MAX]);
             return;
-        }
-
-        //free
-        for i in 0..pages {
-            unsafe { physical_allocator::deallocate_frame(buffer_alloc + (i * 4096)) };
         }
 
         //return
@@ -229,47 +224,28 @@ fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let f_handle = file_handle; //get to local
         let pages = size.div_ceil(4096);
         let buffer_alloc = physical_allocator::allocate_contiguous(pages as u32);
-        let buffer_alloc_virt: VirtAddr = buffer_alloc.into();
+        let buffer_alloc_virt: VirtAddr = buffer_alloc.0.start.into();
         let dst = buffer_alloc_virt.0 as *mut u8;
         let src = buf_ptr;
         //copy to user buffer
         let copy_valid = safe_memcpy_from_user(dst as u64, src, size as usize);
         if !copy_valid {
             proc.set_syscall_return(&[u64::MAX]);
-
-            //free
-            for i in 0..pages {
-                unsafe { physical_allocator::deallocate_frame(buffer_alloc + (i * 4096)) };
-            }
             return;
         }
 
-        let buffers = (0..pages).map(|i| buffer_alloc + (i * 4096)).collect::<Vec<PhysAddr>>();
+        let buffers = buffer_alloc.get_range().get_addresses().collect::<Vec<PhysAddr>>();
 
         let write_result = crate::vfs::write_file(f_handle.get(), &buffers, size).await;
         let Some(proc) = proc_clone.upgrade() else {
-            //free
-            for i in 0..pages {
-                unsafe { physical_allocator::deallocate_frame(buffer_alloc + (i * 4096)) };
-            }
             return; //proc was killed
         };
         if write_result.is_err() {
             println!("fwrite: write failed");
             proc.set_syscall_return(&[u64::MAX]);
-
-            //free
-            for i in 0..pages {
-                unsafe { physical_allocator::deallocate_frame(buffer_alloc + (i * 4096)) };
-            }
             return;
         }
         let bytes_written = unsafe { write_result.unwrap_unchecked() };
-
-        //free
-        for i in 0..pages {
-            unsafe { physical_allocator::deallocate_frame(buffer_alloc + (i * 4096)) };
-        }
 
         //return
         proc.set_syscall_return(&[bytes_written]);

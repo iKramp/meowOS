@@ -18,10 +18,10 @@ pub struct GPTDriver {}
 impl PartitionSchemeDriver for GPTDriver {
     async fn partitions(&self, disk: &dyn BlockDevice) -> Vec<(Uuid, Partition)> {
         println!("GPT partitions");
-        let first_lba = physical_allocator::allocate_frame();
+        let first_lba = physical_allocator::allocate();
 
-        disk.read(1, 1, &[first_lba]).await;
-        let header = unsafe { get_at_addr::<GptHeader, _>(first_lba) };
+        disk.read(1, 1, &[first_lba.0]).await;
+        let header = unsafe { get_at_addr::<GptHeader, _>(&first_lba) };
 
         assert_eq!(header.signature, *b"EFI PART", "Not a GPT disk");
 
@@ -30,11 +30,9 @@ impl PartitionSchemeDriver for GPTDriver {
         let entry_size = header.size_partition_entry as usize;
         let entry_num_lbas = (num_entries * entry_size).div_ceil(512);
         let entry_num_pages = (entry_num_lbas as u64).div_ceil(8);
-        let phys_addr = physical_allocator::allocate_contiguous(entry_num_pages as u32);
-        let physical_addresses = (0..entry_num_pages)
-            .map(|i| phys_addr + (i * 4096))
-            .collect::<Vec<PhysAddr>>();
-        let virt_addr = VirtAddr::from(phys_addr);
+        let phys_range = physical_allocator::allocate_contiguous(entry_num_pages as u32);
+        let physical_addresses = phys_range.get_range().get_addresses().collect::<Vec<_>>();
+        let virt_addr = VirtAddr::from(phys_range.0.start);
 
         disk.read(start_entries, entry_num_lbas, &physical_addresses).await;
 
@@ -105,24 +103,15 @@ impl PartitionSchemeDriver for GPTDriver {
             }
         }
 
-        unsafe {
-            //free memory
-            for phys_addr in physical_addresses {
-                physical_allocator::deallocate_frame(phys_addr);
-            }
-            physical_allocator::deallocate_frame(first_lba);
-        }
-
         println!("Partitions: {:#?}", partitions);
         partitions
     }
 
     async fn guid(&self, disk: &dyn BlockDevice) -> Uuid {
-        let first_lba = physical_allocator::allocate_frame();
-        disk.read(1, 1, &[first_lba]).await;
-        let header = unsafe { get_at_addr::<GptHeader, _>(first_lba) };
+        let first_lba = physical_allocator::allocate();
+        disk.read(1, 1, &[first_lba.0]).await;
+        let header = unsafe { get_at_addr::<GptHeader, _>(&first_lba) };
         let guid = header.disk_guid;
-        unsafe { physical_allocator::deallocate_frame(first_lba) };
         Uuid::from_fields(
             u32::from_le_bytes(guid[0..4].try_into().expect("slice with incorrect length")),
             u16::from_le_bytes(guid[4..6].try_into().expect("slice with incorrect length")),

@@ -109,16 +109,19 @@ pub fn enable_apic(platform_info: &super::platform_info::PlatformInfo, processor
 
 fn map_lapic_registers(lapic_address: PhysAddr) {
     unsafe {
-        let (virt_addr, entry) = memory::kernel_manual_map(lapic_address, 1, None);
-        entry.set_pat(LiminePat::UC, virt_addr);
+        let owned_phys_addr = OwnedPhysAddr(lapic_address);
+        let (virt_range, entry) = memory::kernel_manual_map(owned_phys_addr.into(), None);
+        let virt_addr = virt_range.into_owned_virt_addr();
+        entry.set_pat(LiminePat::UC, virt_addr.0);
 
-        let lapic_ref = &mut *(virt_addr.0 as *mut LapicRegisters);
+        let lapic_ref = &mut *(virt_addr.0.0 as *mut LapicRegisters);
         LAPIC_REGISTERS = MaybeUninit::new(LapicRegistersPtr::from_mut(lapic_ref));
 
         println!(
             "Mapping LAPIC registers. Phys: {:016X}, Virt: {:016X}",
-            lapic_address.0, virt_addr.0
+            lapic_address.0, virt_addr.0.0
         );
+        core::mem::forget(virt_addr); //keep mapped forever
     }
 }
 

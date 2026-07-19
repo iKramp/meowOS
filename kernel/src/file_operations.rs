@@ -128,9 +128,9 @@ impl WriteFileOperation {
         let mut frames = Vec::new();
         let mut frame_bindings = Vec::new();
         for _ in 0..(content.len().div_ceil(4096)) {
-            let frame = physical_allocator::allocate_frame();
+            let frame = physical_allocator::allocate();
+            let frame_binding = VirtAddr::from(&frame);
             frames.push(frame);
-            let frame_binding = VirtAddr::from(frame);
             frame_bindings.push(frame_binding);
         }
         for i in 0..(content.len().div_ceil(4096)) {
@@ -151,13 +151,10 @@ impl WriteFileOperation {
         let file = block_task(ffi_open_file_future).expect("fopen failed in debug function");
 
         println!(level:info, "Writing file: {} of size: {}", self.file_name, content.len());
-        let write_future = vfs::write_file(&file, &frames, self.content.len() as u64);
+        let addresses = frames.iter().map(|e| e.0).collect::<Vec<_>>();
+        let write_future = vfs::write_file(&file, &addresses, self.content.len() as u64);
         let ffi_write_future = into_ffi_future(write_future);
         block_task(ffi_write_future).expect("file write failed in debug function");
-
-        for frame in frames {
-            unsafe { crate::memory::physical_allocator::deallocate_frame(frame) };
-        }
     }
 }
 
@@ -227,7 +224,7 @@ impl ReadFileOperation {
         let real_length = length - real_offset + offset;
         let mut buffer = Vec::with_capacity(real_length.div_ceil(4096) as usize);
         for _ in 0..(real_length.div_ceil(4096)) {
-            let frame = crate::memory::physical_allocator::allocate_frame();
+            let frame = crate::memory::physical_allocator::allocate();
             buffer.push(frame);
         }
 
@@ -236,7 +233,8 @@ impl ReadFileOperation {
         let ffi_open_file_future = into_ffi_future(open_file_future);
         let file = block_task(ffi_open_file_future).expect("fopen failed in debug function");
 
-        let read_future = vfs::read_file(&file, &buffer, real_length);
+        let addresses = buffer.iter().map(|e| e.0).collect::<Vec<_>>();
+        let read_future = vfs::read_file(&file, &addresses, real_length);
         let ffi_read_future = into_ffi_future(read_future);
         block_task(ffi_read_future).expect("file read failed in debug function");
 
@@ -249,12 +247,11 @@ impl ReadFileOperation {
             } else {
                 4096
             };
-            let data = unsafe { get_at_addr::<[u8; 4096], _>(*frame) };
+            let data = unsafe { get_at_addr::<[u8; 4096], _>(frame) };
             while frame_ptr < limit + frame_ptr_start {
                 final_data.push(data[frame_ptr & 0xFFF]);
                 frame_ptr += 1;
             }
-            unsafe { crate::memory::physical_allocator::deallocate_frame(*frame) };
         }
 
         println!(level:info, "Read file: {} at offset {} and size of read {}", file_name, offset, length);

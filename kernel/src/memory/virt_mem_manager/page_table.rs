@@ -38,7 +38,7 @@ impl PageTable {
 
                 if level == 1 {
                     if dealloc_phys {
-                        unsafe { physical_allocator::deallocate_frame(phys_addr) };
+                        drop(OwnedPhysAddr(phys_addr));
                     }
                     continue;
                 }
@@ -46,10 +46,11 @@ impl PageTable {
                 if entry.huge_page() {
                     if dealloc_phys {
                         let size_pages = 512_u64.pow(level as u32 - 1);
-                        for i in 0..size_pages {
-                            let addr_to_dealloc = phys_addr + i * 4096;
-                            unsafe { physical_allocator::deallocate_frame(addr_to_dealloc) };
-                        }
+                        let range_to_dealloc = PhysRange {
+                            start: phys_addr,
+                            n_pages: size_pages,
+                        };
+                        drop(OwnedPhysRange(range_to_dealloc));
                     }
                     continue;
                 }
@@ -58,7 +59,7 @@ impl PageTable {
             }
         }
 
-        unsafe { physical_allocator::deallocate_frame(self_phys) };
+        drop(OwnedPhysAddr(self_phys));
     }
 
     /// Intended to be used for MMIO, or physical ram in very rare cases.
@@ -106,10 +107,11 @@ impl PageTable {
 
             let lower_table_phys;
             if !entry.present() {
-                let new_frame = physical_allocator::allocate_frame();
-                unsafe { memset_at_addr(new_frame, 0, 4096) };
-                *entry = PageTableEntry::new(new_frame, false);
-                lower_table_phys = new_frame;
+                let new_frame = physical_allocator::allocate();
+                unsafe { memset_at_addr(new_frame.0, 0, 4096) };
+                *entry = PageTableEntry::new(new_frame.0, false);
+                lower_table_phys = new_frame.0;
+                core::mem::forget(new_frame); //don't deallocate the frame
             } else {
                 lower_table_phys = entry.address();
             }
@@ -202,7 +204,7 @@ impl PageTable {
 
             if lower_table.entries.iter().all(|e| !e.present()) {
                 entry.set_present(false);
-                unsafe { physical_allocator::deallocate_frame(lower_table_phys) };
+                drop(OwnedPhysAddr(lower_table_phys));
             }
 
             freed += newly_freed;
@@ -236,19 +238,21 @@ impl PageTable {
                 if entry.present() {
                     continue;
                 }
-                let entry_phys = physical_allocator::allocate_frame();
-                *entry = PageTableEntry::new(entry_phys, true);
+                let entry_phys = physical_allocator::allocate();
+                *entry = PageTableEntry::new(entry_phys.0, true);
                 entry.set_writeable(permissions.write());
                 entry.set_no_execute(!permissions.execute());
+                core::mem::forget(entry_phys); //don't deallocate the frame
                 println!("allocated userspace page: {:X?}", entry);
                 continue;
             }
 
             //not lowest level
             if !entry.present() {
-                let new_frame = physical_allocator::allocate_frame();
-                unsafe { memset_at_addr(new_frame, 0, 4096) };
-                *entry = PageTableEntry::new(new_frame, true);
+                let new_frame = physical_allocator::allocate();
+                unsafe { memset_at_addr(new_frame.0, 0, 4096) };
+                *entry = PageTableEntry::new(new_frame.0, true);
+                core::mem::forget(new_frame); //don't deallocate the frame
             } else if entry.huge_page() {
                 panic!("no huge pages in userspace for now")
             }
@@ -299,7 +303,7 @@ impl PageTable {
 
             if lower_table.entries.iter().all(|e| !e.present()) {
                 *entry = PageTableEntry::blank();
-                unsafe { physical_allocator::deallocate_frame(lower_table_phys) };
+                drop(OwnedPhysAddr(lower_table_phys));
             }
         }
     }
@@ -382,12 +386,13 @@ impl PageTable {
 
         if !entry.present() {
             if allocate_missing {
-                let new_frame = physical_allocator::allocate_frame();
-                unsafe { memset_at_addr(new_frame, 0, 4096) };
+                let new_frame = physical_allocator::allocate();
+                unsafe { memset_at_addr(new_frame.0, 0, 4096) };
                 let user_mode = virt_addr.0 < (1 << 48);
-                *entry = PageTableEntry::new(new_frame, user_mode);
+                *entry = PageTableEntry::new(new_frame.0, user_mode);
                 entry.set_writeable(true);
                 entry.set_no_execute(false); //permissions on lower levels
+                core::mem::forget(new_frame); //don't deallocate the frame
             } else {
                 return None;
             }

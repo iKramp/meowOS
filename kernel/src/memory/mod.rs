@@ -10,7 +10,7 @@ use crate::interrupts::{disable_interrupts, enable_interrupts};
 use crate::{println, printlnc};
 use addresses::*;
 
-pub static mut TRAMPOLINE_RESERVED: PhysAddr = PhysAddr(0);
+pub static mut TRAMPOLINE_RESERVED: OwnedPhysAddr = OwnedPhysAddr(PhysAddr(0));
 
 #[repr(C)]
 pub struct ProbeResult {
@@ -45,7 +45,9 @@ pub fn init_memory() {
         physical_allocator::init();
 
         //allocates low addresses first, so we reserve this for the trampoline
-        TRAMPOLINE_RESERVED = physical_allocator::reserve_low();
+        let mut reserved = physical_allocator::reserve_low();
+        core::mem::swap(&mut TRAMPOLINE_RESERVED, &mut reserved);
+        core::mem::forget(reserved);
         println!(level:info, "initializing pager");
         virt_mem_manager::init_paging();
 

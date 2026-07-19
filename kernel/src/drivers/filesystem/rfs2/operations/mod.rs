@@ -129,7 +129,7 @@ impl Rfs2 {
     async fn get_file_info(&self, file_root: BlockPtr) -> InodeInfo {
         let working_buffer = WorkingBlock::new();
         self.partition
-            .read(file_root as usize * BLOCK_SIZE_SECTORS, 1, &[working_buffer.phys])
+            .read(file_root as usize * BLOCK_SIZE_SECTORS, 1, &[working_buffer.phys.0])
             .await;
         let inode_info = working_buffer.get_as::<InodeInfo>().clone();
         working_buffer.forget_mem_binding();
@@ -141,7 +141,7 @@ impl Rfs2 {
         let inode_info = working_buffer.get_as_mut::<InodeInfo>();
         *inode_info = info;
         self.partition
-            .write(file_root as usize * BLOCK_SIZE_SECTORS, 1, &[working_buffer.phys])
+            .write(file_root as usize * BLOCK_SIZE_SECTORS, 1, &[working_buffer.phys.0])
             .await;
         working_buffer.forget_mem_binding();
     }
@@ -193,7 +193,7 @@ impl FileSystem for Rfs2 {
         let size_pages = file_info.size.div_ceil(4096);
 
         let buf = physical_allocator::allocate_contiguous(size_pages as u32);
-        let buf_vec = (0..size_pages).map(|n| buf + n * 4096).collect::<Vec<_>>();
+        let buf_vec = buf.get_range().get_addresses().collect::<Vec<_>>();
         let res = self
             .read_locked(file_root, 0, file_info.size, &buf_vec)
             .await
@@ -201,15 +201,11 @@ impl FileSystem for Rfs2 {
 
         drop(locked);
 
-        let buf_virt = VirtAddr::from(buf);
+        let buf_virt = VirtAddr::from(buf.0.start);
         let num_dir_entries = res as usize / core::mem::size_of::<DirEntry>();
         let direntry_slice = unsafe { core::slice::from_raw_parts(buf_virt.0 as *const DirEntry, num_dir_entries) };
 
         let vfs_direntries: Vec<VfsDirEntry> = direntry_slice.iter().map(|dent| dent.into()).collect();
-
-        for buf in buf_vec {
-            unsafe { physical_allocator::deallocate_frame(buf) };
-        }
 
         Ok(vfs_direntries.into_boxed_slice())
     }
@@ -337,7 +333,6 @@ impl FileSystem for Rfs2 {
         let (binding, entries) = self.read_direntries(parent_inode).await;
         let Some(pos) = entries.iter_mut().position(|ent| ent.is_name(name)) else {
             drop(parent_locked);
-            Self::dealloc_dirent_binding(binding, entries.len());
             return Err(ErrorCode::InodeNotPresent);
         };
 
@@ -349,7 +344,7 @@ impl FileSystem for Rfs2 {
         entries[pos] = entries[entries.len() - 2].clone();
         entries[entries.len() - 2] = entries[entries.len() - 1].clone();
 
-        self.write_direntries(parent_inode, binding, entries.len() - 2).await;
+        self.write_direntries(parent_inode, binding.0, entries.len() - 2).await;
 
         let parent_root = self.get_file_root_block(parent_inode as InodeIndex).await?;
         let parent_info = self.get_file_info(parent_root).await;
@@ -430,7 +425,6 @@ impl FileSystem for Rfs2 {
 
             if entry.is_name(name) {
                 drop(locked);
-                Self::dealloc_dirent_binding(binding, entries.len());
                 return Err(ErrorCode::InvalidArgument);
             }
         }
@@ -440,7 +434,7 @@ impl FileSystem for Rfs2 {
         last.inode = child_inode as InodeIndex;
         last.set_name(name);
 
-        self.write_direntries(parent_root, binding, entries.len()).await;
+        self.write_direntries(parent_root, binding.0, entries.len()).await;
 
         let mut child_info = self.get_file_info(child_root).await;
         child_info.link_count += 1;
@@ -482,12 +476,11 @@ impl FileSystem for Rfs2 {
         let (binding, entries) = self.read_direntries(parent_inode).await;
         let Some(entry) = entries.iter_mut().find(|ent| ent.inode == inode as InodeIndex) else {
             drop(locked);
-            Self::dealloc_dirent_binding(binding, entries.len());
             return Err(ErrorCode::InodeNotPresent);
         };
         entry.set_name(name);
 
-        self.write_direntries(parent_inode, binding, entries.len() - 1).await;
+        self.write_direntries(parent_inode, binding.0, entries.len() - 1).await;
 
         Ok(())
     }

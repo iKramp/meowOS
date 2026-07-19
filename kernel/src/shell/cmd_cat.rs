@@ -14,11 +14,11 @@ pub(super) async fn cmd_cat(path: &str) -> Result<(), ErrorCode> {
     let file_size = file_info.size;
     let mut buffer = Vec::with_capacity(file_size.div_ceil(4096) as usize);
     for _ in 0..(file_size.div_ceil(4096) as usize) {
-        let frame = physical_allocator::allocate_frame();
+        let frame = physical_allocator::allocate();
         buffer.push(frame);
     }
 
-    vfs::read_file(&file_handle, &buffer, file_size).await?;
+    vfs::read_file(&file_handle, &buffer.iter().map(|e| e.0).collect::<Vec<_>>(), file_size).await?;
 
     let mut read_data = 0;
 
@@ -26,15 +26,13 @@ pub(super) async fn cmd_cat(path: &str) -> Result<(), ErrorCode> {
 
     for frame in buffer {
         let to_read = (file_size - read_data).min(4096);
-        let virt_addr: VirtAddr = frame.into();
+        let virt_addr = VirtAddr::from(frame.0);
         let ptr = virt_addr.0 as *const u8;
         let data = unsafe { core::slice::from_raw_parts(ptr, to_read as usize) };
         let string = unsafe { str::from_utf8_unchecked(data) };
         tty.print(string);
 
         read_data += to_read;
-
-        unsafe { physical_allocator::deallocate_frame(frame) };
     }
     tty.print("\n");
 

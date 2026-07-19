@@ -46,7 +46,7 @@ impl Rfs2 {
             .read(
                 file_root as usize * BLOCK_SIZE_SECTORS + 1,
                 BLOCK_SIZE_SECTORS - 1,
-                &[working_block.phys],
+                &[working_block.phys.0],
             )
             .await;
 
@@ -81,7 +81,7 @@ impl Rfs2 {
             .write(
                 file_root as usize * BLOCK_SIZE_SECTORS + 1,
                 BLOCK_SIZE_SECTORS - 1,
-                &[working_block.phys],
+                &[working_block.phys.0],
             )
             .await;
 
@@ -101,7 +101,7 @@ impl Rfs2 {
             .read(
                 block_ptr as usize * BLOCK_SIZE_SECTORS,
                 BLOCK_SIZE_SECTORS,
-                &[working_block.phys],
+                &[working_block.phys.0],
             )
             .await;
 
@@ -135,7 +135,7 @@ impl Rfs2 {
             .write(
                 block_ptr as usize * BLOCK_SIZE_SECTORS,
                 BLOCK_SIZE_SECTORS,
-                &[working_block.phys],
+                &[working_block.phys.0],
             )
             .await;
     }
@@ -151,7 +151,7 @@ impl Rfs2 {
             .read(
                 file_root as usize * BLOCK_SIZE_SECTORS + 1,
                 BLOCK_SIZE_SECTORS - 1,
-                &[working_block.phys],
+                &[working_block.phys.0],
             )
             .await;
 
@@ -161,7 +161,7 @@ impl Rfs2 {
                 .read(
                     first_ptr as usize * BLOCK_SIZE_SECTORS,
                     BLOCK_SIZE_SECTORS,
-                    &[working_block.phys],
+                    &[working_block.phys.0],
                 )
                 .await;
             self.release_block(first_ptr).await;
@@ -171,7 +171,7 @@ impl Rfs2 {
             .write(
                 file_root as usize * BLOCK_SIZE_SECTORS + 1,
                 BLOCK_SIZE_SECTORS - 1,
-                &[working_block.phys],
+                &[working_block.phys.0],
             )
             .await;
     }

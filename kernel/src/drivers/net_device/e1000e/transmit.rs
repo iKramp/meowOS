@@ -2,16 +2,12 @@ use crate::memory::addresses::*;
 use core::{cell::UnsafeCell, sync::atomic::Ordering};
 use std::{lock_w_info, println, vec::Vec, w_lock_w_info};
 
-use crate::{
-    drivers::net_device::e1000e::E1000eDevice,
-    memory::{self, physical_allocator},
-    net::RawNetDataChunk,
-};
+use crate::{drivers::net_device::e1000e::E1000eDevice, memory::physical_allocator, net::RawNetDataChunk};
 
 #[derive(Debug)]
 #[repr(C)]
 pub(super) struct TransmitDescriptor {
-    pub buffer_addr: PhysAddr,
+    pub buffer: OwnedPhysRange,
     pub length: u16,
     pub checksum_offset: u8,
     pub command: TxDescCommand,
@@ -52,16 +48,18 @@ pub(super) fn init_transmit(dev: &mut E1000eDevice) {
     let queue_size_pages = queue_size_bytes.div_ceil(4096) as u64;
 
     // let tx_queue_virt = paging::PageTree::current().allocate_contigious(queue_size_pages as u64, None, false);
-    let tx_queue_virt = memory::kernel_map_contiguous(None, queue_size_pages);
+    let tx_queue_phys = physical_allocator::allocate_contiguous(queue_size_pages as u32);
+    let tx_queue_virt = VirtAddr::from(tx_queue_phys.0.start);
     let tx_queue: &mut [UnsafeCell<TransmitDescriptor>; TX_DESC_COUNT] =
         unsafe { &mut *(tx_queue_virt.0 as *mut [UnsafeCell<TransmitDescriptor>; TX_DESC_COUNT]) };
 
-    let tx_queue_phys = translate_virt_phys_addr(tx_queue_virt, None).expect("Failed to translate TX queue address");
-
     for descriptor in tx_queue.iter_mut() {
-        let phys_addr = physical_allocator::allocate_frame();
+        let mut phys_addr = physical_allocator::allocate().into();
         let desc = unsafe { &mut *descriptor.get() };
-        desc.buffer_addr = phys_addr;
+
+        core::mem::swap(&mut desc.buffer, &mut phys_addr);
+        core::mem::forget(phys_addr); //uninitialized data
+
         desc.length = 0;
         desc.checksum_offset = 0;
         desc.command = TxDescCommand(0);
@@ -70,15 +68,14 @@ pub(super) fn init_transmit(dev: &mut E1000eDevice) {
         desc.vlan = 0;
     }
 
-    dev.transmit_queue = Some((tx_queue, (tx_queue_virt, tx_queue_phys)));
     registers
         .tx_descriptor_queue_info()
         .tdbal()
-        .write((tx_queue_phys.0 & 0xFFFF_FFFF) as u32);
+        .write((tx_queue_phys.0.start.0 & 0xFFFF_FFFF) as u32);
     registers
         .tx_descriptor_queue_info()
         .tdbah()
-        .write((tx_queue_phys.0 >> 32) as u32);
+        .write((tx_queue_phys.0.start.0 >> 32) as u32);
     registers.tx_descriptor_queue_info().tdlen().write((queue_size_bytes) as u32);
     registers.tx_descriptor_queue_info().tdh().write(0);
     registers.tx_descriptor_queue_info().tdt().write(0);
@@ -97,17 +94,21 @@ pub(super) fn init_transmit(dev: &mut E1000eDevice) {
     registers
         .tipg()
         .write(*registers.tipg().read().set_ipgt(8).set_ipgr1(2).set_ipgr2(10));
+
+    dev.transmit_queue = Some((tx_queue, (tx_queue_virt, tx_queue_phys)));
 }
 
 pub(super) fn send_packet(dev: &E1000eDevice, raw_chunks: Vec<RawNetDataChunk>) {
     let mut tx_descriptors = Vec::new();
-    for chunk in raw_chunks {
+    for chunk in raw_chunks.into_iter() {
         let mut command = TxDescCommand(0);
         command.set_insert_fcs(true);
 
+        let (buffer, len) = chunk.deconstruct();
+
         let descriptor = TransmitDescriptor {
-            buffer_addr: chunk.phys_addr(),
-            length: chunk.len() as u16,
+            buffer,
+            length: len as u16,
             command,
             ..TransmitDescriptor::default()
         };
@@ -169,18 +170,10 @@ pub fn disable_transmit(dev: &E1000eDevice) {
     registers.tctl().write(tctl);
 }
 
-impl Drop for TransmitDescriptor {
-    fn drop(&mut self) {
-        if self.buffer_addr.0 != 0 {
-            unsafe { physical_allocator::deallocate_frame(self.buffer_addr) };
-        }
-    }
-}
-
 impl Default for TransmitDescriptor {
     fn default() -> Self {
         Self {
-            buffer_addr: PhysAddr(0),
+            buffer: OwnedPhysRange::empty(),
             length: 0,
             checksum_offset: 0,
             command: TxDescCommand(0),
@@ -190,31 +183,31 @@ impl Default for TransmitDescriptor {
         }
     }
 }
-
-impl Clone for TransmitDescriptor {
-    fn clone(&self) -> Self {
-        if self.buffer_addr.0 == 0 {
-            Self {
-                buffer_addr: self.buffer_addr,
-                length: self.length,
-                checksum_offset: self.checksum_offset,
-                command: self.command,
-                status_extcmd: self.status_extcmd,
-                checksum_start: self.checksum_start,
-                vlan: self.vlan,
-            }
-        } else {
-            //new frame, just copy data
-            let new_phys_addr = physical_allocator::allocate_frame();
-            Self {
-                buffer_addr: new_phys_addr,
-                length: self.length,
-                checksum_offset: self.checksum_offset,
-                command: self.command,
-                status_extcmd: self.status_extcmd,
-                checksum_start: self.checksum_start,
-                vlan: self.vlan,
-            }
-        }
-    }
-}
+//
+// impl Clone for TransmitDescriptor {
+//     fn clone(&self) -> Self {
+//         if self.buffer.0 == 0 {
+//             Self {
+//                 buffer: self.buffer,
+//                 length: self.length,
+//                 checksum_offset: self.checksum_offset,
+//                 command: self.command,
+//                 status_extcmd: self.status_extcmd,
+//                 checksum_start: self.checksum_start,
+//                 vlan: self.vlan,
+//             }
+//         } else {
+//             //new frame, just copy data
+//             let new_phys_addr = physical_allocator::allocate_frame();
+//             Self {
+//                 buffer: new_phys_addr,
+//                 length: self.length,
+//                 checksum_offset: self.checksum_offset,
+//                 command: self.command,
+//                 status_extcmd: self.status_extcmd,
+//                 checksum_start: self.checksum_start,
+//                 vlan: self.vlan,
+//             }
+//         }
+//     }
+// }

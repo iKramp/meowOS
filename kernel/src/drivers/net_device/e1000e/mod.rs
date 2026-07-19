@@ -25,7 +25,6 @@ use crate::{
         },
         pci::{self, BarTrait, NetworkController, PciClass, PcieDriver},
     },
-    memory,
     net::{self, MacAddress, NIC, NicIdentifier, RawNetDataChunk, deregister_nic},
 };
 
@@ -95,17 +94,23 @@ fn init_e1000e(dev: &pci::PcieDevice) -> Result<Arc<E1000eDevice>, ErrorCode> {
 #[derive(Debug)]
 struct E1000eDevice {
     identifier: NicIdentifier,
-    memory_bar: VirtAddr,
-    flash_bar: VirtAddr,
+    memory_bar: VirtRange,
+    flash_bar: VirtRange,
     registers: RWSpinlock<registers::E1000eRegistersPtr<'static>>, //same value as memory_bar but typed
     phy_addr: PhyAddress,
     phy_id: u32,
     mac_address: net::MacAddress,
     link_up: AtomicBool,
     #[allow(clippy::type_complexity)] //not even that complex
-    receive_queue: Option<(&'static [UnsafeCell<ReceiveDescriptor>; RX_DESC_COUNT], (VirtAddr, PhysAddr))>,
+    receive_queue: Option<(
+        &'static [UnsafeCell<ReceiveDescriptor>; RX_DESC_COUNT],
+        (VirtAddr, OwnedPhysRange),
+    )>,
     #[allow(clippy::type_complexity)] //not even that complex
-    transmit_queue: Option<(&'static [UnsafeCell<TransmitDescriptor>; TX_DESC_COUNT], (VirtAddr, PhysAddr))>,
+    transmit_queue: Option<(
+        &'static [UnsafeCell<TransmitDescriptor>; TX_DESC_COUNT],
+        (VirtAddr, OwnedPhysRange),
+    )>,
     receive_lock: NoIntSpinlock<()>,
     transmit_lock: NoIntSpinlock<()>,
 }
@@ -128,13 +133,13 @@ impl E1000eDevice {
 
         let memory_bar = mem_bar.get_address();
         let flash_bar = flash_bar.get_address();
-        let registers = unsafe { registers::E1000eRegistersPtr::from_ptr(memory_bar.0 as *mut _) };
+        let registers = unsafe { registers::E1000eRegistersPtr::from_ptr(memory_bar.start.0 as *mut _) };
 
         #[cfg(debug_assertions)]
         {
             use crate::drivers::net_device::e1000e::registers::E1000eRegistersPtr;
 
-            let registers = unsafe { E1000eRegistersPtr::from_ptr(mem_bar.get_address().0 as *mut _) };
+            let registers = unsafe { E1000eRegistersPtr::from_ptr(mem_bar.get_address().start.0 as *mut _) };
             let addr_0 = registers.as_ptr() as usize;
             let addr_last_field = registers.fcrtv().as_ptr() as usize;
             assert!(addr_last_field - addr_0 == 0x5F40); //when modifying regs, this needs to stay
@@ -238,23 +243,5 @@ impl NIC for E1000eDevice {
 
     fn nic_type(&self) -> net::NicType {
         net::NicType::Ethernet
-    }
-}
-
-impl Drop for E1000eDevice {
-    fn drop(&mut self) {
-        if let Some(queue) = &self.receive_queue {
-            let queue_size_bytes = RX_DESC_COUNT * core::mem::size_of::<ReceiveDescriptor>();
-            let queue_size_pages = queue_size_bytes.div_ceil(4096);
-
-            memory::kernel_free_contiguous(queue.1.0, queue_size_pages as u64);
-        }
-
-        if let Some(queue) = &self.transmit_queue {
-            let queue_size_bytes = TX_DESC_COUNT * core::mem::size_of::<TransmitDescriptor>();
-            let queue_size_pages = queue_size_bytes.div_ceil(4096);
-
-            memory::kernel_free_contiguous(queue.1.0, queue_size_pages as u64);
-        }
     }
 }

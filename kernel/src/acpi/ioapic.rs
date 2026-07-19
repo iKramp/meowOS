@@ -6,10 +6,12 @@ use crate::memory::{self, LiminePat};
 pub fn init_ioapic(platform_info: &PlatformInfo) {
     unsafe {
         for (io_apic_index, io_apic_info) in platform_info.apic.io_apics.iter().enumerate() {
-            let (virt_addr, entry) = memory::kernel_manual_map(PhysAddr(io_apic_info.address.into()), 1, None);
-            entry.set_pat(LiminePat::UC, virt_addr);
+            let (virt_range, entry) =
+                memory::kernel_manual_map(OwnedPhysAddr(PhysAddr(io_apic_info.address.into())).into(), None);
+            let virt_addr = virt_range.into_owned_virt_addr();
+            entry.set_pat(LiminePat::UC, virt_addr.0);
 
-            let io_apic = get_at_addr::<IoApicRegisters, _>(virt_addr);
+            let io_apic = get_at_addr::<IoApicRegisters, _>(&virt_addr);
             let (_, entries) = io_apic.get_version_and_entries();
             //println!("got io apic: {:#x?}", io_apic);
             //println!("io apic version: {:#x?}", (version, entries));
@@ -46,6 +48,8 @@ pub fn init_ioapic(platform_info: &PlatformInfo) {
                 //println!("setting entry {:b}", table_entry.0);
                 io_apic.set_redir_table(gsi, table_entry)
             }
+
+            drop(virt_addr); //explicit late drop
         }
     }
 }

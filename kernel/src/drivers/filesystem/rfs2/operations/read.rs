@@ -67,12 +67,12 @@ impl Rfs2 {
             return Ok(0);
         }
 
-        let working_block = physical_allocator::allocate_frame();
+        let working_block = physical_allocator::allocate_contiguous(1);
         self.partition
             .read(
                 file_root as usize * BLOCK_SIZE_SECTORS + 1,
                 BLOCK_SIZE_SECTORS - 1,
-                &[working_block],
+                &working_block.0.get_addresses().collect::<Vec<_>>(),
             )
             .await;
 
@@ -83,18 +83,17 @@ impl Rfs2 {
                 file_root, offset_blocks, size_bytes
             );
 
-            let src_virt = VirtAddr::from(working_block);
+            let src_virt = VirtRange::from(&working_block);
             let dest_virt = VirtAddr::from(buffer[0]);
 
-            unsafe { core::ptr::copy_nonoverlapping(src_virt.0 as *const u8, dest_virt.0 as *mut u8, size_bytes as usize) };
+            unsafe { core::ptr::copy_nonoverlapping(src_virt.start.0 as *const u8, dest_virt.0 as *mut u8, size_bytes as usize) };
 
             return Ok(file_info.size.min(size_bytes) as u64);
         }
         println!("reading multi-level file");
 
         //they must be contiguous both physically and virtually
-        let mut current_working_blocks = Vec::new();
-        current_working_blocks.push(working_block);
+        let mut current_range = working_block;
 
         //inclusive bounds of blocks to read
         let first_block_to_read = offset_blocks;
@@ -110,30 +109,20 @@ impl Rfs2 {
             let last_relevant_ptr = (last_block_to_read - skipped_blocks) / ptr_blocks;
             skipped_blocks += ptr_blocks * first_relevant_ptr;
 
-            let ptr_virt = VirtAddr::from(*current_working_blocks.first().expect("must have at least 1 block"))
-                + first_relevant_ptr * core::mem::size_of::<BlockPtr>() as u64;
+            let ptr_virt = VirtAddr::from(current_range.0.start) + first_relevant_ptr * core::mem::size_of::<BlockPtr>() as u64;
             let ptrs_to_read = (last_relevant_ptr - first_relevant_ptr + 1) as usize;
             let ptrs_slice = unsafe { core::slice::from_raw_parts(ptr_virt.0 as *const BlockPtr, ptrs_to_read) };
 
             if current_ptr_level == levels {
                 self.read_locked_pointers(ptrs_slice, buffer).await;
 
-                for block in current_working_blocks {
-                    unsafe { physical_allocator::deallocate_frame(block) };
-                }
                 break;
             } else {
                 let new_working_physical = physical_allocator::allocate_contiguous(ptrs_to_read as u32);
-                let new_working_blocks = (0..ptrs_to_read)
-                    .map(|i| PhysAddr(new_working_physical.0 + i as u64 * 4096))
-                    .collect::<Vec<_>>();
+                current_range = new_working_physical;
+                self.read_locked_pointers(ptrs_slice, &current_range.0.get_addresses().collect::<Vec<_>>())
+                    .await;
 
-                self.read_locked_pointers(ptrs_slice, &new_working_blocks).await;
-
-                for block in current_working_blocks {
-                    unsafe { physical_allocator::deallocate_frame(block) };
-                }
-                current_working_blocks = new_working_blocks;
                 current_ptr_level += 1;
             }
         }

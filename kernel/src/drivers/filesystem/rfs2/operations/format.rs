@@ -25,7 +25,7 @@ impl Rfs2 {
         //----------clear disk----------
         for i in 0..whole_blocks {
             self.partition
-                .write(i * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys])
+                .write(i * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys.0])
                 .await;
         }
 
@@ -39,7 +39,7 @@ impl Rfs2 {
                 .write(
                     i * GROUP_SIZE_BLOCKS * BLOCK_SIZE_SECTORS,
                     BLOCK_SIZE_SECTORS,
-                    &[working_block.phys],
+                    &[working_block.phys.0],
                 )
                 .await;
         }
@@ -61,7 +61,7 @@ impl Rfs2 {
                 .write(
                     whole_groups * GROUP_SIZE_BLOCKS * BLOCK_SIZE_SECTORS,
                     BLOCK_SIZE_SECTORS,
-                    &[working_block.phys],
+                    &[working_block.phys.0],
                 )
                 .await;
         }
@@ -91,29 +91,33 @@ impl Rfs2 {
             }
 
             self.partition
-                .read(block * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys])
+                .read(block * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys.0])
                 .await;
 
             working_block.get_as_mut::<[u8; 4096]>()[0] |= 3; //first 2 marked
 
             self.partition
-                .write(block * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys])
+                .write(block * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys.0])
                 .await;
             self.partition
-                .write((block + 1) * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[superblock_block.phys])
+                .write(
+                    (block + 1) * BLOCK_SIZE_SECTORS,
+                    BLOCK_SIZE_SECTORS,
+                    &[superblock_block.phys.0],
+                )
                 .await;
         }
         superblock_block.forget_mem_binding();
 
         //----------initialize first bitmask----------
         working_block.get_as_mut::<[u8; 4096]>()[0] = 0b11111;
-        self.partition.write(0, BLOCK_SIZE_SECTORS, &[working_block.phys]).await;
+        self.partition.write(0, BLOCK_SIZE_SECTORS, &[working_block.phys.0]).await;
 
         //----------initialize inode tree root----------
         let node = working_block.get_as_mut::<BTreeNode>();
         node.initialize_root(ROOT_INODE_INDEX as InodeIndex, 4);
         self.partition
-            .write(2 * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys])
+            .write(2 * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys.0])
             .await;
 
         //----------initialize inode bitmask----------
@@ -127,7 +131,7 @@ impl Rfs2 {
         let byte = (2 << ROOT_INODE_INDEX) - 1;
         working_block.get_as_mut::<[u8; 4096]>()[0] = byte;
         self.partition
-            .write(3 * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys])
+            .write(3 * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys.0])
             .await;
 
         //----------initialize root inode----------
@@ -147,7 +151,7 @@ impl Rfs2 {
             stat_change_seconds_since_epoch: since_epoch,
         };
         self.partition
-            .write(4 * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys])
+            .write(4 * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[working_block.phys.0])
             .await;
 
         working_block.forget_mem_binding();

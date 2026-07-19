@@ -92,10 +92,11 @@ impl HeapAllocationData {
                     ptr_to_first: VirtAddr(0),
                     ptr_to_last: VirtAddr(0),
                 };
-                metadata.populate(new_page);
-                set_at_addr(new_page, metadata);
+                metadata.populate(new_page.0);
+                set_at_addr(new_page.0, metadata);
                 self.free_objects = metadata.max_allocations as u64;
                 self.ptr_to_first = metadata.ptr_to_first;
+                core::mem::forget(new_page);
             }
 
             let allocated = self.ptr_to_first;
@@ -235,7 +236,10 @@ impl Heap {
             //allocate whole page/pages
             let n_of_pages = size.div_ceil(4096);
 
-            Self::allocate_contigious(n_of_pages)
+            let owned_range = Self::allocate_contigious(n_of_pages);
+            let virt_addr = owned_range.0.start;
+            core::mem::forget(owned_range);
+            virt_addr
         } else {
             let size_order = log2_rounded_up(size);
             let index = u64::max(4, size_order) - 4;
@@ -251,10 +255,12 @@ impl Heap {
         let page_addr = VirtAddr(addr.0 & !0xFFF);
         unsafe {
             if size > 1024 {
-                let pages_allocated = size.div_ceil(4096);
-                for i in 0..pages_allocated {
-                    Self::deallocate_page(page_addr + (i * 4096));
-                }
+                let n_of_pages = size.div_ceil(4096);
+                let range = OwnedVirtRange(VirtRange {
+                    start: page_addr,
+                    n_pages: n_of_pages,
+                });
+                Self::deallocate_pages(range);
             } else {
                 let metadata = get_at_addr::<HeapPageMetadata, _>(page_addr);
                 debug_assert!(
@@ -268,20 +274,17 @@ impl Heap {
         }
     }
 
-    fn allocate_page() -> VirtAddr {
-        physical_allocator::allocate_frame().into()
+    fn allocate_page() -> OwnedVirtAddr {
+        physical_allocator::allocate().into()
     }
 
-    fn allocate_contigious(n_pages: u64) -> VirtAddr {
+    fn allocate_contigious(n_pages: u64) -> OwnedVirtRange {
         let phys_addr = physical_allocator::allocate_contiguous(n_pages as u32);
         phys_addr.into()
     }
 
-    fn deallocate_page(addr: VirtAddr) {
-        let phys_addr = translate_virt_phys_addr(addr, None);
-        if let Some(phys_addr) = phys_addr {
-            unsafe { physical_allocator::deallocate_frame(phys_addr) };
-        }
+    fn deallocate_pages(addr: impl Into<OwnedVirtRange>) {
+        drop(addr); //HHDM - only phys allocator does things
     }
 }
 

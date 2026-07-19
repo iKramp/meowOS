@@ -110,28 +110,22 @@ pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &s
     let stat = vfs::stat_file(&file_handle).await;
     let buf_pages = stat.size.div_ceil(4096);
     let phys_buf = physical_allocator::allocate_contiguous(buf_pages as u32);
-    let buf = VirtAddr::from(phys_buf);
+    let buf = VirtRange::from(&phys_buf);
 
-    let phys_buf_vec = (0..buf_pages).map(|i| phys_buf + i * 4096).collect::<Vec<_>>();
+    let phys_buf_vec = phys_buf.get_range().get_addresses().collect::<Vec<_>>();
     let read_res = vfs::read_file(&file_handle, &phys_buf_vec, stat.size).await?;
     if read_res != stat.size {
-        for frame in phys_buf_vec {
-            unsafe { physical_allocator::deallocate_frame(frame) };
-        }
         return Err(ErrorCode::InternalFSError);
     }
 
     let context = match loaders::load_process_context(
-        unsafe { core::slice::from_raw_parts(buf.0 as *const u8, stat.size as usize) },
+        unsafe { core::slice::from_raw_parts(buf.start.0 as *const u8, stat.size as usize) },
         cmdline,
     ) {
         Ok(context) => context,
         Err(e) => {
             println!(level:error, "Failed to load process from file: {}", path.to_string());
             println!(level:error, "Error: {:?}", e);
-            for frame in phys_buf_vec {
-                unsafe { physical_allocator::deallocate_frame(frame) };
-            }
             return Err(ErrorCode::InvalidProcessFile);
         }
     };
@@ -143,15 +137,9 @@ pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &s
         Ok(pid) => pid,
         Err(e) => {
             println!(level:error, "Failed to create process from file: {}, error: {:?}", path.to_string(), e);
-            for frame in phys_buf_vec {
-                unsafe { physical_allocator::deallocate_frame(frame) };
-            }
             return Err(e);
         }
     };
-    for frame in phys_buf_vec {
-        unsafe { physical_allocator::deallocate_frame(frame) };
-    }
 
     Ok(new_pid)
 }

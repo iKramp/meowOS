@@ -143,14 +143,14 @@ unsafe impl Sync for FatDriver {}
 
 impl FatDriver {
     async fn new(partition: MountedPartition) -> Self {
-        let page = physical_allocator::allocate_frame();
-        partition.read(0, 1, &[page]).await;
+        let page = physical_allocator::allocate();
+        partition.read(0, 1, &[page.0]).await;
 
         let mut header = MaybeUninit::uninit();
 
         unsafe {
             let header_ptr = header.as_mut_ptr();
-            let page_virt = VirtAddr::from(page);
+            let page_virt = VirtAddr::from(&page);
             let src_ptr = page_virt.0 as *const FatHeader;
             *header_ptr = *src_ptr;
 
@@ -206,7 +206,7 @@ impl FatDriver {
             println!("data_sectors: {}", data_sectors);
             println!("header: {:#?}", header_ref);
 
-            physical_allocator::deallocate_frame(page);
+            drop(page);
 
             part
         }
@@ -223,16 +223,16 @@ impl FatDriver {
     }
 
     async fn read_sector(&self, sector: u32) -> Box<[u8; 512]> {
-        let page = physical_allocator::allocate_frame();
-        let page_virt: VirtAddr = page.into();
-        self.partition.read(sector as usize, 1, &[page]).await;
+        let page = physical_allocator::allocate();
+        let page_virt = VirtAddr::from(&page);
+        self.partition.read(sector as usize, 1, &[page.0]).await;
         let mut data = Box::new([0_u8; 512]);
         let data_src = page_virt.0 as *const u8;
         let data_dest = data.as_mut_ptr();
         unsafe {
             data_dest.copy_from(data_src, 512);
-            physical_allocator::deallocate_frame(page);
         }
+        drop(page);
         data
     }
 

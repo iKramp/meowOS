@@ -46,51 +46,32 @@ pub fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let f_handle = file_handle; //get to local
         let pages = size.div_ceil(4096);
         let buffer_alloc = crate::memory::physical_allocator::allocate_contiguous(pages as u32);
-        let dst = VirtAddr::from(buffer_alloc).0 as *mut u8;
+        let dst = VirtAddr::from(buffer_alloc.0.start).0 as *mut u8;
         let src = buffer_ptr;
         //copy to user buffer
         let copy_valid = safe_memcpy_from_user(dst as u64, src as u64, size as usize);
         if !copy_valid {
             let proc_lock = proc.get();
             proc_lock.set_legacy_syscall_return(u64::MAX, 1);
-
-            //free
-            for i in 0..pages {
-                unsafe { crate::memory::physical_allocator::deallocate_frame(buffer_alloc + (i * 4096)) };
-            }
             return;
         }
 
-        let buffers = (0..pages).map(|i| buffer_alloc + (i * 4096)).collect::<Vec<PhysAddr>>();
+        let buffers = buffer_alloc.get_range().get_addresses().collect::<Vec<PhysAddr>>();
         let proc_weak = proc.downgrade();
         drop(proc);
 
         let write_result = crate::vfs::write_file(f_handle.get(), &buffers, size).await;
 
         let Some(proc) = proc_weak.upgrade() else {
-            //free
-            for i in 0..pages {
-                unsafe { crate::memory::physical_allocator::deallocate_frame(buffer_alloc + (i * 4096)) };
-            }
             return; //proc was killed
         };
         if write_result.is_err() {
             println!("fwrite: write failed");
             let proc_lock = proc.get();
             proc_lock.set_legacy_syscall_return(u64::MAX, 1);
-
-            //free
-            for i in 0..pages {
-                unsafe { crate::memory::physical_allocator::deallocate_frame(buffer_alloc + (i * 4096)) };
-            }
             return;
         }
         let bytes_written = unsafe { write_result.unwrap_unchecked() };
-
-        //free
-        for i in 0..pages {
-            unsafe { crate::memory::physical_allocator::deallocate_frame(buffer_alloc + (i * 4096)) };
-        }
 
         //return
         proc.set_legacy_syscall_return(bytes_written, 0);

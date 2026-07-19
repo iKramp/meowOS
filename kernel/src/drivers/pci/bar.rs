@@ -21,7 +21,7 @@ pub struct MemoryBar {
     pub offset_in_conf_space: u8,
     phys_address: PhysAddr,
     prefetchable: bool,
-    address: OnceLock<VirtAddr>,
+    address: OnceLock<OwnedVirtRange>,
     pub size: u64,
     pub is_64_bit: bool,
 }
@@ -73,14 +73,14 @@ impl MemoryBar {
         }
     }
 
-    pub fn get_address(&self) -> VirtAddr {
-        *self.address.get_or_init(|| self.map(self.phys_address, self.prefetchable))
+    pub fn get_address(&self) -> VirtRange {
+        self.address.get_or_init(|| self.map(self.phys_address, self.prefetchable)).0
     }
 }
 
 impl BarTrait for MemoryBar {
     fn write_to_bar<T: Sized>(&self, data: &T, offset: u64) {
-        let address = (self.get_address().0 + offset) as *mut T;
+        let address = (self.get_address().start.0 + offset) as *mut T;
         assert!(
             offset + core::mem::size_of::<T>() as u64 <= self.size,
             "Data exceeds BAR size"
@@ -91,7 +91,7 @@ impl BarTrait for MemoryBar {
     }
 
     fn read_from_bar<T: Sized>(&self, offset: u64) -> T {
-        let address = (self.get_address().0 + offset) as *const T;
+        let address = (self.get_address().start.0 + offset) as *const T;
         assert!(
             offset + core::mem::size_of::<T>() as u64 <= self.size,
             "Data exceeds BAR size"
@@ -139,29 +139,22 @@ impl BarTrait for IOBar {
     }
 }
 
-impl Drop for MemoryBar {
-    fn drop(&mut self) {
-        let Some(&addr) = self.address.get() else {
-            return;
-        };
-        let pages = self.size.div_ceil(0x1000);
-        unsafe { memory::kernel_manual_unmap(addr, pages, None) };
-    }
-}
-
 impl MemoryBar {
-    fn map(&self, phys_addr: PhysAddr, prefetchable: bool) -> VirtAddr {
+    fn map(&self, phys_addr: PhysAddr, prefetchable: bool) -> OwnedVirtRange {
         let pages = self.size.div_ceil(0x1000);
 
-        let page_tree_root = memory::current_root();
+        let phys_range = OwnedPhysRange(PhysRange {
+            start: phys_addr,
+            n_pages: pages,
+        });
 
-        let (virt_addr, _entry) = unsafe { memory::kernel_manual_map(phys_addr, pages, Some(page_tree_root)) };
+        let (virt_addr, _entry) = unsafe { memory::kernel_manual_map(phys_range, None) };
         for i in 0..pages {
-            let page_entry = memory::get_page_table_entry(virt_addr + i * 0x1000, Some(page_tree_root)).expect("just allocated");
+            let page_entry = memory::get_page_table_entry(virt_addr.0.start + i * 0x1000, None).expect("just allocated");
             if prefetchable {
-                page_entry.set_pat(memory::LiminePat::WT, virt_addr + i * 0x1000);
+                page_entry.set_pat(memory::LiminePat::WT, virt_addr.0.start + i * 0x1000);
             } else {
-                page_entry.set_pat(memory::LiminePat::UC, virt_addr + i * 0x1000);
+                page_entry.set_pat(memory::LiminePat::UC, virt_addr.0.start + i * 0x1000);
             }
         }
         virt_addr

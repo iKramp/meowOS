@@ -75,36 +75,34 @@ enum PageMapAddrRequest {
 
 //publlic API
 #[inline]
-pub fn kernel_map(phys_addr: Option<PhysAddr>) -> VirtAddr {
-    let phys_addr = match phys_addr {
-        Some(a) => a,
-        None => physical_allocator::allocate_frame(),
-    };
+pub fn kernel_map(phys_addr: OwnedPhysAddr) -> OwnedVirtAddr {
     phys_addr.into()
 }
 
 #[inline]
-pub fn kernel_free(addr: VirtAddr) {
-    let phys_addr = translate_virt_phys_addr(addr, None).expect("freeing on HHDM");
-    unsafe { physical_allocator::deallocate_frame(phys_addr) };
+pub fn kernel_free(addr: OwnedVirtAddr) {
+    assert!(is_in_hhdm(addr.0), "kernel-freeing non-HHDM address");
+    let phys_addr = translate_virt_phys_addr(addr.0, None).expect("freeing on HHDM");
+    let owned_phys_addr = OwnedPhysAddr(phys_addr);
+    core::mem::forget(addr);
+    drop(owned_phys_addr);
 }
 
 #[inline]
-pub fn kernel_map_contiguous(phys_addr: Option<PhysAddr>, n_pages: u64) -> VirtAddr {
-    let phys_addr = match phys_addr {
-        Some(a) => a,
-        None => physical_allocator::allocate_contiguous(n_pages as u32),
-    };
-    phys_addr.into()
+pub fn kernel_map_contiguous(phys_range: OwnedPhysRange) -> OwnedVirtRange {
+    phys_range.into()
 }
 
 #[inline]
-pub fn kernel_free_contiguous(addr: VirtAddr, n_pages: u64) {
-    let phys_addr = translate_virt_phys_addr(addr, None).expect("freeing on HHDM");
-    for i in 0..n_pages {
-        let addr = phys_addr.0 + i * 0x1000;
-        unsafe { physical_allocator::deallocate_frame(PhysAddr(addr)) };
-    }
+pub fn kernel_free_contiguous(range: OwnedVirtRange) {
+    assert!(is_in_hhdm(range.0.start), "kernel-freeing non-HHDM address");
+    let phys_range = translate_virt_phys_addr(range.0.start, None).expect("freeing on HHDM");
+    let owned_phys_range = OwnedPhysRange(PhysRange {
+        start: phys_range,
+        n_pages: range.0.n_pages,
+    });
+    core::mem::forget(range);
+    drop(owned_phys_range);
 }
 
 pub fn kernel_unmap(_addr: VirtAddr) {
@@ -117,18 +115,26 @@ static MANUAL_MAP_LOCK: NoIntSpinlock<()> = NoIntSpinlock::new(());
 /// Caller must ensure the phys_addr is valid and owned
 /// If calling in a loop, provide page tree root
 pub unsafe fn kernel_manual_map(
-    phys_addr: PhysAddr,
-    pages: u64,
+    phys_addr: OwnedPhysRange,
     page_tree_root: Option<PhysAddr>,
-) -> (VirtAddr, &'static mut PageTableEntry) {
+) -> (OwnedVirtRange, &'static mut PageTableEntry) {
+    let pages = phys_addr.0.n_pages;
     let virt_addr = allocation_area::allocate_area(pages, AllocationAreaFlags::default()).expect("OOM");
 
     let _lock = lock_w_info!(MANUAL_MAP_LOCK);
     let page_table_root = page_tree_root.unwrap_or_else(current_root);
     let page_table = unsafe { get_at_addr::<PageTable, _>(page_table_root) };
-    let res = unsafe { page_table.kernel_manual_map(phys_addr, virt_addr, pages, VirtAddr(0), 4) };
+    let res = unsafe { page_table.kernel_manual_map(phys_addr.0.start, virt_addr, pages, VirtAddr(0), 4) };
     drop(_lock);
-    (virt_addr, res.0)
+
+    let virt_range = VirtRange {
+        start: virt_addr,
+        n_pages: pages,
+    };
+    let owned_virt_range = OwnedVirtRange(virt_range);
+    core::mem::forget(phys_addr);
+
+    (owned_virt_range, res.0)
 }
 
 /// Intended to be used for MMIO, or physical ram in very rare cases.
@@ -220,16 +226,17 @@ pub fn prepare_higher_half() {
         if entry.present() {
             continue;
         }
-        let frame = physical_allocator::allocate_frame();
+        let frame = physical_allocator::allocate();
         unsafe {
             core::ptr::write_volatile(
-                get_at_addr::<PageTable, _>(frame),
+                get_at_addr::<PageTable, _>(&frame),
                 PageTable {
                     entries: [PageTableEntry(0); 512],
                 },
             )
         };
-        *entry = PageTableEntry::new(frame, false);
+        *entry = PageTableEntry::new(frame.0, false);
+        core::mem::forget(frame); //don't deallocate
     }
 }
 

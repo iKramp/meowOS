@@ -182,10 +182,10 @@ impl NetPacket {
         let len = vec.iter().fold(0, |a, b| a + b.length);
         let pages = len.div_ceil(4096);
         let phys_addr = physical_allocator::allocate_contiguous(pages);
-        let virt_addr = VirtAddr::from(phys_addr);
+        let virt_addr = VirtAddr::from(phys_addr.0.start);
         let mut curr_offset = 0;
         for chunk in vec.iter() {
-            let chunk_virt = VirtAddr::from(chunk.data);
+            let chunk_virt = VirtAddr::from(chunk.data.0.start);
             unsafe {
                 core::ptr::copy_nonoverlapping(
                     chunk_virt.0 as *const u8,
@@ -249,7 +249,7 @@ impl NetPacket {
         let to_shift = offset_to_keep - curr_off;
         if to_shift > 0 {
             let first_chunk = self.chunks.first_mut()?;
-            let chunk_virt = VirtAddr::from(first_chunk.data);
+            let chunk_virt = VirtAddr::from(first_chunk.data.0.start);
             unsafe {
                 core::ptr::copy(
                     chunk_virt.0 as *const u8,
@@ -316,36 +316,43 @@ impl NetPacket {
 //owns the data
 #[derive(Debug)]
 pub struct RawNetDataChunk {
-    data: PhysAddr,
+    data: OwnedPhysRange,
     length: u32,
 }
 
 impl RawNetDataChunk {
-    pub fn new(data: PhysAddr, length: u32) -> Self {
+    pub fn new(data: OwnedPhysRange, length: u32) -> Self {
         RawNetDataChunk { data, length }
+    }
+
+    pub fn deconstruct(self) -> (OwnedPhysRange, u32) {
+        (self.data, self.length)
     }
 
     pub fn allocate_new(length: u32) -> Self {
         let pages = length.div_ceil(4096);
-        let phys_addr = physical_allocator::allocate_contiguous(pages);
-        RawNetDataChunk { data: phys_addr, length }
+        let phys_range = physical_allocator::allocate_contiguous(pages);
+        RawNetDataChunk {
+            data: phys_range,
+            length,
+        }
     }
 
     pub fn len(&self) -> u32 {
         self.length
     }
 
-    pub fn phys_addr(&self) -> PhysAddr {
-        self.data
+    pub fn phys_range(&self) -> PhysRange {
+        self.data.get_range()
     }
 
     pub fn data(&self) -> &[u8] {
-        let ptr = VirtAddr::from(self.data).0 as *const u8;
+        let ptr = VirtAddr::from(self.data.0.start).0 as *const u8;
         unsafe { core::slice::from_raw_parts(ptr, self.length as usize) }
     }
 
     pub fn data_mut(&mut self) -> &mut [u8] {
-        let ptr = VirtAddr::from(self.data).0 as *mut u8;
+        let ptr = VirtAddr::from(self.data.0.start).0 as *mut u8;
         unsafe { core::slice::from_raw_parts_mut(ptr, self.length as usize) }
     }
 
@@ -353,44 +360,23 @@ impl RawNetDataChunk {
         if new_len >= self.length {
             return;
         }
-        let pages_before = self.length.div_ceil(4096);
         self.length = new_len;
         let pages_after = self.length.div_ceil(4096);
-        for i in pages_after..pages_before {
-            unsafe {
-                physical_allocator::deallocate_frame(PhysAddr(self.data.0 + (i as u64) * 4096));
-            }
-        }
-    }
-}
 
-impl Drop for RawNetDataChunk {
-    fn drop(&mut self) {
-        if self.data.0 == 0 {
-            return;
-        }
-
-        let pages = self.length.div_ceil(4096);
-        for i in 0..pages {
-            unsafe {
-                physical_allocator::deallocate_frame(PhysAddr(self.data.0 + (i as u64) * 4096));
-            }
-        }
+        let new_range = PhysRange {
+            start: self.data.0.start,
+            n_pages: pages_after as u64,
+        };
+        self.data.shrink_to(new_range);
     }
 }
 
 impl Clone for RawNetDataChunk {
     fn clone(&self) -> Self {
-        if self.data.0 == 0 {
-            return Self {
-                data: self.data,
-                length: self.length,
-            };
-        }
         let pages = self.length.div_ceil(4096);
         let new_phys = physical_allocator::allocate_contiguous(pages);
-        let old_ptr = VirtAddr::from(self.data).0 as *const u8;
-        let new_ptr = VirtAddr::from(new_phys).0 as *mut u8;
+        let old_ptr = VirtAddr::from(self.data.0.start).0 as *const u8;
+        let new_ptr = VirtAddr::from(new_phys.0.start).0 as *mut u8;
         unsafe { core::ptr::copy_nonoverlapping(old_ptr, new_ptr, self.length as usize) };
         Self {
             data: new_phys,

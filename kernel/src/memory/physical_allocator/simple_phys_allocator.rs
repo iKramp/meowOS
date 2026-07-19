@@ -135,10 +135,13 @@ impl PhysicalAllocator for SimplePhysicalAllocator {
         })
     }
 
-    fn deallocate<T: Into<OwnedPhysRange>>(&mut self, addr: T) {
-        let range: OwnedPhysRange = addr.into();
-        let start_page = range.0.start.0 / 4096;
-        for page in start_page..(start_page + range.0.n_pages as u64) {
+    fn deallocate<T: OwnedPhysicalRangeData>(&mut self, addr: &T) {
+        if addr.get_range().n_pages == 0 {
+            return;
+        }
+        let range = addr.get_range();
+        let start_page = range.start.0 / 4096;
+        for page in start_page..(start_page + range.n_pages as u64) {
             self.deallocate_single(PhysAddr(page * 4096));
         }
     }
@@ -193,7 +196,7 @@ pub fn allocate_contiguous(n_pages: u32) -> OwnedPhysRange {
     lock_w_info!(SIMPLE_PHYS_ALLOCATOR).allocate_contiguous(n_pages)
 }
 
-pub unsafe fn deallocate<T: Into<OwnedPhysRange>>(addr: T) {
+pub unsafe fn deallocate<T: OwnedPhysicalRangeData>(addr: &T) {
     lock_w_info!(SIMPLE_PHYS_ALLOCATOR).deallocate(addr);
 }
 

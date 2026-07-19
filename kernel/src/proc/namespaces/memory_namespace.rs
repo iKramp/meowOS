@@ -58,7 +58,9 @@ impl ProcNamespace for MemoryNamespace {
     }
 
     fn create_empty(id: u64) -> Result<Self, ErrorCode> {
-        let page_tree_root = physical_allocator::allocate_frame();
+        let owned_page_tree_root = physical_allocator::allocate();
+        let page_tree_root = owned_page_tree_root.0;
+        core::mem::forget(owned_page_tree_root); //dealloc handled by drop impl
         unsafe { memset_at_addr(page_tree_root, 0, 0x1000) };
         Ok(Self {
             id,
@@ -247,10 +249,6 @@ impl MemoryNamespaceDynamicData {
 
 impl Drop for MemoryNamespace {
     fn drop(&mut self) {
-        if self.page_tree_root.0 == 0 {
-            panic!("invalid page tree root");
-        }
-
         for range in lock_w_info!(self.dynamic_data).memory_ranges.iter() {
             let Some(table_entry) = memory::get_page_table_entry_at_level(
                 self.page_tree_root,

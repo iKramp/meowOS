@@ -8,47 +8,33 @@ use crate::{
 
 impl Rfs2 {
     //contains an additional allocation for linking
-    pub(super) async fn read_direntries(&self, dir_root: BlockPtr) -> (PhysAddr, &'static mut [DirEntry]) {
+    pub(super) async fn read_direntries(&self, dir_root: BlockPtr) -> (OwnedPhysRange, &'static mut [DirEntry]) {
         let dir_info = self.get_file_info(dir_root).await;
         let size_pages = (dir_info.size + core::mem::size_of::<DirEntry>() as u64).div_ceil(4096);
 
         let buf = physical_allocator::allocate_contiguous(size_pages as u32);
-        let buf_virt = VirtAddr::from(buf);
-        let buf_vec = (0..size_pages).map(|i| buf + i * 4096).collect::<Vec<_>>();
-        self.read_locked(dir_root, 0, dir_info.size, &buf_vec)
+        let buf_virt = VirtRange::from(&buf);
+        self.read_locked(dir_root, 0, dir_info.size, &buf.0.get_addresses().collect::<Vec<_>>())
             .await
             .expect("correct args");
         let entries = dir_info.size as usize / core::mem::size_of::<DirEntry>();
-        let entry_slice = unsafe { core::slice::from_raw_parts_mut(buf_virt.0 as *mut DirEntry, entries + 1) };
+        let entry_slice = unsafe { core::slice::from_raw_parts_mut(buf_virt.start.0 as *mut DirEntry, entries + 1) };
         let last = entry_slice.last_mut().expect("must have at least 1 entry");
         last.inode = 0;
         last.name = [0; 256 - core::mem::size_of::<InodeIndex>() - 1];
         (buf, entry_slice)
     }
 
-    pub(super) async fn write_direntries(&self, dir_root: BlockPtr, buffer: PhysAddr, num_entries: usize) {
-        let num_bytes = num_entries * core::mem::size_of::<DirEntry>();
-        let num_pages = num_bytes.div_ceil(4096) as u64;
-        let buffer_vec = (0..num_pages).map(|i| buffer + i * 4096).collect::<Vec<_>>();
+    pub(super) async fn write_direntries(&self, dir_root: BlockPtr, buffer: PhysRange, num_entries: usize) {
         self.write_locked(
             dir_root,
             0,
             num_entries as u64 * core::mem::size_of::<DirEntry>() as u64,
-            &buffer_vec,
+            &buffer.get_addresses().collect::<Vec<_>>(),
         )
         .await
         .expect("correct args");
         self.truncate_locked(dir_root, num_entries * core::mem::size_of::<DirEntry>())
             .await;
-
-        Self::dealloc_dirent_binding(buffer, num_entries);
-    }
-
-    pub(super) fn dealloc_dirent_binding(binding: PhysAddr, num_entries: usize) {
-        let num_bytes = num_entries * core::mem::size_of::<DirEntry>();
-        let num_pages = num_bytes.div_ceil(4096) as u64;
-        for i in 0..num_pages {
-            unsafe { physical_allocator::deallocate_frame(binding + i * 4096) };
-        }
     }
 }

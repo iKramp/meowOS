@@ -20,7 +20,7 @@ pub(super) struct HpetWrapper {
     cmp_value: u64,
     seconds_since: AtomicU64,
     last_main_count: AtomicU64,
-    allocated_page: VirtAddr,
+    allocated_page: OwnedVirtAddr,
 }
 
 impl HpetWrapper {
@@ -32,14 +32,21 @@ impl HpetWrapper {
             cmp_value: 0,
             seconds_since: AtomicU64::new(0),
             last_main_count: AtomicU64::new(0),
-            allocated_page: VirtAddr(0),
+            allocated_page: OwnedVirtAddr(VirtAddr(0)),
         }
     }
 
     fn get_registers(&mut self, reg_phys_addr: PhysAddr) -> bool {
-        let (virt_addr, entry) = unsafe { memory::kernel_manual_map(reg_phys_addr, 1, None) };
+        let owned_addr = OwnedPhysAddr(reg_phys_addr);
+
+        let (virt_range, entry) = unsafe { memory::kernel_manual_map(owned_addr.into(), None) };
+        let mut owned_virt_addr = virt_range.into_owned_virt_addr();
+        let virt_addr = owned_virt_addr.0;
+
         entry.set_pat(LiminePat::UC, virt_addr);
-        self.allocated_page = virt_addr;
+
+        core::mem::swap(&mut self.allocated_page, &mut owned_virt_addr);
+        core::mem::forget(owned_virt_addr); //uninitialized
 
         let registers = unsafe { HpetRegistersPtr::from_ptr(virt_addr.0 as *mut HpetRegisters) };
         let general_cap = registers.general_capabilities().read();
@@ -90,21 +97,12 @@ impl HpetWrapper {
 
 impl Drop for HpetWrapper {
     fn drop(&mut self) {
-        if self.allocated_page.0 == 0 {
-            return;
-        }
-
         let self_regs = unsafe { self.registers.assume_init_ref() };
 
         //disable timer
         let mut gen_conf = self_regs.general_configuration().read();
         gen_conf.set_enabled(false);
         self_regs.general_configuration().write(gen_conf);
-
-        //free allocated page
-        unsafe {
-            memory::kernel_manual_unmap(self.allocated_page, 1, None);
-        }
     }
 }
 

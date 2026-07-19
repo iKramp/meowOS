@@ -94,7 +94,7 @@ impl AhciController {
             return Err(ErrorCode::IllegalValue);
         };
 
-        let ghc = unsafe { GenericHostControlPtr::from_ptr(abar.get_address().0 as *mut GenericHostControl) };
+        let ghc = unsafe { GenericHostControlPtr::from_ptr(abar.get_address().start.0 as *mut GenericHostControl) };
         let is_64_bit = ghc.cap().read().S64A();
 
         Ok(Self {
@@ -120,7 +120,7 @@ impl AhciController {
                 ports.push(VirtualPort {
                     index: i as u8,
                     address: (ghc_lock.as_ptr() as u64 + 0x100 + (i as u64) * 0x80) as *mut u32,
-                    command_list: VirtAddr(0),
+                    command_list: OwnedVirtAddr(VirtAddr(0)),
                     fis: VirtAddr(0),
                     is_64_bit: self.is_64_bit,
                     sectors: 0,
@@ -261,7 +261,7 @@ struct VirtualPort {
     //thread safe (only written during init)
     fis: VirtAddr,
     //thread safe (as long as commands_issued works)
-    command_list: VirtAddr,
+    command_list: OwnedVirtAddr,
     command_depth: u16,
     device: u8,
 }
@@ -304,38 +304,44 @@ impl VirtualPort {
         const FIS_SWITCHING: bool = false;
 
         let cmd_list_base = if is_64_bit {
-            physical_allocator::allocate_frame()
+            physical_allocator::allocate()
         } else {
             panic!("i do not support 32 bit");
         };
 
         let fis_base = if !FIS_SWITCHING {
-            cmd_list_base + PhysAddr(0x400)
-        } else if is_64_bit {
-            physical_allocator::allocate_frame()
+            cmd_list_base.0 + PhysAddr(0x400)
         } else {
-            panic!("i do not support 32 bit");
+            todo!("support fis switching maybe");
         };
+        // } else if is_64_bit {
+        //     physical_allocator::allocate()
+        // } else {
+        //     panic!("i do not support 32 bit");
+        // };
 
         let lock = lock_w_info!(self.address_lock);
-        self.set_property(0, cmd_list_base.0 as u32);
-        self.set_property(4, (cmd_list_base.0 >> 32) as u32);
+        self.set_property(0, cmd_list_base.0.0 as u32);
+        self.set_property(4, (cmd_list_base.0.0 >> 32) as u32);
         self.set_property(8, fis_base.0 as u32);
         self.set_property(12, (fis_base.0 >> 32) as u32);
         drop(lock);
 
-        let clb_virt = memory::kernel_map(Some(cmd_list_base));
+        let mut clb_virt = memory::kernel_map(cmd_list_base);
 
-        unsafe { memset_at_addr(clb_virt, 0, 0x1000) };
+        unsafe { memset_at_addr(clb_virt.0, 0, 0x1000) };
         let fis_virt = if !FIS_SWITCHING {
-            clb_virt + 0x400_u64
+            clb_virt.0 + 0x400_u64
         } else {
-            let tmp_virt = memory::kernel_map(Some(fis_base));
-            unsafe { memset_at_addr(tmp_virt, 0, 0x1000) };
-            tmp_virt
+            todo!("support fis switching maybe");
+            // let tmp_virt = memory::kernel_map(fis_base);
+            // unsafe { memset_at_addr(tmp_virt, 0, 0x1000) };
+            // tmp_virt
         };
 
-        self.command_list = clb_virt;
+        core::mem::swap(&mut self.command_list, &mut clb_virt);
+        core::mem::forget(clb_virt); //now uninitialized data
+
         self.fis = fis_virt;
     }
 
@@ -433,9 +439,10 @@ impl VirtualPort {
             ..Default::default()
         };
 
-        let fis_recv_area = physical_allocator::allocate_frame();
+        let fis_recv_area = physical_allocator::allocate();
+        let fis_recv_borrowed = fis_recv_area.0;
         let prdt = PrdtDescriptor {
-            base: fis_recv_area,
+            base: fis_recv_area.0,
             count: 512,
         };
 
@@ -461,13 +468,14 @@ impl VirtualPort {
         self.release_command_index(identify_cmd_index);
 
         unsafe {
-            let data = &raw const *get_at_addr::<IdentifyStructure, _>(fis_recv_area);
+            let data = &raw const *get_at_addr::<IdentifyStructure, _>(fis_recv_borrowed);
             let data = data.read_volatile();
 
             self.sectors = data.total_usr_sectors();
             self.command_depth = data.queue_depth;
             assert!(data.sector_bytes == 512);
         }
+        drop(fis_recv_area); //explicit late drop
 
         Ok(())
     }
@@ -476,8 +484,8 @@ impl VirtualPort {
     fn build_command(&self, write: bool, cfis: &[u8], prdt: &[PrdtDescriptor], index: u8) {
         assert!(prdt.len() <= 248); //i don't want to deal with contiguous allocation
 
-        let cmd_table_page = if self.is_64_bit {
-            physical_allocator::allocate_frame()
+        let cmd_table_frame = if self.is_64_bit {
+            physical_allocator::allocate()
         } else {
             panic!("i do not support 32 bit");
         };
@@ -487,14 +495,15 @@ impl VirtualPort {
         cmd_header.SetCFL(cfis.len() as u128 / 4);
         cmd_header.SetClearBusy(true);
         cmd_header.SetPRDTL(prdt.len() as u128);
-        debug_assert!(cmd_table_page.0 & 0b1111111 == 0); //128 byte alignment
-        cmd_header.SetCTBA(cmd_table_page.0 as u128);
+        debug_assert!(cmd_table_frame.0.0 & 0b1111111 == 0); //128 byte alignment
+        cmd_header.SetCTBA(cmd_table_frame.0.0 as u128);
 
         unsafe {
-            let cmd_header_ptr = (self.command_list.0 as *mut CmdHeader).add(index as usize * 4);
+            let cmd_header_ptr = (self.command_list.0.0 as *mut CmdHeader).add(index as usize * 4);
             cmd_header_ptr.write_volatile(cmd_header);
 
-            let cmd_table_virt = memory::kernel_map(Some(cmd_table_page));
+            let cmd_table_virt = VirtAddr::from(cmd_table_frame.0);
+            core::mem::forget(cmd_table_frame); //don't free this memory, it's used by the controller
             let cmd_table_raw = cmd_table_virt.0 as *mut u8;
             for (i, byte) in cfis.iter().enumerate() {
                 cmd_table_raw.add(i).write_volatile(*byte);
@@ -519,11 +528,11 @@ impl VirtualPort {
     ///frees command header memory. Does not free regions pointed to by PRDT
     fn clean_command(&self, index: u8) {
         unsafe {
-            let cmd_header = (self.command_list.0 as *mut u32).add(index as usize * 4);
+            let cmd_header = (self.command_list.0.0 as *mut u32).add(index as usize * 4);
             let table_lower = cmd_header.add(2).read_volatile();
             let table_upper = cmd_header.add(3).read_volatile();
             let table = (table_upper as u64) << 32 | table_lower as u64;
-            physical_allocator::deallocate_frame(PhysAddr(table));
+            physical_allocator::deallocate(OwnedPhysAddr(PhysAddr(table)));
         }
         //potentially anything else
     }

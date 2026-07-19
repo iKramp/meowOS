@@ -24,14 +24,14 @@ use crate::acpi::{LAPIC_REGISTERS, platform_info::PlatformInfo};
 pub fn wake_cpus(platform_info: &PlatformInfo) {
     copy_trampoline();
 
-    let start_page = unsafe { crate::memory::TRAMPOLINE_RESERVED.0 } >> 12;
+    let start_frame = unsafe { crate::memory::TRAMPOLINE_RESERVED.0.0 } >> 12;
     unsafe {
         //change bsp's gdt, the static one will be used by each AP before switching to their own
         //GDTs
         //i could probably reuse current stack, as kernel doesn't preserve stack across task
         //switches
 
-        let destination = crate::memory::TRAMPOLINE_RESERVED.0 as *mut u8;
+        let destination = VirtAddr::from(crate::memory::TRAMPOLINE_RESERVED.0).0 as *mut u8;
         let comm_lock = destination.add(56);
         for cpu in platform_info.application_processors.iter().enumerate() {
             let ap_stack_top = prepare_kernel_stack(KERNEL_STACK_SIZE_PAGES);
@@ -47,10 +47,10 @@ pub fn wake_cpus(platform_info: &PlatformInfo) {
             lapic_registers.send_init_ipi(cpu.1.apic_id);
             std::thread::sleep(std::time::Duration::from_millis(10));
 
-            lapic_registers.send_startup_ipi(cpu.1.apic_id, start_page as u8);
+            lapic_registers.send_startup_ipi(cpu.1.apic_id, start_frame as u8);
             std::thread::sleep(std::time::Duration::from_millis(100));
 
-            lapic_registers.send_startup_ipi(cpu.1.apic_id, start_page as u8);
+            lapic_registers.send_startup_ipi(cpu.1.apic_id, start_frame as u8);
 
             send_mtrrs(comm_lock);
             send_cr_registers(comm_lock);
@@ -71,18 +71,19 @@ pub fn wake_cpus(platform_info: &PlatformInfo) {
 }
 
 fn copy_trampoline() {
-    let destination = unsafe { crate::memory::TRAMPOLINE_RESERVED };
-    println!("copying trampoline to {:x?}", destination);
+    let destination_phys = unsafe { crate::memory::TRAMPOLINE_RESERVED.0 };
+    println!("copying trampoline to {:x?}", destination_phys);
 
     assert!(
-        destination.0 <= 0xFFFFF,
+        destination_phys.0 <= 0xFFFFF,
         "memory addresss should be less than 1MB to initialize APs"
     );
+
     let source = super::ap_startup::ap_startup as *const () as *const u8;
-    let destination = destination.0 as *mut u8;
+    let destination_virt = VirtAddr::from(destination_phys).0 as *mut u8;
     for i in 0..0x1000 {
         unsafe {
-            destination.add(i).write_volatile(source.add(i).read_volatile());
+            destination_virt.add(i).write_volatile(source.add(i).read_volatile());
         }
     }
 
@@ -103,12 +104,13 @@ fn copy_trampoline() {
         };
         let wait_loop_ptr = super::ap_startup::ap_started_wait_loop as *const () as u64;
 
-        (destination.add(4) as *mut u32).write_volatile(destination as u32);
+        //copy physical start into mov instruction
+        (destination_virt.add(4) as *mut u32).write_volatile(destination_phys.0 as u32);
 
-        (destination.add(14) as *mut TablePointer).write_volatile(gdt_ptr);
-        (destination.add(24) as *mut u64).write_volatile(cr3);
-        (destination.add(40) as *mut u64).write_volatile(wait_loop_ptr);
-        (destination.add(48) as *mut u64).write_volatile(get_mtrr_def_type());
+        (destination_virt.add(14) as *mut TablePointer).write_volatile(gdt_ptr);
+        (destination_virt.add(24) as *mut u64).write_volatile(cr3);
+        (destination_virt.add(40) as *mut u64).write_volatile(wait_loop_ptr);
+        (destination_virt.add(48) as *mut u64).write_volatile(get_mtrr_def_type());
     }
 }
 

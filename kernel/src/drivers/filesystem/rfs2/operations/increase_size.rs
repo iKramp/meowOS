@@ -49,7 +49,7 @@ impl Rfs2 {
             .read(
                 file_root as usize * BLOCK_SIZE_SECTORS + 1,
                 BLOCK_SIZE_SECTORS - 1,
-                &[working_block.phys],
+                &[working_block.phys.0],
             )
             .await;
         let pointers = working_block.get_as_mut::<[BlockPtr; PTRS_PER_BLOCK]>();
@@ -74,7 +74,7 @@ impl Rfs2 {
             .write(
                 file_root as usize * BLOCK_SIZE_SECTORS + 1,
                 BLOCK_SIZE_SECTORS - 1,
-                &[working_block.phys],
+                &[working_block.phys.0],
             )
             .await;
 
@@ -95,12 +95,15 @@ impl Rfs2 {
             if !new_block {
                 return 0;
             }
-            let frame = physical_allocator::allocate_frame();
-            unsafe { memset_at_addr(frame, 0, 4096) };
+            let frame = physical_allocator::allocate();
+            unsafe { memset_at_addr(&frame, 0, 4096) };
             self.partition
-                .write(working_block_ptr as usize * BLOCK_SIZE_SECTORS, BLOCK_SIZE_SECTORS, &[frame])
+                .write(
+                    working_block_ptr as usize * BLOCK_SIZE_SECTORS,
+                    BLOCK_SIZE_SECTORS,
+                    &[frame.0],
+                )
                 .await;
-            unsafe { physical_allocator::deallocate_frame(frame) };
 
             return 1; //final block, does not contain pointers
         }
@@ -112,11 +115,11 @@ impl Rfs2 {
                 .read(
                     working_block_ptr as usize * BLOCK_SIZE_SECTORS,
                     BLOCK_SIZE_SECTORS,
-                    &[working_block.phys],
+                    &[working_block.phys.0],
                 )
                 .await;
         } else {
-            unsafe { memset_at_addr(working_block.phys, 0, 4096) };
+            unsafe { memset_at_addr(&working_block.phys, 0, 4096) };
         }
 
         let pointers = working_block.get_as_mut::<[BlockPtr; PTRS_PER_BLOCK]>();
@@ -156,7 +159,7 @@ impl Rfs2 {
             .read(
                 file_root as usize * BLOCK_SIZE_SECTORS + 1,
                 BLOCK_SIZE_SECTORS - 1,
-                &[working_block.phys],
+                &[working_block.phys.0],
             )
             .await;
 
@@ -166,7 +169,7 @@ impl Rfs2 {
                 .write(
                     new_block as usize * BLOCK_SIZE_SECTORS,
                     BLOCK_SIZE_SECTORS,
-                    &[working_block.phys],
+                    &[working_block.phys.0],
                 )
                 .await;
 
@@ -178,7 +181,7 @@ impl Rfs2 {
             .write(
                 file_root as usize * BLOCK_SIZE_SECTORS,
                 BLOCK_SIZE_SECTORS,
-                &[working_block.phys],
+                &[working_block.phys.0],
             )
             .await;
 
