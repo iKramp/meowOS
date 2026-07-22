@@ -1,4 +1,4 @@
-use crate::memory::addresses::get_at_addr;
+use crate::memory::{addresses::get_at_addr, current_root};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct VirtAddr(pub u64);
@@ -24,6 +24,15 @@ pub fn is_in_hhdm(addr: VirtAddr) -> bool {
     }
 }
 
+#[inline]
+pub fn is_phys_in_hhdm(addr: PhysAddr) -> bool {
+    let virt = addr + unsafe { HHDM_ADDR };
+    unsafe {
+        let end = HHDM_ADDR.0 + HHDM_LEN;
+        virt.0 >= HHDM_ADDR.0 && virt.0 < end
+    }
+}
+
 impl core::ops::Add<PhysOffset> for PhysAddr {
     type Output = VirtAddr;
     #[inline]
@@ -41,7 +50,7 @@ impl core::ops::Sub<PhysOffset> for VirtAddr {
 impl core::convert::From<PhysAddr> for VirtAddr {
     #[inline]
     fn from(value: PhysAddr) -> Self {
-        assert!(value.0 < unsafe { HHDM_LEN });
+        assert!(is_phys_in_hhdm(value), "phys addr {:#x} is not in HHDM", value.0);
         value + unsafe { HHDM_ADDR }
     }
 }
@@ -51,7 +60,7 @@ pub fn translate_virt_phys_addr(addr: VirtAddr, root_page_addr: Option<PhysAddr>
         return Some(addr - unsafe { HHDM_ADDR });
     }
 
-    let mut page_addr = root_page_addr?;
+    let mut page_addr = root_page_addr.unwrap_or_else(current_root);
     #[allow(clippy::unusual_byte_groupings)] //they are grouped by section masks
     let mut final_mask: u64 = 0b111111111_111111111_111111111_111111111_111111111111;
     let mask = 0b111_111_111_000;

@@ -119,14 +119,7 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
         let mut default_desc = UnsafeCell::new(ReceiveDescriptor::default());
         core::mem::swap(&mut default_desc, descriptor);
         core::mem::forget(default_desc); //uninitialized data from the queue
-
-        let phys_addr = physical_allocator::allocate();
-        descriptor.get_mut().buffer = phys_addr.into();
     }
-    let last_descriptor = rx_queue.last_mut().expect("?");
-    let mut default_desc = UnsafeCell::new(ReceiveDescriptor::default());
-    core::mem::swap(&mut default_desc, last_descriptor);
-    core::mem::forget(default_desc);
 
     core::sync::atomic::fence(Ordering::SeqCst);
 
@@ -246,7 +239,7 @@ pub fn generate_random_mac() -> [u8; 6] {
 impl Default for ReceiveDescriptor {
     fn default() -> Self {
         Self {
-            buffer: OwnedPhysRange::empty(),
+            buffer: physical_allocator::allocate().into(),
             length: 0,
             checksum: 0,
             status: RxDescStatus(0),

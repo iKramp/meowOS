@@ -32,10 +32,12 @@ impl Drop for OwnedPhysRange {
 
 impl core::convert::From<OwnedPhysAddr> for OwnedPhysRange {
     fn from(addr: OwnedPhysAddr) -> Self {
-        Self(PhysRange {
+        let range = Self(PhysRange {
             start: addr.0,
             n_pages: 1,
-        })
+        });
+        core::mem::forget(addr); //don't deallocate
+        range
     }
 }
 
@@ -67,7 +69,7 @@ impl OwnedPhysRange {
         drop(range_after);
     }
     pub fn break_into_individual(self) -> Vec<OwnedPhysAddr> {
-        let new_vec = self.0.get_addresses().map(|e| OwnedPhysAddr(e)).collect::<Vec<_>>();
+        let new_vec = self.0.get_addresses().map(OwnedPhysAddr).collect::<Vec<_>>();
         core::mem::forget(self); //don't deallocate
         new_vec
     }
@@ -77,6 +79,6 @@ impl PhysRange {
     pub fn get_addresses(&self) -> impl Iterator<Item = PhysAddr> {
         let start = self.start;
         let end = self.start + self.n_pages * 4096;
-        return (start.0..end.0).step_by(4096).map(|addr| PhysAddr(addr));
+        (start.0..end.0).step_by(4096).map(PhysAddr)
     }
 }

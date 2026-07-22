@@ -15,6 +15,8 @@ pub fn prepare_kernel_stack(stack_size_pages: u8) -> VirtAddr {
             byte_ptr.write(0);
         }
 
+        core::mem::forget(range); //don't dealloc
+
         highest_addr - 16_u64
     }
 }

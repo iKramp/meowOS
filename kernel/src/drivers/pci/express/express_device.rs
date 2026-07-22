@@ -1,4 +1,4 @@
-use crate::memory::addresses::*;
+use crate::{drivers::pci::express::unmap_config_space, memory::addresses::*};
 use core::fmt::Debug;
 use std::{println, vec::Vec};
 
@@ -86,5 +86,13 @@ impl Debug for PcieDevice {
             .field("capabilities", &self.common.capabilities)
             .field("extended_capabilities", &self.extended_capabilities)
             .finish()
+    }
+}
+
+impl Drop for PcieDevice {
+    fn drop(&mut self) {
+        if self.config_space_addr.as_ptr() as u64 != 0 {
+            unmap_config_space(OwnedVirtAddr(VirtAddr(self.config_space_addr.as_ptr() as u64)));
+        }
     }
 }

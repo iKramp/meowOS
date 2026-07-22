@@ -13,27 +13,17 @@ static BUDDY_ALLOCATOR: NoIntSpinlock<BuddyAllocator> = NoIntSpinlock::new(Buddy
     tree_allocator: VirtAddr(0),
 });
 
-pub static mut MAX_RAM_ADDR: PhysAddr = PhysAddr(0);
-
-pub fn is_on_ram(addr: PhysAddr) -> bool {
-    addr.0 <= unsafe { MAX_RAM_ADDR.0 }
-}
-
-pub struct BuddyAllocator {
+struct BuddyAllocator {
     ///number of pages that can be allocated in physical address space. Is not a power of 2
-    pub n_pages: u64,
+    n_pages: u64,
     ///number of nodes this binary tree has, plus the zero-th node (unused). IS always a power of 2
     binary_tree_size: u64,
     allocated_pages: u64,
     tree_allocator: VirtAddr,
 }
 
-pub fn init(memory_regions: &mut [&mut limine::MemoryMapEntry]) {
-    let n_pages = find_max_ram_address(memory_regions).0 >> 12;
-    unsafe { MAX_RAM_ADDR = PhysAddr(n_pages << 12) };
-    println!(level:info, "n_pages: {}", n_pages);
-    println!(level:info, "max memory address: {:#X}", n_pages * 4096);
-
+pub(super) fn init(memory_regions: &mut [&mut limine::MemoryMapEntry]) {
+    let n_pages = unsafe { super::MAX_RAM_ADDR.0 / 0x1000 };
     //is a power of 2
     let binary_tree_size_elements = get_binary_tree_element_cnt(n_pages);
     // div by 8 for 8 bits in a byte  (also rounded up), times 2 for binary tree
@@ -74,7 +64,7 @@ pub fn init(memory_regions: &mut [&mut limine::MemoryMapEntry]) {
     *lock_w_info!(BUDDY_ALLOCATOR) = allocator;
 }
 
-pub fn is_frame_allocated(addr: PhysAddr) -> bool {
+pub(super) fn is_frame_allocated(addr: PhysAddr) -> bool {
     lock_w_info!(BUDDY_ALLOCATOR).is_frame_allocated(addr)
 }
 
@@ -87,19 +77,19 @@ pub fn print_state() {
 
 ///# Safety
 ///addr must be a page aligned, currently allocated physical frame address
-pub unsafe fn deallocate_frame(addr: PhysAddr) {
+pub(super) unsafe fn deallocate_frame(addr: PhysAddr) {
     lock_w_info!(BUDDY_ALLOCATOR).deallocate_frame(addr)
 }
 
-pub fn allocate_frame() -> PhysAddr {
+pub(super) fn allocate_frame() -> PhysAddr {
     lock_w_info!(BUDDY_ALLOCATOR).allocate_frame()
 }
 
-pub fn allocate_contiguous(n_pages: u64) -> PhysAddr {
+pub(super) fn allocate_contiguous(n_pages: u64) -> PhysAddr {
     lock_w_info!(BUDDY_ALLOCATOR).allocate_contiguius_high(n_pages)
 }
 
-pub fn reserve_low() -> PhysAddr {
+pub(super) fn reserve_low() -> PhysAddr {
     lock_w_info!(BUDDY_ALLOCATOR).allocate_frame_low()
 }
 
@@ -356,16 +346,6 @@ fn find_mem_region_to_shrink(memory_regions: &[&mut limine::MemoryMapEntry], spa
     }
 
     panic!("Not enough ram for physical allocator")
-}
-
-fn find_max_ram_address(memory_regions: &[&mut limine::MemoryMapEntry]) -> PhysAddr {
-    let mut highest = 0;
-    for region in memory_regions {
-        if region.can_be_usable() {
-            highest = region.base + region.length;
-        }
-    }
-    PhysAddr(highest)
 }
 
 ///rounded up to power of 2

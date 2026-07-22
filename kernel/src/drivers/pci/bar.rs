@@ -148,15 +148,15 @@ impl MemoryBar {
             n_pages: pages,
         });
 
-        let (virt_addr, _entry) = unsafe { memory::kernel_manual_map(phys_range, None) };
+        let (virt_range, _entry) = unsafe { memory::kernel_manual_map(phys_range, None) };
         for i in 0..pages {
-            let page_entry = memory::get_page_table_entry(virt_addr.0.start + i * 0x1000, None).expect("just allocated");
+            let page_entry = memory::get_page_table_entry(virt_range.0.start + i * 0x1000, None).expect("just allocated");
             if prefetchable {
-                page_entry.set_pat(memory::LiminePat::WT, virt_addr.0.start + i * 0x1000);
+                page_entry.set_pat(memory::LiminePat::WT, virt_range.0.start + i * 0x1000);
             } else {
-                page_entry.set_pat(memory::LiminePat::UC, virt_addr.0.start + i * 0x1000);
+                page_entry.set_pat(memory::LiminePat::UC, virt_range.0.start + i * 0x1000);
             }
         }
-        virt_addr
+        virt_range
     }
 }

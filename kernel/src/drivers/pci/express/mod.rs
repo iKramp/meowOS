@@ -89,6 +89,7 @@ fn check_pcie_device(allocation: &BaseAddressAllocation, bus: u8, device: u8, fu
     let config_space_address = map_config_space(phys_addr);
     pcie_device.config_space_addr =
         unsafe { LegacyConfigSpaceT0Ptr::from_ptr(config_space_address.0.0 as *mut LegacyConfigSpaceT0) };
+    core::mem::forget(config_space_address); //don't deallocate
 
     //get device type
     let class = config_space_ptr.class_code().read();
@@ -123,4 +124,12 @@ fn map_config_space(phys_addr: PhysAddr) -> OwnedVirtAddr {
     let addr = pci_dev_virt.0.start;
     core::mem::forget(pci_dev_virt);
     OwnedVirtAddr(addr)
+}
+
+fn unmap_config_space(virt_addr: OwnedVirtAddr) {
+    let range = VirtRange {
+        start: virt_addr.0,
+        n_pages: 1,
+    };
+    drop(OwnedVirtRange(range));
 }

@@ -141,7 +141,7 @@ impl PhysicalAllocator for SimplePhysicalAllocator {
         }
         let range = addr.get_range();
         let start_page = range.start.0 / 4096;
-        for page in start_page..(start_page + range.n_pages as u64) {
+        for page in start_page..(start_page + range.n_pages) {
             self.deallocate_single(PhysAddr(page * 4096));
         }
     }

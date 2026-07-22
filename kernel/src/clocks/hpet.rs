@@ -1,4 +1,4 @@
-use crate::memory::addresses::*;
+use crate::memory::{addresses::*, kernel_map, physical_allocator};
 use core::{mem::MaybeUninit, sync::atomic::AtomicU64};
 use std::printlnc;
 
@@ -97,6 +97,14 @@ impl HpetWrapper {
 
 impl Drop for HpetWrapper {
     fn drop(&mut self) {
+        if self.allocated_page.0 == VirtAddr(0) {
+            //make self.allocated_page be a legit droppable page
+            let mut tmp = kernel_map(physical_allocator::allocate());
+            core::mem::swap(&mut tmp, &mut self.allocated_page);
+            core::mem::forget(tmp); //not efficient but won't be called much
+            return;
+        }
+
         let self_regs = unsafe { self.registers.assume_init_ref() };
 
         //disable timer

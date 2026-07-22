@@ -6,6 +6,8 @@ mod simple_address;
 pub use phys_range::{OwnedPhysRange, OwnedPhysicalRangeData, PhysRange};
 pub use simple_address::*;
 
+use crate::memory::kernel_manual_unmap;
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct OwnedVirtRange(pub VirtRange);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
@@ -15,6 +17,12 @@ pub struct VirtRange {
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
+///This type holds as much ownership as possible:
+///When in HHDM, it owns the physical address, but not translation (HHDM is always mapped)
+///When in MMIO, it owns the translation, but not the physical address (MMIO cannot be allocated/freed)
+///Else, it owns both the physical address and translation (normal memory)
+///
+///It will always try to free physical memory, but that will be a noop for memory not on ram
 pub struct OwnedVirtAddr(pub VirtAddr);
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct OwnedPhysAddr(pub PhysAddr);
@@ -183,11 +191,13 @@ pub unsafe fn align<T>(addr: VirtAddr) -> VirtAddr {
 }
 ///# Safety
 ///Can only be called on in-memory read only STATIC data structures
+///Arguments must follow args in `std::alloc::Layout::from_size_align(size, align)`
 pub unsafe fn align_manual(addr: VirtAddr, size: u64, align: u64) -> VirtAddr {
     if addr.0.is_multiple_of(align) {
         addr
     } else {
-        let heap_data = unsafe { std::alloc::alloc::alloc(Layout::from_size_align(size as usize, align as usize).unwrap()) };
+        let heap_data =
+            unsafe { std::alloc::alloc::alloc(Layout::from_size_align(size as usize, align as usize).expect("Invalid args")) };
         unsafe {
             core::ptr::copy_nonoverlapping(addr.0 as *const u8, heap_data, size as usize);
         }
@@ -236,13 +246,25 @@ pub unsafe fn set_static_lifetime_mut<T>(data: &mut T) -> &'static mut T {
 
 impl Drop for OwnedVirtAddr {
     fn drop(&mut self) {
-        todo!("Implement drop and don't drop MMIO phys range")
+        let range = VirtRange {
+            start: self.0,
+            n_pages: 1,
+        };
+        drop(OwnedVirtRange(range));
     }
 }
 
 impl Drop for OwnedVirtRange {
     fn drop(&mut self) {
-        todo!("Implement drop and don't drop MMIO phys range")
+        let phys_addr =
+            translate_virt_phys_addr(self.0.start, None).expect("Failed to translate virtual address to physical address");
+        if !is_in_hhdm(self.0.start) {
+            unsafe { kernel_manual_unmap(self.0.start, self.0.n_pages, None) };
+        }
+        drop(OwnedPhysRange(PhysRange {
+            start: phys_addr,
+            n_pages: self.0.n_pages,
+        }));
     }
 }
 
