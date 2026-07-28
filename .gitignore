@@ -32,3 +32,7 @@ result
 ahci_disk.img.bak
 
 fat_disk.img
+
+# record/replay files
+*.qcow2
+*.rr

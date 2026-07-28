@@ -4,9 +4,6 @@ layout src
 set directories std/src/:kernel/src/
 symbol-file kernel_build_files/kernel.elf
 set substitute-path /rustc/ $env{RUST_STORE_PATH}/lib/rustlib/src/rust/
-define b
-hbreak $arg0
-end
 
 python
 import subprocess
@@ -31,6 +28,6 @@ end
 
 source ./scripts/interrupt_macro_unwinder.py
 
-b kernel::_start
+hbreak kernel::_start
 
 c

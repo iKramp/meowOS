@@ -36,6 +36,7 @@ pub fn init() {
             unsafe {
                 std::time::GET_TIME = || SELECTED_TIMER.assume_init_ref().get_time();
             }
+
             return;
         }
     }

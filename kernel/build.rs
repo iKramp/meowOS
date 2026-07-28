@@ -2,6 +2,10 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    println!("cargo:rerun-if-changed=linker_script.ld");
+    println!("cargo:rerun-if-changed=src/acpi/smp/trampoline.asm");
+    println!("cargo:rerun-if-changed=src/memory/probe.asm");
+
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR variable not set");
     let link_script_file =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR variable not set")).join("linker_script.ld");
@@ -49,8 +53,6 @@ fn main() {
     //println!("cargo:rustc-link-arg=Map=/home/nejc/dev/meowOS/kernel.map");
 
     // Re-run the build script if the build configuration changes
-    println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=kernel/linker_script.ld");
     println!("cargo:rustc-link-search={}", out_dir);
     println!("cargo:rustc-link-lib=static=trampoline");
     println!("cargo:rustc-link-lib=static=probe");

@@ -1,6 +1,9 @@
 use std::{path::PathBuf, process::Command};
 
 fn main() {
+    println!("cargo:rerun-if-changed=scripts/make_disk.sh");
+    println!("cargo:rerun-if-changed=kernel/src");
+
     // set by cargo, build scripts should use this directory for output files
     let _out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR variable not set"));
     let kernel =
@@ -12,6 +15,7 @@ fn main() {
     }
     std::fs::copy(kernel, kernel_build_files_dir.join("kernel.elf"))
         .expect("Failed to copy kernel binary to kernel_build_files directory");
+
     let status = Command::new("objcopy")
         .arg("kernel_build_files/kernel.elf")
         .arg("kernel_build_files/kernel.bin")
@@ -24,6 +28,4 @@ fn main() {
         .status()
         .expect("Failed to run make_disk.sh");
     assert!(status.success());
-
-    println!("cargo:rerun-if-canged=build.rs");
 }

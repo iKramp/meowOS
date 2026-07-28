@@ -88,6 +88,8 @@ impl Timer for TscWrapper {
     }
 
     fn calibrate(&mut self, now: std::time::Instant) {
+        let ticks_now = TscWrapper::get_ticks();
+        self.ticks_on_start = ticks_now;
         self.start = now;
     }
 }
