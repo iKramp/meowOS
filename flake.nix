@@ -4,43 +4,54 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     rust-overlay.url = "github:oxalica/rust-overlay";
-    flake-utils.url  = "github:numtide/flake-utils";
+    flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, rust-overlay, flake-utils, ... }: 
-  let
-    system = "x86_64-linux";
-    overlays = [ (import rust-overlay) ];
-    pkgs = import nixpkgs { inherit system overlays; };
+  outputs =
+    {
+      self,
+      nixpkgs,
+      rust-overlay,
+      flake-utils,
+      ...
+    }:
+    let
+      system = "x86_64-linux";
+      overlays = [ (import rust-overlay) ];
+      pkgs = import nixpkgs { inherit system overlays; };
 
-    rust = pkgs.rust-bin.nightly."2026-05-01".default.override {
-      targets = [ "x86_64-unknown-none" ];
-      extensions = [ "rust-src" ];
+      rust = pkgs.rust-bin.nightly."2026-05-01".default.override {
+        targets = [ "x86_64-unknown-none" ];
+        extensions = [ "rust-src" ];
+      };
+
+    in
+    {
+      devShells.${system}.default = pkgs.mkShell {
+
+        buildInputs = [
+          (pkgs.limine.override {
+            enableAll = true;
+          })
+          rust
+          (pkgs.qemu.overrideAttrs (oldAttrs: {
+            separateDebugInfo = false;
+            dontStrip = true;
+          }))
+          pkgs.gdb
+          pkgs.gf
+          pkgs.nasm
+          pkgs.rust-analyzer
+          pkgs.clippy
+          pkgs.xorriso
+          pkgs.cargo-expand
+          pkgs.gptfdisk
+        ];
+
+        shellHook = ''
+          export RUST_STORE_PATH=${rust}
+          exec zsh
+        '';
+      };
     };
-
-  in {
-    devShells.${system}.default = pkgs.mkShell {
-
-      buildInputs = [
-        (pkgs.limine.override {
-          enableAll = true;
-        })
-        rust
-        pkgs.qemu
-        pkgs.gdb
-        pkgs.nasm
-        pkgs.rust-analyzer
-        pkgs.clippy
-        pkgs.xorriso
-        pkgs.cargo-expand
-        pkgs.gptfdisk
-      ];
-
-      shellHook = ''
-        export RUST_STORE_PATH=${rust}
-        exec zsh
-      '';
-    };
-  };
 }
-

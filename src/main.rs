@@ -20,10 +20,10 @@ fn main() {
     //chose whether to debug with GDB
     let debug = true;
     let uefi = false;
-    let snapshot = false;
+    let snapshot = true;
     let cores = 1;
     let net = false;
-    let run_mode = RunMode::Replay;
+    let run_mode = RunMode::Record;
 
     let mut cmd = std::process::Command::new("qemu-system-x86_64");
     //general config
@@ -178,7 +178,11 @@ fn main() {
         cmd.arg("-S");
     }
 
-    println!("Running QEMU with command: {:?}", cmd);
+    println!(
+        "Running QEMU with command: {} {}",
+        cmd.get_program().to_str().unwrap(),
+        cmd.get_args().map(|a| a.to_str().unwrap()).collect::<Vec<_>>().join(" ")
+    );
 
     let mut child = cmd.spawn().expect("Failed to start QEMU");
 
