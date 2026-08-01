@@ -7,6 +7,7 @@ use crate::{
     vfs::{self, ResolvedPath, ResolvedPathBorrowed},
 };
 use std::{
+    boxed::Box,
     format, lock_w_info, println,
     string::{String, ToString},
     sync::no_int_spinlock::NoIntSpinlock,
@@ -56,7 +57,7 @@ impl ShellState {
                 println!("ls command executed");
                 let path = chunks.next().unwrap_or_else(|| ".".to_string());
                 self.started_proc = true;
-                let task = async move {
+                let task = Box::pin(async move {
                     let res = cmd_ls(&path).await;
                     match res {
                         Ok(()) => lock_w_info!(SHELL_STATE).command_finished(),
@@ -65,7 +66,7 @@ impl ShellState {
                             lock_w_info!(SHELL_STATE).command_finished();
                         }
                     }
-                };
+                });
                 let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
                 crate::task_runner::add_task(ffi_safe_task, PidOption::None);
             }
@@ -73,7 +74,7 @@ impl ShellState {
                 println!("cat command executed");
                 let path = chunks.next().unwrap_or_else(|| ".".to_string());
                 self.started_proc = true;
-                let task = async move {
+                let task = Box::pin(async move {
                     let res = cmd_cat(&path).await;
                     match res {
                         Ok(()) => lock_w_info!(SHELL_STATE).command_finished(),
@@ -82,7 +83,7 @@ impl ShellState {
                             lock_w_info!(SHELL_STATE).command_finished();
                         }
                     }
-                };
+                });
                 let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
                 crate::task_runner::add_task(ffi_safe_task, PidOption::None);
             }
@@ -91,7 +92,7 @@ impl ShellState {
                 let path = chunks.next().unwrap_or_else(|| ".".to_string());
                 let part_id = chunks.next().unwrap_or_else(|| "no_uuid_provided".to_string());
                 self.started_proc = true;
-                let task = async move {
+                let task = Box::pin(async move {
                     let res = cmd_mount(&path, &part_id).await;
                     match res {
                         Ok(()) => lock_w_info!(SHELL_STATE).command_finished(),
@@ -103,7 +104,7 @@ impl ShellState {
                             lock_w_info!(SHELL_STATE).command_finished();
                         }
                     }
-                };
+                });
                 let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
                 crate::task_runner::add_task(ffi_safe_task, PidOption::None);
             }
@@ -111,7 +112,7 @@ impl ShellState {
                 println!("mkdir command executed");
                 let path = chunks.next().unwrap_or_else(|| ".".to_string());
                 self.started_proc = true;
-                let task = async move {
+                let task = Box::pin(async move {
                     let res = cmd_mkdir(&path).await;
                     match res {
                         Ok(()) => lock_w_info!(SHELL_STATE).command_finished(),
@@ -120,7 +121,7 @@ impl ShellState {
                             lock_w_info!(SHELL_STATE).command_finished();
                         }
                     }
-                };
+                });
                 let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
                 crate::task_runner::add_task(ffi_safe_task, PidOption::None);
             }
@@ -138,7 +139,7 @@ impl ShellState {
 
                 self.started_proc = true;
 
-                let task = async move {
+                let task = Box::pin(async move {
                     let run_proc_future = proc::run_process_default_env((&resolved_path).into(), &cmd_cloned, "/").await;
                     match run_proc_future {
                         Ok(pid) => {
@@ -151,7 +152,7 @@ impl ShellState {
                             lock_w_info!(SHELL_STATE).command_finished();
                         }
                     }
-                };
+                });
                 let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
                 crate::task_runner::add_task(ffi_safe_task, PidOption::None);
             }

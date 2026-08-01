@@ -267,6 +267,7 @@ impl Rfs2 {
         block.write_and_dealloc(self).await;
     }
 
+    #[heap_future::heap_future]
     pub async fn allocate_inode(&self) -> InodeIndex {
         let mut block = WorkingBlock::new();
         let mut iteration_index = 0;

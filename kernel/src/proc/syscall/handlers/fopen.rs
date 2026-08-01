@@ -1,4 +1,4 @@
-use std::{println, sync::arc::Arc};
+use std::{boxed::Box, println, sync::arc::Arc};
 
 use crate::{
     proc::{
@@ -44,7 +44,7 @@ pub fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     };
 
     let proc_clone = proc.downgrade();
-    let task = async move {
+    let task = Box::pin(async move {
         let proc = proc_clone;
         let resolved_path = vfs::resolve_path(&path);
         let file_flags = FileFlags(flags as u8);
@@ -79,7 +79,7 @@ pub fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         }
         println!("fopen: finished processing fopen for pid {pid:?}");
         proc::wake_process(pid)
-    };
+    });
 
     let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
 

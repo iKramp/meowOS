@@ -271,19 +271,12 @@ impl FileSystem for Rfs2 {
         uid: u16,
         gid: u16,
     ) -> Result<(VfsInode, VfsInode), ErrorCode> {
-        crate::memory::print_mem_mapping();
-        println!("BBBBB");
         let new_block = self.allocate_block().await;
         let new_inode = self.allocate_inode().await;
-        crate::memory::print_mem_mapping();
-        println!("CCCCC");
 
         let inode_lock = self.inode_lock.lock().await;
         BTreeNode::insert_inode_root(new_inode, new_block, self).await;
         drop(inode_lock);
-
-        crate::memory::print_mem_mapping();
-        println!("DDDDD");
 
         let since_epoch = std::time::Instant::now().duration_since(std::time::UNIX_EPOCH).as_secs();
         let new_inode_info = InodeInfo {
@@ -298,11 +291,7 @@ impl FileSystem for Rfs2 {
             stat_change_seconds_since_epoch: since_epoch,
         };
 
-        crate::memory::print_mem_mapping();
-        println!("EEEEE");
         self.set_file_info(new_block, new_inode_info.clone()).await;
-        crate::memory::print_mem_mapping();
-        println!("FFFFF");
 
         println!("created new file, linking");
         let res = self.link(new_inode as VfsInodeIndex, parent_dir, name).await;

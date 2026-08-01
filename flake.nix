@@ -34,9 +34,11 @@
             enableAll = true;
           })
           rust
-          (pkgs.qemu.overrideAttrs (oldAttrs: {
-            separateDebugInfo = false;
-            dontStrip = true;
+          ((pkgs.qemu.override { #locally building, so only build what i really need
+            hostCpuTargets = [ "x86_64-softmmu" ];
+          }).overrideAttrs
+          (oldAttrs: {
+            patches = (oldAttrs.patches or [ ]) ++ [ ./assets/qemu_restore_deadlock.patch ];
           }))
           pkgs.gdb
           pkgs.gf

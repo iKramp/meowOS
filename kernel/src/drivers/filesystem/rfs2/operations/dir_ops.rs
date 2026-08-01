@@ -1,5 +1,5 @@
 use crate::memory::addresses::*;
-use std::vec::Vec;
+use std::{boxed::Box, vec::Vec};
 
 use crate::{
     drivers::filesystem::rfs2::{BlockPtr, InodeIndex, Rfs2, operations::DirEntry},
@@ -8,6 +8,7 @@ use crate::{
 
 impl Rfs2 {
     //contains an additional allocation for linking
+    #[heap_future::heap_future]
     pub(super) async fn read_direntries(&self, dir_root: BlockPtr) -> (OwnedPhysRange, &'static mut [DirEntry]) {
         let dir_info = self.get_file_info(dir_root).await;
         let size_pages = (dir_info.size + core::mem::size_of::<DirEntry>() as u64).div_ceil(4096);
@@ -25,6 +26,7 @@ impl Rfs2 {
         (buf, entry_slice)
     }
 
+    #[heap_future::heap_future]
     pub(super) async fn write_direntries(&self, dir_root: BlockPtr, buffer: PhysRange, num_entries: usize) {
         self.write_locked(
             dir_root,

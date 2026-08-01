@@ -111,6 +111,7 @@ fn remove_disk_slow(uuid: Uuid, mut vfs: NoIntSpinlockGuard<'_, Vfs>) {
     });
 }
 
+#[heap_future::heap_future]
 pub async fn mount_blkdev_partition(part_id: Uuid, mountpoint: ResolvedPath) -> Result<(), ErrorCode> {
     let mut vfs = lock_w_info!(VFS);
     let Some(partition) = vfs.available_partitions.get(&part_id) else {
@@ -148,6 +149,7 @@ pub async fn mount_blkdev_partition(part_id: Uuid, mountpoint: ResolvedPath) -> 
     }
 }
 
+#[heap_future::heap_future]
 async fn mount_filesystem(mountpoint: ResolvedPath, fs: Arc<dyn FileSystem + Send>, part_id: Uuid) -> Result<(), ErrorCode> {
     let root = mountpoint.inner().is_empty();
     if root {
@@ -228,6 +230,7 @@ pub async fn unmount(path: ResolvedPathBorrowed<'_>) -> Result<(), ErrorCode> {
     Ok(())
 }
 
+#[heap_future::heap_future]
 pub async fn open_file(
     path: ResolvedPathBorrowed<'_>,
     from: Option<InodeIdentifierChain>,

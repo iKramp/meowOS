@@ -10,6 +10,8 @@ use crate::interrupts::{disable_interrupts, enable_interrupts};
 use crate::{println, printlnc};
 use addresses::*;
 
+const LIMINE_STACK_SIZE_PAGES: usize = 16; //64kb stack
+
 pub static mut TRAMPOLINE_RESERVED: OwnedPhysAddr = OwnedPhysAddr(PhysAddr(0));
 
 #[repr(C)]
@@ -30,7 +32,8 @@ unsafe extern "C" {
     pub static probe_functions_end: u8;
 }
 
-pub fn init_memory() {
+pub fn init_memory(stack_start: VirtAddr) {
+    fill_stack_with_pattern(stack_start);
     println!(level:info, "initializing memory");
     print_limine_phys_map();
     unsafe {
@@ -79,6 +82,24 @@ pub fn print_limine_phys_map() {
             _ => "Unknown",
         };
         println!(level:info, "{:#x?} - {:#x?} ({})", start, end, mem_type);
+    }
+}
+
+pub fn fill_stack_with_pattern(stack_start: VirtAddr) {
+    let rsp: u64;
+    unsafe {
+        core::arch::asm!("mov {}, rsp", out(reg) rsp);
+    }
+    let stack_now = (rsp as usize - 0x100) & !0xfff; //align to page boundary
+    let stack_start = (stack_start.0 as usize & !0xfff) + 0x1000; //align to page boundary
+    let stack_end = stack_start - (LIMINE_STACK_SIZE_PAGES - 1) * 4096; //1 less just in case to not overflow
+    let to_fill_len = stack_now - stack_end;
+
+    let stack = unsafe { core::slice::from_raw_parts_mut(stack_end as *mut u8, to_fill_len) };
+    let pattern: u8 = 0xAA;
+
+    for byte in stack.iter_mut() {
+        *byte = pattern;
     }
 }
 

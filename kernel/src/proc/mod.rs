@@ -4,6 +4,7 @@ use core::{
 };
 use scheduler::Scheduler;
 use std::{
+    boxed::Box,
     error::ErrorCode,
     lock_w_info, println,
     string::ToString,
@@ -105,6 +106,7 @@ pub fn init_ap() {
     syscall::init();
 }
 
+#[heap_future::heap_future]
 pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &str, cwd: &str) -> Result<Pid, ErrorCode> {
     let file_handle = vfs::open_file(path, None, OpenFlags(1)).await?;
     let stat = vfs::stat_file(&file_handle).await;

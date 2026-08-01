@@ -1,5 +1,5 @@
 use crate::memory::addresses::*;
-use std::{error::ErrorCode, vec::Vec};
+use std::{boxed::Box, error::ErrorCode, vec::Vec};
 
 use crate::{
     drivers::filesystem::rfs2::{BLOCK_SIZE_SECTORS, BlockPtr, Rfs2, operations::PTRS_PER_BLOCK},
@@ -7,6 +7,7 @@ use crate::{
 };
 
 impl Rfs2 {
+    #[heap_future::heap_future]
     pub(super) async fn write_locked(
         &self,
         file_root: BlockPtr,

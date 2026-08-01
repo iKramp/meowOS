@@ -1,0 +1,64 @@
+diff --git a/migration/savevm.c b/migration/savevm.c
+index 34dd06f9f7..dcd1a498ec 100644
+--- a/migration/savevm.c
++++ b/migration/savevm.c
+@@ -64,20 +64,22 @@
+ #include "system/runstate.h"
+ #include "system/system.h"
+ #include "system/xen.h"
+ #include "migration/colo.h"
+ #include "qemu/bitmap.h"
+ #include "net/announce.h"
+ #include "qemu/yank.h"
+ #include "yank_functions.h"
+ #include "system/qtest.h"
+ #include "options.h"
++#include "system/replay.h"
++#include "replay/replay-internal.h"
+ 
+ const unsigned int postcopy_ram_discard_version;
+ 
+ /* Subcommands for QEMU_VM_COMMAND */
+ enum qemu_vm_cmd {
+     MIG_CMD_INVALID = 0,   /* Must be 0 */
+     MIG_CMD_OPEN_RETURN_PATH,  /* Tell the dest to open the Return path */
+     MIG_CMD_PING,              /* Request a PONG on the RP */
+ 
+     MIG_CMD_POSTCOPY_ADVISE,       /* Prior to any page transfers, just
+@@ -3516,25 +3518,36 @@ bool load_snapshot(const char *name, const char *vmstate,
+         goto err_drain;
+     }
+ 
+     qemu_system_reset(SHUTDOWN_CAUSE_SNAPSHOT_LOAD);
+     mis->from_src_file = f;
+ 
+     if (!yank_register_instance(MIGRATION_YANK_INSTANCE, errp)) {
+         ret = -EINVAL;
+         goto err_drain;
+     }
++
++    assert(replay_mutex_locked());
++    assert(bql_locked());
++    replay_mutex_unlock();
++
+     ret = qemu_loadvm_state(f, errp);
++
+     migration_incoming_state_destroy();
+ 
+     bdrv_drain_all_end();
+ 
++    /* delay the bql unlock until after bdrv_drain_all_end */
++    bql_unlock();
++    replay_mutex_lock();
++    bql_lock();
++
+     if (ret < 0) {
+         return false;
+     }
+ 
+     return true;
+ 
+ err_drain:
+     bdrv_drain_all_end();
+     return false;
+ }

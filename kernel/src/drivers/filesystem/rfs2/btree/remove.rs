@@ -13,7 +13,8 @@ enum RemoveResult {
 }
 
 impl BTreeNode {
-    pub async fn remove_key_root(inode_index: InodeIndex, rfs: &Rfs2) -> Option<BlockPtr> {
+    #[heap_future::heap_future]
+    pub async fn remove_key_root<'a>(inode_index: InodeIndex, rfs: &'a Rfs2) -> Option<BlockPtr> {
         let mut superblock = rfs.get_superblock().await;
         if superblock.inode_tree_root_ptr == 0 {
             panic!("illegal root pointer");
@@ -62,6 +63,7 @@ impl BTreeNode {
         None
     }
 
+    #[heap_future::heap_future]
     async fn remove_key(&mut self, index: InodeIndex, rfs: &Rfs2) -> Option<(BlockPtr, RemoveResult)> {
         let state = self.get_state();
 
@@ -107,7 +109,7 @@ impl BTreeNode {
                 let child_index = i;
                 let mut child_block = rfs.get_disk_block(self.children[child_index]).await;
                 let child_node = child_block.get_as_mut::<BTreeNode>();
-                let result = Box::pin(child_node.remove_key(index, rfs)).await;
+                let result: Option<(BlockPtr, RemoveResult)> = child_node.remove_key(index, rfs).await;
                 let Some((block, remove_result)) = result else {
                     child_block.forget_mem_binding();
                     return None;
@@ -132,6 +134,7 @@ impl BTreeNode {
     }
 
     //return Self remove result
+    #[heap_future::heap_future]
     async fn handle_short_child(&mut self, child: &mut Self, child_index: usize, rfs: &Rfs2) -> RemoveResult {
         if child_index > 0 {
             //try rotate and merge with left
@@ -175,6 +178,7 @@ impl BTreeNode {
     }
 
     //returns None if it's empty
+    #[heap_future::heap_future]
     async fn take_largest_key(&mut self, rfs: &Rfs2) -> Option<(Key, RemoveResult)> {
         let state = self.get_state();
 
@@ -189,6 +193,7 @@ impl BTreeNode {
         }
     }
 
+    #[heap_future::heap_future]
     async fn take_smallest_key(&mut self, rfs: &Rfs2) -> Option<(Key, RemoveResult)> {
         let state = self.get_state();
 
@@ -234,6 +239,7 @@ impl BTreeNode {
         Some((key, RemoveResult::Updated))
     }
 
+    #[heap_future::heap_future]
     async fn take_non_leaf_key(&mut self, largest: bool, rfs: &Rfs2) -> Option<(Key, RemoveResult)> {
         let key_index = if largest {
             self.key_indexes.iter().position(|k| *k == 0).unwrap_or(BTREE_KEY_CNT) - 1

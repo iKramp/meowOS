@@ -1,7 +1,8 @@
-use std::{error::ErrorCode, println};
+use std::{boxed::Box, error::ErrorCode, println};
 
 use crate::vfs::{self, InodeTypeAndPerms, ResolvedPath, file::OpenFlags};
 
+#[heap_future::heap_future]
 pub(super) async fn cmd_mkdir(dir_name: &str) -> Result<(), ErrorCode> {
     let resolved_path = vfs::resolve_path(dir_name);
     let open_flags = *OpenFlags(0).set_read(true).set_write(true);

@@ -58,7 +58,7 @@ pub fn read_tables() {
     let tables = rsdt.get_tables();
     for table in &tables {
         unsafe {
-            let table_virt: VirtAddr = table.clone().into();
+            let table_virt: VirtAddr = (*table).into();
             let table_ptr = table_virt.0 as *const sdt::AcpiSdtHeader;
             let table_len = (table_ptr.byte_add(4) as *const u32).read_unaligned();
             let table_virt = align_manual(table_virt, table_len as u64, 8);

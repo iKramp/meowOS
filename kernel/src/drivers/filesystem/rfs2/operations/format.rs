@@ -1,4 +1,4 @@
-use std::{error::ErrorCode, println};
+use std::{Box, error::ErrorCode, println};
 
 use crate::{
     drivers::filesystem::rfs2::{
@@ -9,6 +9,7 @@ use crate::{
 };
 
 impl Rfs2 {
+    #[heap_future::heap_future]
     pub async fn format(&mut self) -> Result<(), ErrorCode> {
         let whole_blocks = self.partition.partition.size_sectors / BLOCK_SIZE_SECTORS;
         if whole_blocks < 5 {

@@ -36,3 +36,6 @@ fat_disk.img
 # record/replay files
 *.qcow2
 *.rr
+
+#from scripts
+__pycache__/

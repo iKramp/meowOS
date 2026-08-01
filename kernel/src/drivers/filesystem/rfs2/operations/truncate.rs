@@ -6,6 +6,7 @@ use crate::drivers::filesystem::rfs2::{
 };
 
 impl Rfs2 {
+    #[heap_future::heap_future]
     pub(super) async fn truncate_locked(&self, file_root: u64, new_size_bytes: usize) {
         let mut file_info = self.get_file_info(file_root).await;
         let current_size = file_info.size as usize;
@@ -91,6 +92,7 @@ impl Rfs2 {
         working_block.forget_mem_binding();
     }
 
+    #[heap_future::heap_future]
     async fn decrease_file_size_recursively(&self, block_ptr: BlockPtr, current_level: u8, left_to_keep: usize) {
         if current_level == 0 {
             return; //final block, does not contain pointers
@@ -117,7 +119,8 @@ impl Rfs2 {
                 continue;
             }
 
-            Box::pin(self.decrease_file_size_recursively(pointers[i], current_level - 1, left_to_keep - scanned_blocks)).await;
+            self.decrease_file_size_recursively(pointers[i], current_level - 1, left_to_keep - scanned_blocks)
+                .await;
             scanned_blocks += ptr_blocks;
             if scanned_blocks >= left_to_keep {
                 for j in i..PTRS_PER_BLOCK {
@@ -140,6 +143,7 @@ impl Rfs2 {
             .await;
     }
 
+    #[heap_future::heap_future]
     async fn decrease_file_depth(&self, file_root: u64, decrease_by: i8) {
         if decrease_by <= 0 {
             return;

@@ -70,7 +70,7 @@ fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let pid = proc.pid();
 
     let proc_clone = proc.downgrade();
-    let task = async move {
+    let task = Box::pin(async move {
         let resolved_path = vfs::resolve_path(&path);
         let handle = vfs::open_file((&resolved_path).into(), Some(file_source), flags).await;
         let Some(proc) = proc_clone.upgrade() else {
@@ -94,7 +94,7 @@ fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         }
         println!("fopen: finished processing fopen for pid {pid:?}");
         proc::wake_process(pid)
-    };
+    });
 
     let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
 

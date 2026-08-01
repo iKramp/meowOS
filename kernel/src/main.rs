@@ -42,7 +42,7 @@ mod vga;
 use limine::LIMINE_BOOTLOADER_REQUESTS;
 use vfs::ResolvedPath;
 
-use crate::task_runner::block_task;
+use crate::{memory::addresses::VirtAddr, task_runner::block_task};
 
 const TIME_PRINTER: &[u8] = include_bytes!("../../assets/time_printer");
 
@@ -65,7 +65,7 @@ extern "C" fn _start() -> ! {
     println!(level:info, "starting RustOs...");
     println!(level:info, "stack pointer: {:?}", stack_pointer);
 
-    memory::init_memory();
+    memory::init_memory(VirtAddr(stack_pointer as u64));
 
     acpi::cpu_locals::init_dummy_cpu_locals();
 

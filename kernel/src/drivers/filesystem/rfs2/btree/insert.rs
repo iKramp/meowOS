@@ -1,3 +1,4 @@
+use core::pin::Pin;
 use std::boxed::Box;
 
 use crate::drivers::filesystem::rfs2::{
@@ -15,49 +16,56 @@ enum InsertResult {
 //first rebalance, then insert
 
 impl BTreeNode {
-    pub async fn insert_inode_root(index: InodeIndex, block: BlockPtr, rfs: &Rfs2) {
-        let mut superblock = rfs.get_superblock().await;
-        if superblock.inode_tree_root_ptr == 0 {
-            panic!("illegal root pointer");
-        }
-        let mut root_block = rfs.get_disk_block(superblock.inode_tree_root_ptr).await;
-        let root_node = root_block.get_as_mut::<BTreeNode>();
-        let res = root_node.insert_inode(index, block, rfs).await;
-        let InsertResult::TooBig(key, child) = res else {
-            if res != InsertResult::Updated {
-                root_block.changed = false;
+    pub fn insert_inode_root<'a>(
+        index: InodeIndex,
+        block: BlockPtr,
+        rfs: &'a Rfs2,
+    ) -> Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            let mut superblock = rfs.get_superblock().await;
+            if superblock.inode_tree_root_ptr == 0 {
+                panic!("illegal root pointer");
+            }
+            let mut root_block = rfs.get_disk_block(superblock.inode_tree_root_ptr).await;
+            let root_node = root_block.get_as_mut::<BTreeNode>();
+            let res = root_node.insert_inode(index, block, rfs).await;
+            let InsertResult::TooBig(key, child) = res else {
+                if res != InsertResult::Updated {
+                    root_block.changed = false;
+                }
+                root_block.write_and_dealloc(rfs).await;
+                return;
+            };
+            let mut new_block = WorkingBlock::get_disk_block(rfs).await;
+            let new_block_disk_block = new_block.disk_block.expect("wawa");
+            let new_node = new_block.get_as_mut::<BTreeNode>();
+
+            for i in 0..BTREE_KEY_CNT {
+                new_node.key_indexes[i] = 0;
+                new_node.key_ptrs[i] = 0;
+                new_node.children[i] = 0;
+            }
+            new_node.children[BTREE_KEY_CNT] = 0;
+
+            new_node.children[0] = superblock.inode_tree_root_ptr;
+            superblock.inode_tree_root_ptr = new_block_disk_block;
+            rfs.update_superblock(superblock).await;
+
+            Self::split(new_node, 0, root_node, rfs).await;
+            if new_node.key_indexes[0] > key.index {
+                root_node.insert_key_child(key, child);
+            } else {
+                let mut right_child = rfs.get_disk_block(new_node.children[1]).await;
+                let right_node = right_child.get_as_mut::<BTreeNode>();
+                right_node.insert_key_child(key, child);
+                right_child.write_and_dealloc(rfs).await;
             }
             root_block.write_and_dealloc(rfs).await;
-            return;
-        };
-        let mut new_block = WorkingBlock::get_disk_block(rfs).await;
-        let new_block_disk_block = new_block.disk_block.expect("wawa");
-        let new_node = new_block.get_as_mut::<BTreeNode>();
-
-        for i in 0..BTREE_KEY_CNT {
-            new_node.key_indexes[i] = 0;
-            new_node.key_ptrs[i] = 0;
-            new_node.children[i] = 0;
-        }
-        new_node.children[BTREE_KEY_CNT] = 0;
-
-        new_node.children[0] = superblock.inode_tree_root_ptr;
-        superblock.inode_tree_root_ptr = new_block_disk_block;
-        rfs.update_superblock(superblock).await;
-
-        Self::split(new_node, 0, root_node, rfs).await;
-        if new_node.key_indexes[0] > key.index {
-            root_node.insert_key_child(key, child);
-        } else {
-            let mut right_child = rfs.get_disk_block(new_node.children[1]).await;
-            let right_node = right_child.get_as_mut::<BTreeNode>();
-            right_node.insert_key_child(key, child);
-            right_child.write_and_dealloc(rfs).await;
-        }
-        root_block.write_and_dealloc(rfs).await;
-        new_block.write_and_dealloc(rfs).await;
+            new_block.write_and_dealloc(rfs).await;
+        })
     }
 
+    #[heap_future::heap_future]
     async fn insert_inode(&mut self, index: InodeIndex, block: BlockPtr, rfs: &Rfs2) -> InsertResult {
         let (fill_state, level_state) = self.get_state();
 
@@ -191,6 +199,7 @@ impl BTreeNode {
         self.key_ptrs[0] = block;
     }
 
+    #[heap_future::heap_future]
     async fn split(parent: &mut Self, child_index: usize, child: &mut Self, rfs: &Rfs2) -> InsertResult {
         let mut new_node_block = WorkingBlock::get_disk_block(rfs).await;
         let new_node_disk_block = new_node_block.disk_block.expect("wawa");

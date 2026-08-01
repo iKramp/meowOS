@@ -11,6 +11,7 @@ use crate::{
 };
 
 impl Rfs2 {
+    #[heap_future::heap_future]
     pub(super) async fn increase_file_size(&self, file_root: BlockPtr, new_size: usize) {
         let mut file_info = self.get_file_info(file_root).await;
 
@@ -84,6 +85,7 @@ impl Rfs2 {
         working_block.forget_mem_binding();
     }
 
+    #[heap_future::heap_future]
     async fn increase_file_size_recursively(
         &self,
         working_block_ptr: BlockPtr,
@@ -134,9 +136,9 @@ impl Rfs2 {
                 pointers[i] = new_block;
                 is_new_block = true;
             }
-            let allocated_here =
-                Box::pin(self.increase_file_size_recursively(pointers[i], current_level - 1, left_to_allocate, is_new_block))
-                    .await;
+            let allocated_here = self
+                .increase_file_size_recursively(pointers[i], current_level - 1, left_to_allocate, is_new_block)
+                .await;
             left_to_allocate = left_to_allocate.saturating_sub(allocated_here);
             allocated += allocated_here;
             if left_to_allocate == 0 {
@@ -147,6 +149,7 @@ impl Rfs2 {
         allocated
     }
 
+    #[heap_future::heap_future]
     async fn increase_file_depth(&self, file_root: BlockPtr, increase_by: i8) {
         if increase_by <= 0 {
             return;
