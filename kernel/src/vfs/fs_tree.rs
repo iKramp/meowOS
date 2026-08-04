@@ -1,44 +1,40 @@
-use std::error::ErrorCode;
 use std::{
     boxed::Box,
     collections::btree_map::BTreeMap,
-    lock_w_info, printlnc,
+    error::ErrorCode,
+    lock_w_info, println, r_lock_w_info,
     sync::no_int_spinlock::{NoIntSpinlock, NoIntSpinlockGuard},
     vec::Vec,
 };
-use std::{println, vec};
 
-use super::{DeviceId, InodeIdentifier, InodeIdentifierChain, ResolvedPathBorrowed, VFS};
+use crate::vfs::{DeviceId, GLOBAL_MOUNTS, InodeIdentifier, InodeIdentifierChain, ResolvedPathBorrowed, VFS};
 
-pub(super) static INODE_CACHE: NoIntSpinlock<InodeCache> = NoIntSpinlock::new(InodeCache::new());
+static INODE_CACHE: NoIntSpinlock<FsTreeCache> = NoIntSpinlock::new(FsTreeCache::new());
 
 #[derive(Debug)]
 struct FsTreeNode {
     children: Vec<(Box<str>, InodeIdentifier)>,
 }
 
-pub(super) struct InodeCache {
+/// Cache container for directory inode related data (fs tree, global mount points)
+pub(super) struct FsTreeCache {
     inodes: BTreeMap<InodeIdentifier, FsTreeNode>,
     root: InodeIdentifier,
-    ///maps from parent inode in mount point to child inode in mount point
-    mount_points: BTreeMap<InodeIdentifier, InodeIdentifier>,
 }
 
-impl InodeCache {
+impl FsTreeCache {
     pub const fn new() -> Self {
-        InodeCache {
+        FsTreeCache {
             inodes: BTreeMap::new(),
             root: InodeIdentifier {
                 device_id: DeviceId::new(0),
                 index: 0,
             },
-            mount_points: BTreeMap::new(),
         }
     }
 }
 
-///Should be called when mounting a new fs as root
-pub fn init(root: InodeIdentifier) {
+pub(super) fn init(root: InodeIdentifier) {
     let mut cache = lock_w_info!(INODE_CACHE);
 
     cache.inodes.clear();
@@ -46,170 +42,118 @@ pub fn init(root: InodeIdentifier) {
     cache.root = root;
 }
 
-pub async fn get_unmount_inodes(
-    path: ResolvedPathBorrowed<'_>,
-    from: Option<InodeIdentifier>,
-) -> Result<(InodeIdentifier, InodeIdentifier), ErrorCode> {
-    let mut cache = Some(lock_w_info!(INODE_CACHE));
-    let mut current = from.unwrap_or(cache.as_ref().expect("is some").root);
-    for component in path.iter() {
-        while let Some(mount_point) = cache.as_ref().expect("is some").mount_points.get(&current) {
-            if *mount_point == current {
-                printlnc!((0, 0, 255), "Detected mount loop at inode {:?}\n", current);
-                break;
-            }
-            current = *mount_point;
-        }
-        let child = find_child_no_mounts(current, component, &mut cache).await?;
-        current = child;
-    }
-    let mut old = current;
-    while let Some(mount_point) = cache.as_ref().expect("is some").mount_points.get(&current) {
-        if *mount_point == current {
-            printlnc!((0, 0, 255), "Detected mount loop at inode {:?}\n", current);
-            break;
-        }
-        old = current;
-        current = *mount_point;
-    }
-    if old == current {
-        return Err(ErrorCode::NotMounted);
-    }
-    Ok((old, current))
-}
-
-pub async fn get_inode_chain(
+/// Returns the inode chain for the given path.
+/// If a `from` chain is provided, the path is relative and starts from there. From chain is
+/// included in the returned chain. If no `from` chain is provided, the path is absolute and starts
+/// from the root inode.
+/// ret.0 is the last inode in the chain, the actual inode for this path
+/// ret.1 is the chain going from root to this same last inode, with it included
+pub(super) async fn get_inode_chain(
     path: ResolvedPathBorrowed<'_>,
     from: Option<InodeIdentifierChain>,
+    namespace_mounts: Option<&BTreeMap<InodeIdentifier, InodeIdentifier>>,
 ) -> Result<(InodeIdentifier, InodeIdentifierChain), ErrorCode> {
-    let mut cache_lock = Some(lock_w_info!(INODE_CACHE));
-    let mut current = from
-        .unwrap_or(Box::new([cache_lock.as_ref().expect("is some").root]))
-        .to_vec();
-    if current.is_empty() {
-        current = vec![cache_lock.as_ref().expect("is some").root];
+    let mut chain = match from {
+        Some(chain) => chain.to_vec(),
+        None => Vec::new(),
+    };
+    if chain.is_empty() {
+        let cache = lock_w_info!(INODE_CACHE);
+        chain.push(cache.root);
     }
+
+    let mut current = *chain.last().expect("chain should have at least 1 element");
+
     for component in path.iter() {
         if **component == *".." {
-            if current.len() > 1 {
-                current.pop();
+            if chain.len() > 1 {
+                chain.pop();
+                current = *chain.last().expect("chain should have at least 1 element");
             }
             continue;
         }
 
-        let mut current_last = *current.last().expect("current can't be empty");
-        println!(
-            "get_inode_chain: current last inode: {:?}, component: {}",
-            current_last, component
-        );
-
-        while let Some(mount_point) = cache_lock.as_ref().expect("is some").mount_points.get(&current_last) {
-            if *mount_point == current_last {
-                printlnc!((0, 255, 255), "Detected mount loop at inode {:?}\n", current);
-                break;
-            }
-            *current.last_mut().expect("current can't be empty") = *mount_point;
-            current_last = *current.last().expect("current can't be empty");
-            println!("get_inode_chain: following mount point to inode: {:?}", *mount_point);
-        }
-
-        let child = find_child_no_mounts(*current.last().expect("current can't be empty"), component, &mut cache_lock).await?;
-        println!("get_inode_chain: found child inode: {:?} for component: {}", child, component);
-        current.push(child);
+        let child = get_child(current, component, true, namespace_mounts).await?;
+        chain.push(child);
+        current = child;
     }
 
-    //print all mountpoints
-    for mp in &cache_lock.as_ref().expect("is some").mount_points {
-        println!("mountpoint at {:?} with value {:?}", mp.0, mp.1);
-    }
-
-    println!(
-        "get_inode_chain: last inode: {:?}",
-        *current.last().expect("current can't be empty")
-    );
-
-    while let Some(mount_point) = cache_lock
-        .as_ref()
-        .expect("is some")
-        .mount_points
-        .get(current.last().expect("current can't be empty"))
-    {
-        *current.last_mut().expect("current can't be empty") = *mount_point;
-    }
-
-    println!(
-        "get_inode_chain: last inode after mounts: {:?}",
-        *current.last().expect("current can't be empty")
-    );
-
-    let file = *current.last().expect("current can't be empty");
-    if current.len() > 1 {
-        current.pop();
-    }
-
-    Ok((file, current.into_boxed_slice()))
+    Ok((current, chain.into_boxed_slice()))
 }
 
-async fn find_child_no_mounts(
-    current: InodeIdentifier,
-    f_name: &str,
-    cache: &mut Option<NoIntSpinlockGuard<'_, InodeCache>>,
+/// Link a parent to a child with a given name. This function is technically optional, as if the
+/// child is not found when searching, a scan of the parent dir will be performed to find the child.
+/// For performance reasons, use this function
+pub(super) fn link_inode(parent_cache_num: InodeIdentifier, name: Box<str>, inode_index: InodeIdentifier) {
+    let mut cache = lock_w_info!(INODE_CACHE);
+    let Some(parent_node) = cache.inodes.get_mut(&parent_cache_num) else {
+        return;
+    };
+
+    parent_node.children.push((name, inode_index));
+    cache.inodes.entry(inode_index).or_insert(FsTreeNode { children: Vec::new() });
+}
+
+/// Unlink a child from a parent. This function, unlike `link_inode`, is not optional. It must be
+/// called to prevent incorrect path to inode resolution.
+pub(super) fn unlink_inode(parent_cache_num: InodeIdentifier, name: &str) {
+    let mut cache = lock_w_info!(INODE_CACHE);
+    let Some(parent_node) = cache.inodes.get_mut(&parent_cache_num) else {
+        return; //parent not in cache, nothing to unlink
+    };
+
+    let index = parent_node.children.iter().position(|(n, _)| n.as_ref() == name);
+    if let Some(index) = index {
+        parent_node.children.swap_remove(index);
+    }
+}
+
+/// Removes an inode from the cache. This function is called when an inode is deleted.
+/// Make sure to call `unlink_inode` before calling this function!!
+pub(super) fn remove_inode(inode_index: InodeIdentifier) {
+    let mut cache = lock_w_info!(INODE_CACHE);
+    cache.inodes.remove(&inode_index);
+}
+
+pub(super) fn remove_device(_device_id: DeviceId) {
+    let mut cache = lock_w_info!(INODE_CACHE);
+    cache.inodes.clear(); //easiest and fastest ig :3
+}
+
+pub async fn get_child(
+    parent: InodeIdentifier,
+    name: &str,
+    resolve_mounts: bool,
+    namespace_mounts: Option<&BTreeMap<InodeIdentifier, InodeIdentifier>>,
 ) -> Result<InodeIdentifier, ErrorCode> {
-    let current_node = cache
-        .as_ref()
-        .expect("is some")
-        .inodes
-        .get(&current)
-        .ok_or(ErrorCode::InodeNotPresent)?;
-
-    println!(
-        "find_child_no_mounts: current node: {:?}, looking for child: {}",
-        current, f_name
-    );
-
-    let child = current_node.children.iter().find(|(name, _)| **name == *f_name);
-    if let Some(child) = child {
-        println!(
-            "find_child_no_mounts: found child in cache: {:?} for name: {}",
-            child.1, f_name
-        );
-        return Ok(child.1);
+    let cache = lock_w_info!(INODE_CACHE);
+    if let Some(parent_node) = cache.inodes.get(&parent) {
+        if let Some((_, child)) = parent_node.children.iter().find(|(n, _)| n.as_ref() == name) {
+            if !resolve_mounts {
+                return Ok(*child);
+            }
+            return Ok(resolve_mount_point(*child, namespace_mounts).map_or_else(|| *child, |(_, overlaid)| overlaid));
+        }
     }
-    // If the child is not found, we need to load the directory
-    println!(
-        "find_child_no_mounts: child not found in cache for name: {}, loading directory for inode: {:?}",
-        f_name, current
-    );
-    load_dir(current, cache).await?;
-    // After loading, we check again
-    let current_node = cache
-        .as_ref()
-        .expect("is some")
-        .inodes
-        .get(&current)
-        .ok_or(ErrorCode::InodeNotPresent)?;
-    let child = current_node.children.iter().find(|(name, _)| **name == *f_name);
-    if let Some(child) = child {
-        println!(
-            "find_child_no_mounts: found child after loading directory: {:?} for name: {}",
-            child.1, f_name
-        );
-        return Ok(child.1);
-    }
-    println!(
-        "find_child_no_mounts: child still not found after loading directory for name: {}, inode: {:?}",
-        f_name, current
-    );
-    //print dir children
+    drop(cache);
 
-    for child in &current_node.children {
-        println!("find_child_no_mounts: directory entry: {} with inode: {:?}", child.0, child.1);
-    }
+    //load the directory, maybe parent was not loaded or child was just created
 
+    let cache = load_dir(parent).await?;
+    if let Some(parent_node) = cache.inodes.get(&parent) {
+        if let Some((_, child)) = parent_node.children.iter().find(|(n, _)| n.as_ref() == name) {
+            if !resolve_mounts {
+                return Ok(*child);
+            }
+            return Ok(resolve_mount_point(*child, namespace_mounts).map_or_else(|| *child, |(_, overlaid)| overlaid));
+        }
+    }
     Err(ErrorCode::NoEntry)
 }
 
-async fn load_dir(current: InodeIdentifier, cache: &mut Option<NoIntSpinlockGuard<'_, InodeCache>>) -> Result<(), ErrorCode> {
+/// Loads the directory entries into the cache and returns the lock so cache isn't cleared before a
+/// query is made
+async fn load_dir(current: InodeIdentifier) -> Result<NoIntSpinlockGuard<'static, FsTreeCache>, ErrorCode> {
     let mut vfs = lock_w_info!(VFS);
     let device_details = vfs.devices.get(&current.device_id).ok_or(ErrorCode::NoEntry)?;
     let partition_id = device_details.partition;
@@ -219,7 +163,6 @@ async fn load_dir(current: InodeIdentifier, cache: &mut Option<NoIntSpinlockGuar
         .ok_or(ErrorCode::NoEntry)?
         .clone();
     drop(vfs);
-    drop(cache.take()); //drop lock
 
     let dir = fs.read_dir(current.index).await?;
     println!("load_dir: loaded directory for inode {:?}, entries: {}", current, dir.len());
@@ -227,15 +170,12 @@ async fn load_dir(current: InodeIdentifier, cache: &mut Option<NoIntSpinlockGuar
 
     let mut children = Vec::new();
     if dir.is_empty() {
-        *cache = Some(lock_w_info!(INODE_CACHE)); //get lock back
-        return Ok(());
+        return Ok(lock_w_info!(INODE_CACHE));
     }
     for dir_entry in dir.iter() {
-        drop(cache.take()); //drop in loop
         let inode_stat = fs.stat(dir_entry.inode, current.index).await;
         if let Err(e) = inode_stat {
             println!(level:error, "Failed to stat inode {} while loading directory: {e}", dir_entry.inode);
-            *cache = Some(lock_w_info!(INODE_CACHE)); //get lock back
             continue;
         }
         let inode = unsafe { inode_stat.unwrap_unchecked() };
@@ -244,12 +184,11 @@ async fn load_dir(current: InodeIdentifier, cache: &mut Option<NoIntSpinlockGuar
             device_id: inode.device,
             index: inode.index,
         };
-        *cache = Some(lock_w_info!(INODE_CACHE)); //get lock back
-        cache
-            .as_mut()
-            .expect("is some")
-            .inodes
-            .insert(inode_index, FsTreeNode { children: Vec::new() });
+
+        let mut cache = lock_w_info!(INODE_CACHE);
+        cache.inodes.insert(inode_index, FsTreeNode { children: Vec::new() });
+        drop(cache);
+
         println!(
             "load_dir: added inode {:?} to cache for directory entry: {}",
             inode_index, dir_entry.name
@@ -263,98 +202,46 @@ async fn load_dir(current: InodeIdentifier, cache: &mut Option<NoIntSpinlockGuar
         children.len()
     );
 
+    let mut cache = lock_w_info!(INODE_CACHE);
     cache
-        .as_mut()
-        .expect("is some")
         .inodes
-        .get_mut(&current)
-        .ok_or(ErrorCode::InodeNotPresent)?
+        .entry(current)
+        .or_insert(FsTreeNode { children: Vec::new() })
         .children = children;
 
-    Ok(())
+    Ok(cache)
 }
 
-pub fn insert_inode(parent_cache_num: InodeIdentifier, name: Box<str>, inode_index: InodeIdentifier) -> Result<(), ErrorCode> {
-    let mut cache = lock_w_info!(INODE_CACHE);
-    cache.inodes.insert(inode_index, FsTreeNode { children: Vec::new() });
-    let parent_res = cache.inodes.get_mut(&parent_cache_num);
-    match parent_res {
-        None => {
-            cache.inodes.remove(&inode_index);
-            return Err(ErrorCode::InodeNotPresent);
+/// Resolves the mount point for the given inode. If there are no mounts on top if this inode, None
+/// is returned. If there are mounts, the top 2 inodes on the stack are returned. First is the mount
+/// point, second is the overlaid inode
+pub fn resolve_mount_point(
+    mut inode: InodeIdentifier,
+    namespace_mounts: Option<&BTreeMap<InodeIdentifier, InodeIdentifier>>,
+) -> Option<(InodeIdentifier, InodeIdentifier)> {
+    let global_mounts = r_lock_w_info!(GLOBAL_MOUNTS);
+    let mut prev_inode = None;
+
+    loop {
+        let mut found_mount = false;
+
+        if let Some(mount) = global_mounts.get(&inode) {
+            prev_inode = Some(inode);
+            inode = *mount;
+            found_mount = true;
         }
-        Some(parent) => parent.children.push((name, inode_index)),
-    }
-    Ok(())
-}
 
-pub fn unlink_inode(parent_cache_num: InodeIdentifier, name: &str) -> Result<(), ErrorCode> {
-    let mut cache = lock_w_info!(INODE_CACHE);
-    let parent_res = cache.inodes.get_mut(&parent_cache_num);
-    match parent_res {
-        None => Err(ErrorCode::InodeNotPresent),
-        Some(parent) => {
-            if let Some(pos) = parent.children.iter().position(|(child_name, _)| **child_name == *name) {
-                let inode_index = parent.children[pos].1;
-                parent.children.remove(pos);
-                cache.inodes.remove(&inode_index);
-                Ok(())
-            } else {
-                Err(ErrorCode::NoEntry)
+        if let Some(namespace_mounts) = namespace_mounts {
+            if let Some(mount) = namespace_mounts.get(&inode) {
+                prev_inode = Some(inode);
+                inode = *mount;
+                found_mount = true;
             }
         }
-    }
-}
 
-///parent_cache_num refers to the mountpoint itself, on top of which the new inode will be mounted
-pub fn mount_inode(parent_cache_num: InodeIdentifier, target_inode: InodeIdentifier) {
-    let mut cache = lock_w_info!(INODE_CACHE);
-    cache.mount_points.insert(parent_cache_num, target_inode);
-}
-
-///parent_cache_num refers to the parent directory, NOT the mountpoint itself
-///returns true if the last mountpoint of this filesystem was unmounted
-pub fn unmount_inode(parent_cache_num: InodeIdentifier) -> bool {
-    let mut cache = lock_w_info!(INODE_CACHE);
-    let unmounted_device = cache
-        .mount_points
-        .remove(&parent_cache_num)
-        .map_or(DeviceId::new(u64::MAX), |v| v.device_id);
-    let count = cache
-        .mount_points
-        .values()
-        .filter(|&&v| v.device_id == unmounted_device)
-        .count();
-    drop(cache);
-    if count == 0 {
-        remove_device(unmounted_device);
-        return true;
+        if !found_mount {
+            break;
+        }
     }
-    false
-}
-
-/// Removes all inodes associated with a specific device ID. Called when device is fully unmounted
-pub fn remove_device(device_id: DeviceId) {
-    let mut cache = lock_w_info!(INODE_CACHE);
-    cache.inodes.retain(|inode, _| inode.device_id != device_id);
-    if cache.root.device_id == device_id {
-        cache.root = InodeIdentifier {
-            device_id: DeviceId::new(0),
-            index: 0,
-        };
-    }
-}
-
-pub fn get_child_inode(parent_cache_num: InodeIdentifier, name: &str) -> Result<InodeIdentifier, ErrorCode> {
-    let cache = lock_w_info!(INODE_CACHE);
-    let parent_res = cache.inodes.get(&parent_cache_num);
-    match parent_res {
-        None => Err(ErrorCode::InodeNotPresent),
-        Some(parent) => parent
-            .children
-            .iter()
-            .find(|(child_name, _)| **child_name == *name)
-            .map(|(_, inode_index)| *inode_index)
-            .ok_or(ErrorCode::NoEntry),
-    }
+    prev_inode.map(|prev| (prev, inode))
 }

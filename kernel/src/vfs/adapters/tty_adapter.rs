@@ -1,27 +1,40 @@
 use std::boxed::Box;
 use std::error::ErrorCode;
+use std::sync::arc::Arc;
 use std::sync::no_int_spinlock::NoIntSpinlock;
+use std::sync::once_lock::OnceLock;
 use std::{lock_w_info, println};
+
+use uuid::Uuid;
 
 use crate::memory::addresses::{PhysAddr, VirtAddr};
 use crate::tty;
-use crate::vfs::{DeviceId, Inode, InodeIndex, InodeTypeAndPerms};
+use crate::vfs::{DeviceId, FileSystem, Inode, InodeIndex, InodeTypeAndPerms};
 
 use super::{DirEntry, VfsAdapterTrait};
 
+static PROC_ADAPTER: OnceLock<Arc<dyn FileSystem + Send>> = OnceLock::new();
+
 #[derive(Debug)]
 pub struct TtyAdapter {
-    device_id: DeviceId,
+    device_id: crate::vfs::DeviceId,
+    device_details: crate::vfs::DeviceDetails,
     write_lock: NoIntSpinlock<()>,
 }
 
 impl TtyAdapter {
-    pub fn new(device_id: DeviceId) -> Self {
-        println!("tty adapter created with device_id: {:?}", device_id);
-        TtyAdapter {
-            device_id,
-            write_lock: NoIntSpinlock::new(()),
-        }
+    pub fn get() -> Arc<dyn FileSystem + Send> {
+        PROC_ADAPTER
+            .get_or_init(|| {
+                let device_details = crate::vfs::VFS_ADAPTER_DEVICE.allocate_device(&mut *lock_w_info!(crate::vfs::VFS));
+                println!("tty adapter created with device_id: {:?}", device_details.0);
+                Arc::new(Self {
+                    device_id: device_details.0,
+                    device_details: device_details.1,
+                    write_lock: NoIntSpinlock::new(()),
+                })
+            })
+            .clone()
     }
 
     fn get_inode(&self, index: InodeIndex) -> crate::vfs::Inode {
@@ -44,6 +57,10 @@ impl TtyAdapter {
 impl VfsAdapterTrait for TtyAdapter {
     fn device_id(&self) -> DeviceId {
         self.device_id
+    }
+
+    fn partition_id(&self) -> Uuid {
+        self.device_details.partition
     }
 
     async fn read(

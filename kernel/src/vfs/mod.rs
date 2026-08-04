@@ -2,7 +2,7 @@ use std::{
     boxed::Box,
     collections::btree_map::BTreeMap,
     lock_w_info, println,
-    sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
+    sync::{arc::Arc, no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
     vec::Vec,
 };
 use uuid::Uuid;
@@ -27,6 +27,8 @@ pub use path::*;
 pub const ROOT_INODE_INDEX: u64 = 2;
 pub static VFS: NoIntSpinlock<Vfs> = NoIntSpinlock::new(Vfs::new());
 static VFS_ADAPTER_DEVICE: adapters::VfsAdapterDevice = adapters::VfsAdapterDevice::new();
+///maps from mount point inode to mounted inode. Arc because it's shared across async so a lock to VFS can't be held
+static GLOBAL_MOUNTS: RWSpinlock<BTreeMap<InodeIdentifier, InodeIdentifier>> = RWSpinlock::new(BTreeMap::new());
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

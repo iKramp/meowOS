@@ -48,6 +48,8 @@
           pkgs.xorriso
           pkgs.cargo-expand
           pkgs.gptfdisk
+          pkgs.llvmPackages_22.libllvm
+          pkgs.graphviz
         ];
 
         shellHook = ''

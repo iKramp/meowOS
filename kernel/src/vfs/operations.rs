@@ -6,6 +6,7 @@ use std::{
     string::ToString,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlockGuard},
     vec::Vec,
+    w_lock_w_info,
 };
 
 use uuid::Uuid;
@@ -17,18 +18,16 @@ use crate::{
     },
     memory::addresses::PhysAddr,
     vfs::{
-        Inode, InodeIdentifier,
+        GLOBAL_MOUNTS, Inode, InodeIdentifier,
         file::{OpenFlags, get_file},
     },
 };
 
 use super::{
-    DeviceDetails, InodeIdentifierChain, InodeTypeAndPerms, ROOT_INODE_INDEX, ResolvedPath, ResolvedPathBorrowed, VFS,
-    VFS_ADAPTER_DEVICE, Vfs,
+    DeviceDetails, InodeIdentifierChain, InodeTypeAndPerms, ROOT_INODE_INDEX, ResolvedPath, ResolvedPathBorrowed, VFS, Vfs,
     file::{FileFlags, FileHandle},
     filesystem_trait::FileSystem,
     fs_tree::{self},
-    resolve_path,
 };
 
 pub async fn add_disk(disk: Arc<dyn BlockDevice>) -> Uuid {
@@ -149,34 +148,33 @@ pub async fn mount_blkdev_partition(part_id: Uuid, mountpoint: ResolvedPath) -> 
     }
 }
 
+///Not dealing with namespace mounts yet, all is global
 #[heap_future::heap_future]
 async fn mount_filesystem(mountpoint: ResolvedPath, fs: Arc<dyn FileSystem + Send>, part_id: Uuid) -> Result<(), ErrorCode> {
     let root = mountpoint.inner().is_empty();
+    println!("Mounting filesystem at {:?}", mountpoint.inner());
+
     if root {
-        //mounting root
-        println!("Mounting root filesystem");
-        mount_new_root(&fs).await?;
-        let fs: Arc<dyn FileSystem + Send> = fs;
-        let mut vfs = lock_w_info!(VFS);
-        vfs.mounted_filesystems.insert(part_id, fs);
-        mount_vfs_adapters(vfs).await;
-    } else {
-        println!("Mounting filesystem at {:?}", mountpoint.inner());
-        let (parent_inode, _parent_inode_chain) = fs_tree::get_inode_chain((&mountpoint).into(), None).await?;
-        let inode_id = InodeIdentifier {
-            device_id: fs.device_id(),
-            index: ROOT_INODE_INDEX,
-        };
-        fs_tree::mount_inode(parent_inode, inode_id);
-        let fs: Arc<dyn FileSystem + Send> = fs;
-        let mut vfs = lock_w_info!(VFS);
-        vfs.mounted_filesystems.insert(part_id, fs);
+        make_new_root_checks(&fs).await?;
+        mount_vfs_adapters(&fs).await;
     }
+
+    let (parent_inode, _parent_inode_chain) = fs_tree::get_inode_chain((&mountpoint).into(), None, None).await?;
+    let inode_id = InodeIdentifier {
+        device_id: fs.device_id(),
+        index: ROOT_INODE_INDEX,
+    };
+
+    let mut vfs = lock_w_info!(VFS);
+    vfs.mounted_filesystems.insert(part_id, fs);
+    mount_inode(parent_inode, inode_id);
+
+    drop(vfs);
 
     Ok(())
 }
 
-async fn mount_new_root(fs: &Arc<dyn FileSystem + Send>) -> Result<(), ErrorCode> {
+async fn make_new_root_checks(fs: &Arc<dyn FileSystem + Send>) -> Result<(), ErrorCode> {
     let inode_id = InodeIdentifier {
         device_id: fs.device_id(),
         index: ROOT_INODE_INDEX,
@@ -186,7 +184,6 @@ async fn mount_new_root(fs: &Arc<dyn FileSystem + Send>) -> Result<(), ErrorCode
     //root checks
     let root_dirs = fs.read_dir(ROOT_INODE_INDEX).await?;
     let required_dirs = ["tty", "proc", "net"];
-    #[allow(clippy::never_loop)]
     for required_dir in required_dirs.iter() {
         if !root_dirs.iter().any(|entry| entry.name.as_ref() == *required_dir) {
             println!("Root filesystem is missing required directory {required_dir}, creating it");
@@ -198,36 +195,87 @@ async fn mount_new_root(fs: &Arc<dyn FileSystem + Send>) -> Result<(), ErrorCode
     Ok(())
 }
 
-async fn mount_vfs_adapters(mut vfs: NoIntSpinlockGuard<'_, Vfs>) {
-    let proc_dev = VFS_ADAPTER_DEVICE.allocate_device(&mut vfs);
-    let tty_dev = VFS_ADAPTER_DEVICE.allocate_device(&mut vfs);
-    drop(vfs);
+fn mount_inode(parent_inode: InodeIdentifier, child_inode: InodeIdentifier) {
+    let mut global_mounts = w_lock_w_info!(GLOBAL_MOUNTS);
+    global_mounts.insert(parent_inode, child_inode);
+    //any other updates
+}
 
-    let proc_adapter: Arc<dyn FileSystem + Send> = Arc::new(crate::vfs::adapters::ProcAdapter::new(proc_dev.0));
-    let tty_adapter: Arc<dyn FileSystem + Send> = Arc::new(crate::vfs::adapters::TtyAdapter::new(tty_dev.0));
-    Box::pin(mount_filesystem(resolve_path("/tty"), tty_adapter, tty_dev.1.partition))
-        .await
-        .expect("Failed to mount /tty");
-    Box::pin(mount_filesystem(resolve_path("/proc"), proc_adapter, proc_dev.1.partition))
-        .await
-        .expect("Failed to mount /proc");
+fn unmount_inode(parent_inode: InodeIdentifier) {
+    let mut global_mounts = w_lock_w_info!(GLOBAL_MOUNTS);
+    global_mounts.remove(&parent_inode);
+    //any other updates
+}
+
+async fn mount_vfs_adapters(fs: &Arc<dyn FileSystem + Send>) {
+    let proc_adapter = crate::vfs::adapters::ProcAdapter::get();
+    let proc_adapter_partition_id = proc_adapter.partition_id();
+    let tty_adapter = crate::vfs::adapters::TtyAdapter::get();
+    let tty_adapter_partition_id = tty_adapter.partition_id();
+
+    let adapters = [
+        ("tty", tty_adapter, tty_adapter_partition_id),
+        ("proc", proc_adapter, proc_adapter_partition_id),
+    ];
+
+    let dir_entries = fs.read_dir(ROOT_INODE_INDEX).await.expect("Failed to read root dir");
+
+    for (mountpoint, adapter, _partition_id) in adapters.iter() {
+        let entry = dir_entries
+            .iter()
+            .find(|entry| entry.name.as_ref() == *mountpoint)
+            .expect("should have created dirs for root fs");
+        let inode_id = InodeIdentifier {
+            device_id: adapter.device_id(),
+            index: entry.inode,
+        };
+        mount_inode(
+            InodeIdentifier {
+                device_id: fs.device_id(),
+                index: entry.inode,
+            },
+            inode_id,
+        );
+    }
 }
 
 pub async fn unmount(path: ResolvedPathBorrowed<'_>) -> Result<(), ErrorCode> {
-    let inodes = fs_tree::get_unmount_inodes(path, None).await?;
-    let last_part_mount = fs_tree::unmount_inode(inodes.0);
-    if last_part_mount {
-        let mut vfs = lock_w_info!(VFS);
-        let Some(device) = vfs.devices.get(&inodes.1.device_id) else {
-            return Ok(());
-        };
-        let partition_id = device.partition;
-        let Some(partition) = vfs.mounted_filesystems.remove(&partition_id) else {
-            return Ok(());
-        };
-        partition.unmount().await?;
+    if path.inner().is_empty() {
+        unimplemented!("Unmounting root filesystem is not supported yet");
+        //TODO: update fs_tree root
     }
-    Ok(())
+
+    let path_len = path.inner().len();
+    let without_last = if path_len > 1 { path.index(0..path_len - 1) } else { path };
+    let (parent_inode, _parent_chain) = fs_tree::get_inode_chain(without_last, None, None).await?;
+
+    let inode = fs_tree::get_child(
+        parent_inode,
+        path.get(path_len - 1)
+            .ok_or(ErrorCode::InvalidOperation)? //TODO: fix
+            .to_string()
+            .as_str(),
+        false,
+        None,
+    )
+    .await?;
+
+    let inodes = fs_tree::resolve_mount_point(inode, None).ok_or(ErrorCode::NoEntry)?;
+
+    unmount_inode(inodes.0);
+
+    // if last_part_mount {
+    //     let mut vfs = lock_w_info!(VFS);
+    //     let Some(device) = vfs.devices.get(&inodes.1.device_id) else {
+    //         return Ok(());
+    //     };
+    //     let partition_id = device.partition;
+    //     let Some(partition) = vfs.mounted_filesystems.remove(&partition_id) else {
+    //         return Ok(());
+    //     };
+    //     partition.unmount().await?;
+    // }
+    todo!("Figure out unmounting whole partitions/devices. Checks need to happen BEFORE main unmount code");
 }
 
 #[heap_future::heap_future]
@@ -241,7 +289,7 @@ pub async fn open_file(
         return Err(ErrorCode::InvalidOperation);
     }
 
-    let (inode_index, inode_chain) = fs_tree::get_inode_chain(path, from).await?;
+    let (inode_index, inode_chain) = fs_tree::get_inode_chain(path, from, None).await?;
     let open_file = get_file(inode_index, *inode_chain.last().expect("parent chain has at least 1 element")).await?;
     let is_dir = unsafe { open_file.inode.get_read_ptr().type_mode.is_dir() };
     let file_flags = FileFlags::new_with_flags(open_flags.read(), open_flags.write(), open_flags.append(), is_dir);
@@ -300,7 +348,7 @@ pub async fn create_file(parent_dir: &FileHandle, name: &str, inode_type: InodeT
         device_id: new_parent_inode.device,
         index: file_inode.index,
     };
-    fs_tree::insert_inode(parent_dir.inode, name.to_string().into_boxed_str(), child_id)?;
+    fs_tree::link_inode(parent_dir.inode, name.to_string().into_boxed_str(), child_id);
     parent_inode.update_from(&new_parent_inode);
 
     Ok(())
@@ -337,7 +385,7 @@ pub async fn link_file(parent_dir: &FileHandle, name: &str, target: &FileHandle)
         device_id: parent_inode.device,
         index: target_inode.index,
     };
-    fs_tree::insert_inode(parent_dir.inode, name.to_string().into_boxed_str(), child_id)?;
+    fs_tree::link_inode(parent_dir.inode, name.to_string().into_boxed_str(), child_id);
     parent_inode.update_from(&new_parent_inode);
     target.open_file.inode.lock().await.link_cnt += 1;
 

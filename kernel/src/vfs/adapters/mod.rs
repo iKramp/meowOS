@@ -44,6 +44,7 @@ impl VfsAdapterDevice {
 #[async_trait::async_trait]
 pub trait VfsAdapterTrait: Debug + Send + Sync {
     fn device_id(&self) -> DeviceId;
+    fn partition_id(&self) -> Uuid;
     async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, ErrorCode>;
     async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, ErrorCode>;
     async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), ErrorCode>;
@@ -54,6 +55,10 @@ pub trait VfsAdapterTrait: Debug + Send + Sync {
 impl<T: VfsAdapterTrait> FileSystem for T {
     fn device_id(&self) -> DeviceId {
         VfsAdapterTrait::device_id(self)
+    }
+
+    fn partition_id(&self) -> Uuid {
+        VfsAdapterTrait::partition_id(self)
     }
 
     async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, ErrorCode> {

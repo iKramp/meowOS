@@ -21,6 +21,7 @@ pub trait FileSystemFactory: Send + Sync {
 #[async_trait::async_trait]
 pub trait FileSystem: Debug + Send + Sync {
     fn device_id(&self) -> DeviceId;
+    fn partition_id(&self) -> Uuid;
     async fn unmount(&self) -> Result<(), ErrorCode>;
     ///Offset must be page aligned
     async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, ErrorCode>;

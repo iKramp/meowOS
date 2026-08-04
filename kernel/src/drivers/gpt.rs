@@ -93,6 +93,7 @@ impl PartitionSchemeDriver for GPTDriver {
                 partitions.push((
                     partition_uuid,
                     Partition {
+                        part_id: partition_uuid,
                         start_sector: entry.starting_lba as usize,
                         size_sectors: (entry.ending_lba - entry.starting_lba + 1) as usize,
                         name,

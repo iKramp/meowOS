@@ -29,6 +29,7 @@ pub struct MountedPartition {
 #[derive(Debug, Clone)]
 pub struct Partition {
     pub fs_type: Uuid,
+    pub part_id: Uuid,
     pub device: DeviceId,
     pub start_sector: usize,
     pub size_sectors: usize,

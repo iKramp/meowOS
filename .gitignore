@@ -40,5 +40,4 @@ fat_disk.img
 #from scripts
 __pycache__/
 
-type_sizes.txt
-stack_sizes.txt
+perf_analysis/

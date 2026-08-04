@@ -300,6 +300,10 @@ impl FileSystem for FatDriver {
     fn device_id(&self) -> DeviceId {
         self.partition.partition.device
     }
+    fn partition_id(&self) -> Uuid {
+        self.partition.partition.part_id
+    }
+
     async fn unmount(&self) -> Result<(), ErrorCode> {
         Ok(())
     }

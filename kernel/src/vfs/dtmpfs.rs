@@ -6,7 +6,7 @@ use std::{
     boxed::Box,
     collections::btree_map::BTreeMap,
     error::ErrorCode,
-    lock_w_info,
+    lock_w_info, println,
     string::{String, ToString},
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
     vec::Vec,
@@ -45,12 +45,13 @@ pub(super) fn init_dtmpfs() {
 pub(super) struct DtmpfsFactory;
 
 impl DtmpfsFactory {
-    pub const UUID: Uuid = uuid::uuid!("00000000-0000-0000-0000-000000000000");
+    pub const UUID: Uuid = uuid::uuid!("cc956e68-649d-4744-aca4-c56b4c68c09d");
 }
 
 #[async_trait::async_trait]
 impl FileSystemFactory for DtmpfsFactory {
     async fn mount(&self, _partition: crate::drivers::block_device::disk::MountedPartition) -> Arc<dyn FileSystem + Send> {
+        println!("Mounting dtmpfs");
         let mut inodes = BTreeMap::new();
         inodes.insert(ROOT_INODE_INDEX, DtmpfsNode { children: Vec::new() });
         let fs = Dtmpfs {
@@ -76,6 +77,10 @@ impl FileSystemFactory for DtmpfsFactory {
 impl FileSystem for Dtmpfs {
     fn device_id(&self) -> DeviceId {
         unsafe { DeviceId(0) }
+    }
+
+    fn partition_id(&self) -> Uuid {
+        DtmpfsFactory::UUID
     }
 
     async fn unmount(&self) -> Result<(), ErrorCode> {

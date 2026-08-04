@@ -94,6 +94,7 @@ pub fn resolve_path(path: &str) -> ResolvedPath {
     let chunks = path.split('/');
     let mut path = Vec::new();
     for chunk in chunks {
+        //according to posix multiple slashes are the same as a single slash. Ignore
         if chunk.is_empty() {
             continue;
         }

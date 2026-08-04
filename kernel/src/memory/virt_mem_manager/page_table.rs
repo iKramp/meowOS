@@ -30,7 +30,7 @@ impl PageTable {
         if level != 1 || dealloc_phys {
             let self_obj = unsafe { get_at_addr::<Self, _>(self_phys) };
 
-            for entry in self_obj.entries {
+            for entry in &self_obj.entries {
                 if !entry.present() {
                     continue;
                 }

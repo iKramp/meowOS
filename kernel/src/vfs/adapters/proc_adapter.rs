@@ -1,20 +1,36 @@
 use crate::{
     memory::addresses::*,
-    vfs::{DeviceId, InodeTypeAndPerms},
+    vfs::{DeviceId, FileSystem, InodeTypeAndPerms},
 };
 
 use super::{DirEntry, VfsAdapterTrait};
-use std::{boxed::Box, error::ErrorCode, println};
+use std::{
+    boxed::Box,
+    error::ErrorCode,
+    lock_w_info, println,
+    sync::{arc::Arc, once_lock::OnceLock},
+};
+
+static PROC_ADAPTER: OnceLock<Arc<dyn FileSystem + Send>> = OnceLock::new();
 
 #[derive(Debug)]
 pub struct ProcAdapter {
     device_id: crate::vfs::DeviceId,
+    device_details: crate::vfs::DeviceDetails,
 }
 
 impl ProcAdapter {
-    pub fn new(device_id: crate::vfs::DeviceId) -> Self {
-        println!("proc adapter created with device_id: {:?}", device_id);
-        ProcAdapter { device_id }
+    pub fn get() -> Arc<dyn FileSystem + Send> {
+        PROC_ADAPTER
+            .get_or_init(|| {
+                let device_details = crate::vfs::VFS_ADAPTER_DEVICE.allocate_device(&mut *lock_w_info!(crate::vfs::VFS));
+                println!("proc adapter created with device_id: {:?}", device_details.0);
+                Arc::new(Self {
+                    device_id: device_details.0,
+                    device_details: device_details.1,
+                })
+            })
+            .clone()
     }
 }
 
@@ -22,6 +38,10 @@ impl ProcAdapter {
 impl VfsAdapterTrait for ProcAdapter {
     fn device_id(&self) -> DeviceId {
         self.device_id
+    }
+
+    fn partition_id(&self) -> uuid::Uuid {
+        self.device_details.partition
     }
 
     async fn read(

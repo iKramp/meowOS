@@ -3,17 +3,21 @@ use core::sync::atomic::AtomicU64;
 use std::collections::btree_map::BTreeMap;
 use std::fmt::Debug;
 use std::string::ToString;
+use std::sync::arc::Arc;
+use std::sync::once_lock::OnceLock;
 use std::sync::rw_lock::{RWLockModeRead, RWSpinlock, RWSpinlockGuard};
 use std::{boxed::Box, error::ErrorCode, vec::Vec};
-use std::{println, r_lock_w_info, w_lock_w_info};
+use std::{lock_w_info, println, r_lock_w_info, w_lock_w_info};
 
 use crate::drivers::block_device::disk::DirEntry;
 use crate::memory::addresses::*;
 use crate::vfs::adapters::VfsAdapterTrait;
-use crate::vfs::{DeviceId, Inode, InodeIndex, InodeTypeAndPerms, inode};
+use crate::vfs::{DeviceId, FileSystem, Inode, InodeIndex, InodeTypeAndPerms, inode};
 
 const ENTRIES_PER_NIC_DEVICE: u64 = 2;
 const _: () = assert!(ENTRIES_PER_NIC_DEVICE.is_power_of_two());
+
+static NET_ADAPTER: OnceLock<Arc<dyn FileSystem + Send>> = OnceLock::new();
 
 enum NICEntryType {
     MainFolder = 0,
@@ -34,17 +38,24 @@ type NetAdapterEtherDeviceMap = BTreeMap<InodeIndex, Box<dyn NicAdapter>>;
 pub struct NetAdapter {
     ether_devices: RWSpinlock<NetAdapterEtherDeviceMap>,
     inode_counter: AtomicU64,
-    device_id: DeviceId,
+    device_id: crate::vfs::DeviceId,
+    device_details: crate::vfs::DeviceDetails,
 }
 
 impl NetAdapter {
-    pub fn new(device_id: DeviceId) -> Self {
-        println!("net adapter created with device_id: {:?}", device_id);
-        Self {
-            ether_devices: RWSpinlock::new(BTreeMap::new()),
-            inode_counter: AtomicU64::new(ENTRIES_PER_NIC_DEVICE),
-            device_id,
-        }
+    pub fn get() -> Arc<dyn FileSystem + Send> {
+        NET_ADAPTER
+            .get_or_init(|| {
+                let device_details = crate::vfs::VFS_ADAPTER_DEVICE.allocate_device(&mut *lock_w_info!(crate::vfs::VFS));
+                println!("proc adapter created with device_id: {:?}", device_details.0);
+                Arc::new(Self {
+                    device_id: device_details.0,
+                    device_details: device_details.1,
+                    ether_devices: RWSpinlock::new(BTreeMap::new()),
+                    inode_counter: AtomicU64::new(ENTRIES_PER_NIC_DEVICE),
+                })
+            })
+            .clone()
     }
 
     pub fn register_ether_device(&mut self, device: Box<dyn NicAdapter>) {
@@ -59,6 +70,10 @@ impl NetAdapter {
 impl VfsAdapterTrait for NetAdapter {
     fn device_id(&self) -> DeviceId {
         self.device_id
+    }
+
+    fn partition_id(&self) -> uuid::Uuid {
+        self.device_details.partition
     }
 
     async fn read(
@@ -139,7 +154,7 @@ impl VfsAdapterTrait for NetAdapter {
 
     async fn write(&self, inode: InodeIndex, _offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), ErrorCode> {
         if size == 0 {
-            return Ok((self.stat(inode).await?, 0));
+            return Ok((VfsAdapterTrait::stat(self, inode).await?, 0));
         }
         if buffer.len() != size.div_ceil(4096) as usize {
             return Err(ErrorCode::InvalidArgument);
@@ -168,7 +183,7 @@ impl VfsAdapterTrait for NetAdapter {
                 let slice = unsafe { core::slice::from_raw_parts(ptr, size as usize) };
                 device.send_packet(slice)?;
 
-                Ok((self.stat(inode).await?, size))
+                Ok((VfsAdapterTrait::stat(self, inode).await?, size))
             }
             _ => return Err(ErrorCode::UnsupportedOperation),
         }

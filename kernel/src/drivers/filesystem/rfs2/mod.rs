@@ -181,6 +181,7 @@ impl Rfs2 {
         fs
     }
 
+    #[heap_future::heap_future]
     async fn update_superblock(&self, mut superblock: SuperBlock) {
         superblock.calculate_checksum();
 
@@ -221,6 +222,7 @@ impl Rfs2 {
         res
     }
 
+    #[heap_future::heap_future]
     async fn allocate_block_locked(&self) -> BlockPtr {
         let mut block = WorkingBlock::new();
         for i in 0..self.groups {
@@ -245,6 +247,7 @@ impl Rfs2 {
         drop(lock);
     }
 
+    #[heap_future::heap_future]
     async fn release_block_locked(&self, block: BlockPtr) {
         if block.is_multiple_of(GROUP_SIZE_BLOCKS as u64) {
             println!(level:error, "refusing to free inode bitmask");
@@ -340,6 +343,7 @@ impl Rfs2 {
         }
     }
 
+    #[heap_future::heap_future]
     pub async fn release_inode(&self, index: InodeIndex) {
         let bitmask_index = index as usize / INODES_PER_BITMASK;
         let in_bitmask_index = index as usize % INODES_PER_BITMASK;
