@@ -1,10 +1,20 @@
 use std::{boxed::Box, error::ErrorCode, println};
 
-use crate::vfs::{self, InodeTypeAndPerms, ResolvedPath, file::OpenFlags};
+use crate::{
+    proc::CommandSplitter,
+    shell::AsyncCommandRetType,
+    vfs::{self, InodeTypeAndPerms, ResolvedPath, file::OpenFlags},
+};
 
-#[heap_future::heap_future]
-pub(super) async fn cmd_mkdir(dir_name: &str) -> Result<(), ErrorCode> {
-    let resolved_path = vfs::resolve_path(dir_name);
+//to fix lifetimes
+pub(super) fn cmd_mkdir(args: CommandSplitter) -> AsyncCommandRetType {
+    Box::pin(cmd_mkdir_internal(args))
+}
+
+async fn cmd_mkdir_internal(mut args: CommandSplitter) -> Result<(), ErrorCode> {
+    let dir_name = args.next().ok_or(ErrorCode::InvalidArgument)?;
+
+    let resolved_path = vfs::resolve_path(&dir_name);
     let open_flags = *OpenFlags(0).set_read(true).set_write(true);
     let create_flags = InodeTypeAndPerms::new_dir(0o777);
     let mut parent_file = vfs::open_file((&ResolvedPath::root()).into(), None, open_flags).await?;

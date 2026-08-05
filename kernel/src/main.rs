@@ -11,6 +11,7 @@
 #![feature(async_drop)]
 #![allow(internal_features)]
 #![allow(clippy::fn_to_numeric_cast)]
+#![feature(string_into_chars)]
 
 extern crate static_cond;
 

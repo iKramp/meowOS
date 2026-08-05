@@ -47,14 +47,14 @@ pub fn block_task<T>(task: Future<T>) -> T {
 
 //probably won't change return type, tasks should modify process state or other things themselves (through
 //a pointer)
-pub type AsyncTask = Future<()>;
-struct AsyncTaskWrapper {
-    task: AsyncTask,
+pub type AsyncTask<'a> = Future<'a, ()>;
+struct AsyncTaskWrapper<'a> {
+    task: AsyncTask<'a>,
     proc_id: Option<Pid>,
     id: u64,
 }
 
-impl core::fmt::Debug for AsyncTaskWrapper {
+impl core::fmt::Debug for AsyncTaskWrapper<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("FfiSafeAsyncTaskInternal")
             .field("proc_id", &self.proc_id)
@@ -65,10 +65,10 @@ impl core::fmt::Debug for AsyncTaskWrapper {
 
 pub struct AsyncTaskData {
     task_id_counter: AtomicU64,
-    task_list: NoIntSpinlock<std::queue::DataQueueHead<AsyncTaskWrapper>>,
+    task_list: NoIntSpinlock<std::queue::DataQueueHead<AsyncTaskWrapper<'static>>>,
     tasks_to_wake: NoIntSpinlock<Vec<u64>>,
     // waiting_tasks: NoIntSpinlock<BTreeMap<u64, AsyncTaskInternal>>,
-    waiting_tasks: NoIntSpinlock<Vec<(u64, AsyncTaskWrapper)>>,
+    waiting_tasks: NoIntSpinlock<Vec<(u64, AsyncTaskWrapper<'static>)>>,
 }
 
 impl AsyncTaskData {
@@ -111,7 +111,7 @@ pub enum PidOption {
     Some(Pid),
 }
 
-pub extern "C" fn add_task(task: AsyncTask, pid: PidOption) {
+pub extern "C" fn add_task(task: AsyncTask<'static>, pid: PidOption) {
     let locals = CpuLocals::get();
 
     let id = locals
@@ -141,7 +141,7 @@ pub fn wake_task(task_id: u64, apic_id: u8) {
     to_wake.push(task_id);
 }
 
-fn sleep_task(task: AsyncTaskWrapper) {
+fn sleep_task(task: AsyncTaskWrapper<'static>) {
     let locals = CpuLocals::get();
     let mut waiting_lock = lock_w_info!(locals.async_task_data.waiting_tasks);
     waiting_lock.push((task.id, task));
@@ -235,7 +235,7 @@ fn ros_waker(data: Box<WakerData>) -> Waker {
     unsafe { Waker::from_raw(ros_raw_waker(data)) }
 }
 
-fn process_single_task(task: AsyncTaskWrapper) {
+fn process_single_task(task: AsyncTaskWrapper<'static>) {
     let waker_data = Box::new(WakerData {
         apic_id: CpuLocals::get().apic_id,
         task_id: task.id,

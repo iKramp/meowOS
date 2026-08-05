@@ -1,8 +1,11 @@
 use core::str::FromStr;
+use std::boxed::Box;
 use std::error::ErrorCode;
 
 use uuid::Uuid;
 
+use crate::proc::CommandSplitter;
+use crate::shell::AsyncCommandRetType;
 use crate::vfs::{self};
 
 //  comment: rfs: root=5f8777fa-f706-421a-9528-5364c9679890
@@ -12,12 +15,19 @@ use crate::vfs::{self};
 const RFS2_UUID: Uuid = Uuid::from_u128(0x050532EFC9D54A38A2EC2FC3D79E5554);
 const FAT_UUID: Uuid = Uuid::from_u128(0xe9a75ddc058745af963febbc44c99083);
 
-pub(super) async fn cmd_mount(mountpoint: &str, part_id: &str) -> Result<(), ErrorCode> {
-    let resolved_mountpoint = vfs::resolve_path(mountpoint);
-    let part_id = match part_id {
+pub(super) fn cmd_mount(args: CommandSplitter) -> AsyncCommandRetType {
+    Box::pin(cmd_mount_internal(args))
+}
+
+#[heap_future::heap_future]
+pub async fn cmd_mount_internal(mut args: CommandSplitter) -> Result<(), ErrorCode> {
+    let mountpoint = args.next().ok_or(ErrorCode::InvalidArgument)?;
+    let part_id = args.next().ok_or(ErrorCode::InvalidArgument)?;
+    let resolved_mountpoint = vfs::resolve_path(&mountpoint);
+    let part_id = match part_id.as_str() {
         "rfs2" => RFS2_UUID,
         "fat" => FAT_UUID,
-        _ => Uuid::from_str(part_id).map_err(|_| ErrorCode::InvalidArgument)?,
+        _ => Uuid::from_str(&part_id).map_err(|_| ErrorCode::InvalidArgument)?,
     };
 
     vfs::mount_blkdev_partition(part_id, resolved_mountpoint).await

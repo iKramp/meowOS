@@ -290,7 +290,9 @@ pub async fn open_file(
     }
 
     let (inode_index, inode_chain) = fs_tree::get_inode_chain(path, from, None).await?;
-    let open_file = get_file(inode_index, *inode_chain.last().expect("parent chain has at least 1 element")).await?;
+    let chain_len = inode_chain.len();
+    let parent_in_chain_index = if chain_len == 1 { 0 } else { chain_len - 2 };
+    let open_file = get_file(inode_index, inode_chain[parent_in_chain_index]).await?;
     let is_dir = unsafe { open_file.inode.get_read_ptr().type_mode.is_dir() };
     let file_flags = FileFlags::new_with_flags(open_flags.read(), open_flags.write(), open_flags.append(), is_dir);
     //TODO: check permissions
@@ -411,7 +413,7 @@ pub async fn unlink_file(parent_dir: &FileHandle, name: &str) -> Result<(), Erro
 
     let (new_parent_inode, new_child_inode) = fs.unlink(parent_inode.index, name).await?;
     //ignore error, at most there's no entry, but that shouldn't matter too much
-    let _ = fs_tree::unlink_inode(parent_dir.inode, name);
+    fs_tree::unlink_inode(parent_dir.inode, name);
 
     parent_inode.update_from(&new_parent_inode);
     let child_file = get_file(

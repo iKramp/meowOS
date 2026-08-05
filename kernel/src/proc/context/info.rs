@@ -1,6 +1,10 @@
 use bitfield::bitfield;
-use core::{fmt::Debug, str::Chars};
-use std::{boxed::Box, string::String, vec::Vec};
+use core::fmt::Debug;
+use std::{
+    boxed::Box,
+    string::{String, ToString},
+    vec::Vec,
+};
 
 use crate::memory::addresses::VirtAddr;
 
@@ -228,17 +232,20 @@ pub enum ContextInfoError {
     InvalidCmdLine,
 }
 
-pub struct CommandSplitter<'a> {
-    inner: Chars<'a>,
+#[derive(Debug, Clone)]
+pub struct CommandSplitter {
+    inner: std::string::IntoChars,
 }
 
-impl CommandSplitter<'_> {
-    pub fn new(cmdline: &str) -> CommandSplitter<'_> {
-        CommandSplitter { inner: cmdline.chars() }
+impl CommandSplitter {
+    pub fn new(cmdline: &str) -> CommandSplitter {
+        CommandSplitter {
+            inner: cmdline.to_string().into_chars(),
+        }
     }
 }
 
-impl Iterator for CommandSplitter<'_> {
+impl Iterator for CommandSplitter {
     type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {

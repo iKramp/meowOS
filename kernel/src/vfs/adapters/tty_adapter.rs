@@ -26,7 +26,7 @@ impl TtyAdapter {
     pub fn get() -> Arc<dyn FileSystem + Send> {
         PROC_ADAPTER
             .get_or_init(|| {
-                let device_details = crate::vfs::VFS_ADAPTER_DEVICE.allocate_device(&mut *lock_w_info!(crate::vfs::VFS));
+                let device_details = crate::vfs::VFS_ADAPTER_DEVICE.allocate_device(&mut lock_w_info!(crate::vfs::VFS));
                 println!("tty adapter created with device_id: {:?}", device_details.0);
                 Arc::new(Self {
                     device_id: device_details.0,

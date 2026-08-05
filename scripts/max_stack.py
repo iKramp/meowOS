@@ -19,6 +19,16 @@ ROOTS = [
     # "_RNvNtNtCsfO4Hqg3m9yM_6kernel10interrupts6macros25general_interrupt_handler"
 ]
 
+# Fill this in with indirect/dynamic dispatches that the static callgraph misses.
+# Format:
+#     caller: [callee1, callee2, ...]
+MANUAL_CALLS = {
+    # "_RNv...scheduler": [
+    #     "_RNv...task_a",
+    #     "_RNv...task_b",
+    # ],
+}
+
 # ------------------------------------------------------------
 
 stack_size = {}
@@ -55,6 +65,17 @@ with open(CALLGRAPH_FILE) as f:
 # Ensure every function exists in graph
 for fn in stack_size:
     graph.setdefault(fn, [])
+
+# Add manually specified indirect calls.
+for caller, callees in MANUAL_CALLS.items():
+    graph.setdefault(caller, [])
+
+    for callee in callees:
+        if callee not in graph[caller]:
+            graph[caller].append(callee)
+
+        # Ensure the callee also exists as a node.
+        graph.setdefault(callee, [])
 
 memo = {}
 memo_path = {}

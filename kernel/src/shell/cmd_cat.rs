@@ -2,13 +2,20 @@ use std::{Box, error::ErrorCode, lock_w_info, vec::Vec};
 
 use crate::{
     memory::{addresses::VirtAddr, physical_allocator},
+    proc::CommandSplitter,
+    shell::AsyncCommandRetType,
     tty::TTY,
     vfs::{self, file::OpenFlags},
 };
 
-#[heap_future::heap_future]
-pub(super) async fn cmd_cat(path: &str) -> Result<(), ErrorCode> {
-    let resolved_path = vfs::resolve_path(path);
+//to fix lifetimes
+pub(super) fn cmd_cat(args: CommandSplitter) -> AsyncCommandRetType {
+    Box::pin(cmd_cat_internal(args))
+}
+
+async fn cmd_cat_internal(mut args: CommandSplitter) -> Result<(), ErrorCode> {
+    let path = args.next().ok_or(ErrorCode::InvalidArgument)?;
+    let resolved_path = vfs::resolve_path(&path);
     let file_handle = vfs::open_file((&resolved_path).into(), None, OpenFlags(1)).await?;
     let file_info = vfs::stat_file(&file_handle).await;
 

@@ -1,13 +1,15 @@
 use crate::{
-    memory,
     proc::{self, Pid},
-    shell::{cmd_cat::cmd_cat, cmd_ls::cmd_ls, cmd_mkdir::cmd_mkdir, cmd_mount::cmd_mount},
+    shell::{cmd_cat::cmd_cat, cmd_ls::cmd_ls, cmd_mkdir::cmd_mkdir, cmd_mmap::cmd_mmap, cmd_mount::cmd_mount},
     task_runner::PidOption,
     tty::TTY,
     vfs::{self, ResolvedPath, ResolvedPathBorrowed},
 };
+use core::pin::Pin;
 use std::{
+    alloc::borrow::ToOwned,
     boxed::Box,
+    error::ErrorCode,
     format, lock_w_info, println,
     string::{String, ToString},
     sync::no_int_spinlock::NoIntSpinlock,
@@ -16,7 +18,12 @@ use std::{
 mod cmd_cat;
 mod cmd_ls;
 mod cmd_mkdir;
+mod cmd_mmap;
 mod cmd_mount;
+
+type AsyncCommandRetType = Pin<Box<dyn std::future::Future<Output = Result<(), ErrorCode>> + Send>>;
+type AsyncCmd = fn(proc::CommandSplitter) -> AsyncCommandRetType;
+type SyncCmd = fn(proc::CommandSplitter) -> Result<(), ErrorCode>;
 
 pub struct ShellState {
     current_dir: Option<ResolvedPath>,
@@ -30,6 +37,9 @@ pub static SHELL_STATE: NoIntSpinlock<ShellState> = NoIntSpinlock::new(ShellStat
     started_proc: false,
 });
 
+static ASYNC_CMDS: &[(&str, AsyncCmd)] = &[("ls", cmd_ls), ("cat", cmd_cat), ("mount", cmd_mount), ("mkdir", cmd_mkdir)];
+static SYNC_CMDS: &[(&str, SyncCmd)] = &[("mmap", cmd_mmap)];
+
 pub fn init() {
     let mut shell_state = lock_w_info!(SHELL_STATE);
     shell_state.current_dir = Some(ResolvedPath::root());
@@ -42,6 +52,8 @@ impl ShellState {
             self.current_dir = Some(ResolvedPath::root());
         }
 
+        println!("Received command: {}", cmd.0);
+
         let (cmd, _) = cmd;
 
         let cmd = cmd.trim();
@@ -52,115 +64,31 @@ impl ShellState {
             return;
         };
 
-        match cmd_name.as_str() {
-            "ls" => {
-                println!("ls command executed");
-                let path = chunks.next().unwrap_or_else(|| ".".to_string());
-                self.started_proc = true;
-                let task = Box::pin(async move {
-                    let res = cmd_ls(&path).await;
-                    match res {
-                        Ok(()) => lock_w_info!(SHELL_STATE).command_finished(),
-                        Err(e) => {
-                            lock_w_info!(TTY).print(&format!("Error executing ls command: {:?}\n", e));
-                            lock_w_info!(SHELL_STATE).command_finished();
-                        }
-                    }
-                });
-                let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
-                crate::task_runner::add_task(ffi_safe_task, PidOption::None);
-            }
-            "cat" => {
-                println!("cat command executed");
-                let path = chunks.next().unwrap_or_else(|| ".".to_string());
-                self.started_proc = true;
-                let task = Box::pin(async move {
-                    let res = cmd_cat(&path).await;
-                    match res {
-                        Ok(()) => lock_w_info!(SHELL_STATE).command_finished(),
-                        Err(e) => {
-                            lock_w_info!(TTY).print(&format!("Error executing cat command: {:?}\n", e));
-                            lock_w_info!(SHELL_STATE).command_finished();
-                        }
-                    }
-                });
-                let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
-                crate::task_runner::add_task(ffi_safe_task, PidOption::None);
-            }
-            "mount" => {
-                println!("mount command executed");
-                let path = chunks.next().unwrap_or_else(|| ".".to_string());
-                let part_id = chunks.next().unwrap_or_else(|| "no_uuid_provided".to_string());
-                self.started_proc = true;
-                let task = Box::pin(async move {
-                    let res = cmd_mount(&path, &part_id).await;
-                    match res {
-                        Ok(()) => lock_w_info!(SHELL_STATE).command_finished(),
-                        Err(e) => {
-                            lock_w_info!(TTY).print(&format!(
-                                "Error executing mount command: {:?} with args {} {}\n",
-                                e, path, part_id
-                            ));
-                            lock_w_info!(SHELL_STATE).command_finished();
-                        }
-                    }
-                });
-                let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
-                crate::task_runner::add_task(ffi_safe_task, PidOption::None);
-            }
-            "mkdir" => {
-                println!("mkdir command executed");
-                let path = chunks.next().unwrap_or_else(|| ".".to_string());
-                self.started_proc = true;
-                let task = Box::pin(async move {
-                    let res = cmd_mkdir(&path).await;
-                    match res {
-                        Ok(()) => lock_w_info!(SHELL_STATE).command_finished(),
-                        Err(e) => {
-                            lock_w_info!(TTY).print(&format!("Error executing mkdir command: {:?} with args {}\n", e, path));
-                            lock_w_info!(SHELL_STATE).command_finished();
-                        }
-                    }
-                });
-                let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
-                crate::task_runner::add_task(ffi_safe_task, PidOption::None);
-            }
-            "mmap" => {
-                println!("mmap command executed");
-                memory::print_mem_mapping();
-                self.command_finished();
-            }
-            prog_path if prog_path.starts_with("/") => {
-                println!("Executing file operation command: {}", prog_path);
-                let resolved_path = vfs::resolve_path(prog_path);
+        let args_clone = chunks.clone();
+        println!("Command: {}, Args: {:?}", cmd_name, args_clone);
 
-                let cmd_cloned = cmd.to_string();
-                let prog_path_cloned = prog_path.to_string();
-
-                self.started_proc = true;
-
-                let task = Box::pin(async move {
-                    let run_proc_future = proc::run_process_default_env((&resolved_path).into(), &cmd_cloned, "/").await;
-                    match run_proc_future {
-                        Ok(pid) => {
-                            let mut self_state = lock_w_info!(SHELL_STATE);
-                            self_state.running_proc = Some(pid);
-                            self_state.started_proc = false;
-                        }
-                        Err(e) => {
-                            lock_w_info!(TTY).print(&format!("Failed to start process: {}, error: {:?}\n", prog_path_cloned, e));
-                            lock_w_info!(SHELL_STATE).command_finished();
-                        }
-                    }
-                });
-                let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
-                crate::task_runner::add_task(ffi_safe_task, PidOption::None);
-            }
-            _ => {
-                lock_w_info!(TTY).print(&format!("Unknown command: {}\n", cmd_name));
-                self.command_finished();
-            }
+        let sync_cmd = SYNC_CMDS.iter().find(|&&cmd| cmd_name == cmd.0);
+        if let Some((_, cmd)) = sync_cmd {
+            println!("Executing sync command: {}", cmd_name);
+            self.run_sync_cmd(*cmd, chunks);
+            return;
         }
+
+        let async_cmd = ASYNC_CMDS.iter().find(|&&cmd| cmd_name == cmd.0);
+        if let Some((_, cmd)) = async_cmd {
+            println!("Executing async command: {}", cmd_name);
+            self.run_async_cmd(*cmd, chunks);
+            return;
+        }
+
+        let success = self.try_execute_program(&cmd_name, chunks);
+        if success {
+            println!("Executing program: {}", cmd_name);
+            return;
+        }
+
+        lock_w_info!(TTY).print(&format!("Unknown command: {}\n", cmd_name));
+        self.command_finished();
     }
 
     pub fn can_consume_shell_command(&self) -> bool {
@@ -193,5 +121,64 @@ impl ShellState {
         }
 
         self.print_prompt();
+    }
+
+    fn run_async_cmd(&mut self, cmd: AsyncCmd, args: proc::CommandSplitter) {
+        self.started_proc = true;
+        let fut = async move {
+            let args_clone = args.clone();
+            let res = cmd(args).await;
+            if let Err(e) = res {
+                lock_w_info!(TTY).print(&format!("Error executing command: {:?} with args: {:?}\n", e, args_clone));
+            }
+            lock_w_info!(crate::shell::SHELL_STATE).command_finished();
+        };
+
+        let ffi_safe_task = std::ffi_future::future::into_ffi_future(fut);
+        crate::task_runner::add_task(ffi_safe_task, PidOption::None);
+    }
+
+    fn run_sync_cmd(&mut self, cmd: SyncCmd, args: proc::CommandSplitter) {
+        let res = cmd(args);
+        if let Err(e) = res {
+            lock_w_info!(TTY).print(&format!("Error executing command: {:?}\n", e));
+        }
+        self.command_finished();
+    }
+
+    fn try_execute_program(&mut self, prog_path: &str, args: proc::CommandSplitter) -> bool {
+        if !prog_path.starts_with("/") && !prog_path.starts_with("./") && !prog_path.starts_with("../") {
+            return false;
+        }
+
+        println!("Executing file operation command: {}", prog_path);
+        let resolved_path = vfs::resolve_path(prog_path);
+
+        let mut cmd_cloned = prog_path.to_owned();
+        for arg in args {
+            cmd_cloned.push(' ');
+            cmd_cloned.push_str(&arg);
+        }
+        let prog_path = prog_path.to_owned();
+
+        self.started_proc = true;
+
+        let task = Box::pin(async move {
+            let run_proc_future = proc::run_process_default_env((&resolved_path).into(), &cmd_cloned, "/").await;
+            match run_proc_future {
+                Ok(pid) => {
+                    let mut self_state = lock_w_info!(SHELL_STATE);
+                    self_state.running_proc = Some(pid);
+                    self_state.started_proc = false;
+                }
+                Err(e) => {
+                    lock_w_info!(TTY).print(&format!("Failed to start process: {}, error: {:?}\n", prog_path, e));
+                    lock_w_info!(SHELL_STATE).command_finished();
+                }
+            }
+        });
+        let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
+        crate::task_runner::add_task(ffi_safe_task, PidOption::None);
+        true
     }
 }

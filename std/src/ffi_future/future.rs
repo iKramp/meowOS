@@ -22,13 +22,14 @@ impl<T> Poll<T> {
 }
 
 #[repr(C)]
-pub struct Future<Output> {
+pub struct Future<'a, Output> {
     pub data: NonNull<()>, //thin pointer to data only, not to dyn object or anything else
     pub poll_fn: unsafe extern "C" fn(NonNull<()>, &Waker) -> Poll<Output>,
     pub drop_fn: unsafe extern "C" fn(NonNull<()>),
+    lifetime: core::marker::PhantomData<&'a ()>,
 }
 
-pub fn into_ffi_future<'a, F>(fut: F) -> Future<F::Output>
+pub fn into_ffi_future<'a, F>(fut: F) -> Future<'a, F::Output>
 where
     F: StdFuture + 'a,
 {
@@ -61,17 +62,18 @@ where
         data: unsafe { NonNull::new_unchecked(Box::into_raw(boxed) as *mut ()) },
         poll_fn: poll_impl::<F>,
         drop_fn: drop_impl::<F>,
+        lifetime: core::marker::PhantomData,
     }
 }
 
-impl<Output> Future<Output> {
+impl<Output> Future<'_, Output> {
     pub fn poll(&mut self, waker: &Waker) -> Poll<Output> {
         // # Safety: Data is owned and validated at construction time
         unsafe { (self.poll_fn)(self.data, waker) }
     }
 }
 
-impl<Output> Drop for Future<Output> {
+impl<Output> Drop for Future<'_, Output> {
     fn drop(&mut self) {
         // # Safety: Data is owned and validated at construction time
         unsafe { (self.drop_fn)(self.data) }
