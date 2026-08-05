@@ -120,6 +120,7 @@ pub(super) fn remove_device(_device_id: DeviceId) {
     cache.inodes.clear(); //easiest and fastest ig :3
 }
 
+#[heap_future::heap_future]
 pub async fn get_child(
     parent: InodeIdentifier,
     name: &str,
