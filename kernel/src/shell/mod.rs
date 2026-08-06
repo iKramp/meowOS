@@ -1,6 +1,6 @@
 use crate::{
     proc::{self, Pid},
-    shell::{cmd_cat::cmd_cat, cmd_ls::cmd_ls, cmd_mkdir::cmd_mkdir, cmd_mmap::cmd_mmap, cmd_mount::cmd_mount},
+    shell::{cmd_cat::cmd_cat, cmd_cp::cmd_cp, cmd_ls::cmd_ls, cmd_mkdir::cmd_mkdir, cmd_mmap::cmd_mmap, cmd_mount::cmd_mount},
     task_runner::PidOption,
     tty::TTY,
     vfs::{self, ResolvedPath, ResolvedPathBorrowed},
@@ -16,10 +16,12 @@ use std::{
 };
 
 mod cmd_cat;
+mod cmd_cp;
 mod cmd_ls;
 mod cmd_mkdir;
 mod cmd_mmap;
 mod cmd_mount;
+mod cmd_rm;
 
 type AsyncCommandRetType = Pin<Box<dyn std::future::Future<Output = Result<(), ErrorCode>> + Send>>;
 type AsyncCmd = fn(proc::CommandSplitter) -> AsyncCommandRetType;
@@ -37,7 +39,13 @@ pub static SHELL_STATE: NoIntSpinlock<ShellState> = NoIntSpinlock::new(ShellStat
     started_proc: false,
 });
 
-static ASYNC_CMDS: &[(&str, AsyncCmd)] = &[("ls", cmd_ls), ("cat", cmd_cat), ("mount", cmd_mount), ("mkdir", cmd_mkdir)];
+static ASYNC_CMDS: &[(&str, AsyncCmd)] = &[
+    ("ls", cmd_ls),
+    ("cat", cmd_cat),
+    ("mount", cmd_mount),
+    ("mkdir", cmd_mkdir),
+    ("cp", cmd_cp),
+];
 static SYNC_CMDS: &[(&str, SyncCmd)] = &[("mmap", cmd_mmap)];
 
 pub fn init() {

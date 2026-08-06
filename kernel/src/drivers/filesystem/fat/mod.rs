@@ -260,6 +260,10 @@ impl FatDriver {
             }
             curr_cluster = self.read_fat_entry(curr_cluster).await;
         }
+        if curr_cluster == 0 || Self::entry_is_final(curr_cluster) {
+            return None;
+        }
+
         let sector_in_cluster = sector & self.header.BPB_SectorsPerCluster as u32;
         let cluster_start = self.get_sector_from_cluster(curr_cluster);
         Some(self.read_sector(cluster_start + sector_in_cluster).await)
@@ -319,7 +323,7 @@ impl FileSystem for FatDriver {
 
         for i in start_sector..(start_sector + size_sectors) {
             let Some(data) = self.read_file_sector(i as u32, inode as u32).await else {
-                return Ok(i - start_sector * 512);
+                return Ok((i - start_sector) * 512);
             };
             let buffer_phys = buffer[i as usize / 8];
             let buffer_virt: VirtAddr = buffer_phys.into();

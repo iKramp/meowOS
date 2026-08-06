@@ -1,4 +1,4 @@
-use std::{boxed::Box, vec::Vec};
+use std::{boxed::Box, error::ErrorCode, vec::Vec};
 
 ///A wrapper type for path, that have been resolved to a list of path components
 ///That is, the path starts from root and does not contain any "." or ".." components
@@ -105,4 +105,20 @@ pub fn resolve_path(path: &str) -> ResolvedPath {
     }
 
     ResolvedPath::new(path.into())
+}
+
+pub fn validate_path<'a>(path: &'a [Box<str>]) -> Result<ResolvedPathBorrowed<'a>, ErrorCode> {
+    for component in path.iter() {
+        if component.is_empty() {
+            return Err(ErrorCode::InvalidArgument);
+        }
+        if component.contains('/') {
+            return Err(ErrorCode::InvalidArgument);
+        }
+        if **component == *"." || **component == *".." {
+            return Err(ErrorCode::InvalidArgument);
+        }
+    }
+
+    Ok(ResolvedPathBorrowed(path))
 }
