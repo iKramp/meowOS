@@ -1,5 +1,5 @@
 use crate::memory::addresses::*;
-use std::{error::ErrorCode, vec::Vec};
+use std::{error::KernelError, kerror_unwrapped, vec::Vec};
 
 use crate::drivers::pci::{BarTrait, FullPciDevType, MemoryBar, capabilities::CapAddr, legacy, port_access};
 
@@ -12,13 +12,13 @@ fn set_table_entry(bar: &MemoryBar, bar_off: u32, entry_index: u32, msg_addr: u6
     bar.write_to_bar(&vector_control, bar_off as u64 + (entry_index as u64) * 16 + 12);
 }
 
-pub fn ini_msix_interrupt(dev: &FullPciDevType, msi_irq: u8) -> Result<(), ErrorCode> {
+pub fn ini_msix_interrupt(dev: &FullPciDevType, msi_irq: u8) -> Result<(), KernelError> {
     //disable INTx# interrupts (pins?)
     let capabilities = &dev.get_common().capabilities;
     let msix_cap = capabilities
         .iter()
         .find(|cap| cap.id == PCI_CAP_MSIX_ID)
-        .ok_or(ErrorCode::NoEntry)?;
+        .ok_or(kerror_unwrapped!(NoEntry))?;
 
     let bars: Vec<&MemoryBar>;
     let cap_addr;
@@ -67,11 +67,11 @@ pub fn ini_msix_interrupt(dev: &FullPciDevType, msi_irq: u8) -> Result<(), Error
     let table_bar = bars
         .iter()
         .find(|bar| bar.offset_in_conf_space == (table_bar_off) as u8)
-        .ok_or(ErrorCode::NoEntry)?;
+        .ok_or(kerror_unwrapped!(NoEntry))?;
     let _pba_bar = bars
         .iter()
         .find(|bar| bar.offset_in_conf_space == (pba_bar_off) as u8)
-        .ok_or(ErrorCode::NoEntry)?;
+        .ok_or(kerror_unwrapped!(NoEntry))?;
 
     let platform_info = crate::acpi::get_platform_info();
     let destination_id = platform_info.boot_processor.apic_id as u64;
@@ -93,12 +93,12 @@ pub fn ini_msix_interrupt(dev: &FullPciDevType, msi_irq: u8) -> Result<(), Error
     Ok(())
 }
 
-pub fn disable_msix(dev: &FullPciDevType) -> Result<(), ErrorCode> {
+pub fn disable_msix(dev: &FullPciDevType) -> Result<(), KernelError> {
     let capabilities = &dev.get_common().capabilities;
     let msix_cap = capabilities
         .iter()
         .find(|cap| cap.id == PCI_CAP_MSIX_ID)
-        .ok_or(ErrorCode::NoEntry)?;
+        .ok_or(kerror_unwrapped!(NoEntry))?;
 
     #[allow(clippy::needless_late_init)]
     let cap_addr;

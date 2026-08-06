@@ -1,6 +1,9 @@
 use crate::{
     proc::{self, Pid},
-    shell::{cmd_cat::cmd_cat, cmd_cp::cmd_cp, cmd_ls::cmd_ls, cmd_mkdir::cmd_mkdir, cmd_mmap::cmd_mmap, cmd_mount::cmd_mount},
+    shell::{
+        cmd_cat::cmd_cat, cmd_cp::cmd_cp, cmd_ls::cmd_ls, cmd_mkdir::cmd_mkdir, cmd_mmap::cmd_mmap, cmd_mount::cmd_mount,
+        cmd_tree::cmd_tree,
+    },
     task_runner::PidOption,
     tty::TTY,
     vfs::{self, ResolvedPath, ResolvedPathBorrowed},
@@ -9,7 +12,7 @@ use core::pin::Pin;
 use std::{
     alloc::borrow::ToOwned,
     boxed::Box,
-    error::ErrorCode,
+    error::KernelError,
     format, lock_w_info, println,
     string::{String, ToString},
     sync::no_int_spinlock::NoIntSpinlock,
@@ -22,10 +25,11 @@ mod cmd_mkdir;
 mod cmd_mmap;
 mod cmd_mount;
 mod cmd_rm;
+mod cmd_tree;
 
-type AsyncCommandRetType = Pin<Box<dyn std::future::Future<Output = Result<(), ErrorCode>> + Send>>;
+type AsyncCommandRetType = Pin<Box<dyn std::future::Future<Output = Result<(), KernelError>> + Send>>;
 type AsyncCmd = fn(proc::CommandSplitter) -> AsyncCommandRetType;
-type SyncCmd = fn(proc::CommandSplitter) -> Result<(), ErrorCode>;
+type SyncCmd = fn(proc::CommandSplitter) -> Result<(), KernelError>;
 
 pub struct ShellState {
     current_dir: Option<ResolvedPath>,
@@ -45,6 +49,7 @@ static ASYNC_CMDS: &[(&str, AsyncCmd)] = &[
     ("mount", cmd_mount),
     ("mkdir", cmd_mkdir),
     ("cp", cmd_cp),
+    ("tree", cmd_tree),
 ];
 static SYNC_CMDS: &[(&str, SyncCmd)] = &[("mmap", cmd_mmap)];
 

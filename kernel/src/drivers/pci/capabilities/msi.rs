@@ -1,5 +1,5 @@
-use std::error::ErrorCode;
-use std::println;
+use std::error::KernelError;
+use std::{kerror_unwrapped, println};
 
 use crate::memory::addresses::*;
 
@@ -10,11 +10,14 @@ use crate::{
 
 pub(in crate::drivers::pci) const PCI_CAP_MSI_ID: u8 = 0x5;
 
-pub fn init_msi_interrupt(dev: &FullPciDevType, msi_irq: u8) -> Result<(), ErrorCode> {
+pub fn init_msi_interrupt(dev: &FullPciDevType, msi_irq: u8) -> Result<(), KernelError> {
     //disable INTx# interrupts (pins?)
     println!("Initializing MSI interrupt");
     let capabilities = &dev.get_common().capabilities;
-    let msi_cap = capabilities.iter().find(|cap| cap.id == 5).ok_or(ErrorCode::NoEntry)?;
+    let msi_cap = capabilities
+        .iter()
+        .find(|cap| cap.id == 5)
+        .ok_or(kerror_unwrapped!(NoEntry))?;
 
     #[allow(clippy::needless_late_init)] //bruh useless lint
     let cap_addr;
@@ -83,9 +86,12 @@ pub fn init_msi_interrupt(dev: &FullPciDevType, msi_irq: u8) -> Result<(), Error
     Ok(())
 }
 
-pub fn disable_msi(dev: &FullPciDevType) -> Result<(), ErrorCode> {
+pub fn disable_msi(dev: &FullPciDevType) -> Result<(), KernelError> {
     let capabilities = &dev.get_common().capabilities;
-    let msi_cap = capabilities.iter().find(|cap| cap.id == 5).ok_or(ErrorCode::NoEntry)?;
+    let msi_cap = capabilities
+        .iter()
+        .find(|cap| cap.id == 5)
+        .ok_or(kerror_unwrapped!(NoEntry))?;
 
     #[allow(clippy::needless_late_init)] //bruh useless lint
     let cap_addr;

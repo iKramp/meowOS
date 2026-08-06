@@ -1,9 +1,9 @@
 use std::boxed::Box;
-use std::error::ErrorCode;
+use std::error::KernelError;
 use std::sync::arc::Arc;
 use std::sync::no_int_spinlock::NoIntSpinlock;
 use std::sync::once_lock::OnceLock;
-use std::{lock_w_info, println};
+use std::{kerror, lock_w_info, println};
 
 use uuid::Uuid;
 
@@ -69,7 +69,7 @@ impl VfsAdapterTrait for TtyAdapter {
         _offset_bytes: u64,
         size_bytes: u64,
         buffer: &[PhysAddr],
-    ) -> Result<u64, ErrorCode> {
+    ) -> Result<u64, KernelError> {
         let Some(mut ready_input) = lock_w_info!(tty::TTY).get_input(size_bytes) else {
             return Ok(0);
         };
@@ -94,8 +94,8 @@ impl VfsAdapterTrait for TtyAdapter {
         Ok(read_size)
     }
 
-    async fn read_dir(&self, _inode: crate::vfs::InodeIndex) -> Result<Box<[DirEntry]>, ErrorCode> {
-        Err(ErrorCode::UnsupportedOperation)
+    async fn read_dir(&self, _inode: crate::vfs::InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {
+        kerror!(UnsupportedOperation)
     }
 
     async fn write(
@@ -104,11 +104,11 @@ impl VfsAdapterTrait for TtyAdapter {
         _offset: u64,
         size: u64,
         buffer: &[PhysAddr],
-    ) -> Result<(Inode, u64), ErrorCode> {
+    ) -> Result<(Inode, u64), KernelError> {
         let tty = lock_w_info!(tty::TTY);
         for i in 0..(size / 4096) {
             let Some(phys_ptr) = buffer.get(i as usize) else {
-                return Err(ErrorCode::InvalidArgument);
+                return kerror!(InvalidArgument);
             };
             let virt_ptr: VirtAddr = (*phys_ptr).into();
             let ptr = virt_ptr.0 as *const u8;
@@ -129,7 +129,7 @@ impl VfsAdapterTrait for TtyAdapter {
         Ok((self.get_inode(inode), size))
     }
 
-    async fn stat(&self, inode: crate::vfs::InodeIndex) -> Result<Inode, ErrorCode> {
+    async fn stat(&self, inode: crate::vfs::InodeIndex) -> Result<Inode, KernelError> {
         Ok(self.get_inode(inode))
     }
 }

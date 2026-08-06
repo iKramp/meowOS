@@ -1,6 +1,6 @@
 use bitfield::bitfield;
 use core::{ops::Range, sync::atomic::AtomicU32};
-use std::{error::ErrorCode, lock_w_info, sync::no_int_spinlock::NoIntSpinlock};
+use std::{error::KernelError, kerror, lock_w_info, sync::no_int_spinlock::NoIntSpinlock};
 
 use crate::memory::{self, addresses::*, physical_allocator, virt_mem_manager::page_table::PageTable};
 
@@ -136,21 +136,21 @@ impl VirtualMemoryRange {
         }
     }
 
-    pub fn expand_by(&self, n_pages: u32) -> Result<(), ErrorCode> {
+    pub fn expand_by(&self, n_pages: u32) -> Result<(), KernelError> {
         let current_pages = self.current_size_pages();
         let new_size = current_pages.saturating_add(n_pages);
         self.expand_to(new_size)
     }
 
-    pub fn expand_to(&self, n_pages: u32) -> Result<(), ErrorCode> {
+    pub fn expand_to(&self, n_pages: u32) -> Result<(), KernelError> {
         let VirtualMemoryRangeManagementMode::Managed(grow_direction) = self.mem_range_type else {
-            return Err(ErrorCode::InvalidOperation);
+            return kerror!(InvalidOperation);
         };
         if n_pages > self.max_size().pages() {
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         }
         if n_pages <= self.current_size_pages() {
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         }
 
         let range = if grow_direction == VirtualMemoryRangeGrowDirection::Up {
@@ -166,15 +166,15 @@ impl VirtualMemoryRange {
         Ok(())
     }
 
-    pub fn shrink_by(&mut self, n_pages: u32) -> Result<(), ErrorCode> {
+    pub fn shrink_by(&mut self, n_pages: u32) -> Result<(), KernelError> {
         let current_pages = self.current_size_pages();
         let new_size = current_pages.saturating_sub(n_pages);
         self.shrink_to(new_size)
     }
 
-    pub fn shrink_to(&self, n_pages: u32) -> Result<(), ErrorCode> {
+    pub fn shrink_to(&self, n_pages: u32) -> Result<(), KernelError> {
         let VirtualMemoryRangeManagementMode::Managed(grow_direction) = self.mem_range_type else {
-            return Err(ErrorCode::InvalidOperation);
+            return kerror!(InvalidOperation);
         };
 
         let range = if grow_direction == VirtualMemoryRangeGrowDirection::Up {
@@ -189,15 +189,15 @@ impl VirtualMemoryRange {
         self.free_manual(range)
     }
 
-    pub fn allocate_manual_external(&self, pages_to_map: Range<u32>) -> Result<(), ErrorCode> {
+    pub fn allocate_manual_external(&self, pages_to_map: Range<u32>) -> Result<(), KernelError> {
         if self.mem_range_type != VirtualMemoryRangeManagementMode::Manual {
-            return Err(ErrorCode::InvalidOperation);
+            return kerror!(InvalidOperation);
         }
         self.allocate_manual(pages_to_map)?;
         Ok(())
     }
 
-    fn allocate_manual(&self, pages_to_map: Range<u32>) -> Result<(), ErrorCode> {
+    fn allocate_manual(&self, pages_to_map: Range<u32>) -> Result<(), KernelError> {
         let alloc_lock = lock_w_info!(self.alloc_lock);
         let newly_allocated_pages = pages_to_map.end - pages_to_map.start;
         let current_allocated = self.current_size_pages();
@@ -210,15 +210,15 @@ impl VirtualMemoryRange {
         Ok(())
     }
 
-    pub fn free_manual_external(&self, pages_to_free: Range<u32>) -> Result<(), ErrorCode> {
+    pub fn free_manual_external(&self, pages_to_free: Range<u32>) -> Result<(), KernelError> {
         if self.mem_range_type != VirtualMemoryRangeManagementMode::Manual {
-            return Err(ErrorCode::InvalidOperation);
+            return kerror!(InvalidOperation);
         }
         self.free_manual(pages_to_free)?;
         Ok(())
     }
 
-    fn free_manual(&self, pages_to_free: Range<u32>) -> Result<(), ErrorCode> {
+    fn free_manual(&self, pages_to_free: Range<u32>) -> Result<(), KernelError> {
         let alloc_lock = lock_w_info!(self.alloc_lock);
         let freed_pages = pages_to_free.end - pages_to_free.start;
         let current_allocated = self.current_size_pages();

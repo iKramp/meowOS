@@ -1,9 +1,9 @@
 use core::time::Duration;
-use std::error::ErrorCode;
+use std::{error::KernelError, kerror};
 
 use crate::drivers::net_device::e1000e::registers::{MDIC, MDICPtr, PhyAddress};
 
-pub(super) fn read(mdic_ptr: &MDICPtr, phy: PhyAddress, reg: u32) -> Result<u16, ErrorCode> {
+pub(super) fn read(mdic_ptr: &MDICPtr, phy: PhyAddress, reg: u32) -> Result<u16, KernelError> {
     let mut mdic = MDIC(0);
     mdic.set_ready(false);
     mdic.set_interrupt_enable(false);
@@ -19,13 +19,13 @@ pub(super) fn read(mdic_ptr: &MDICPtr, phy: PhyAddress, reg: u32) -> Result<u16,
     }
 
     if mdic.error() {
-        return Err(ErrorCode::Unknown);
+        return kerror!(Unknown);
     }
 
     Ok(mdic.data() as u16)
 }
 
-pub(super) fn write(mdic_ptr: &MDICPtr, phy: PhyAddress, reg: u32, data: u16) -> Result<(), ErrorCode> {
+pub(super) fn write(mdic_ptr: &MDICPtr, phy: PhyAddress, reg: u32, data: u16) -> Result<(), KernelError> {
     let mut mdic = MDIC(0);
     mdic.set_ready(false);
     mdic.set_interrupt_enable(false);
@@ -42,12 +42,12 @@ pub(super) fn write(mdic_ptr: &MDICPtr, phy: PhyAddress, reg: u32, data: u16) ->
     }
 
     if mdic.error() {
-        return Err(ErrorCode::Unknown);
+        return kerror!(Unknown);
     }
     Ok(())
 }
 
-pub(super) fn modify<F>(mdic_ptr: &MDICPtr, phy: PhyAddress, reg: u32, f: F) -> Result<(), ErrorCode>
+pub(super) fn modify<F>(mdic_ptr: &MDICPtr, phy: PhyAddress, reg: u32, f: F) -> Result<(), KernelError>
 where
     F: FnOnce(u16) -> u16,
 {
@@ -56,6 +56,6 @@ where
     write(mdic_ptr, phy, reg, new_val)
 }
 
-pub(super) fn select_page(mdic_ptr: &MDICPtr, phy: PhyAddress, page: u8) -> Result<(), ErrorCode> {
+pub(super) fn select_page(mdic_ptr: &MDICPtr, phy: PhyAddress, page: u8) -> Result<(), KernelError> {
     write(mdic_ptr, phy, 22, page.into())
 }

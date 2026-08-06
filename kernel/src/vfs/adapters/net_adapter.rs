@@ -6,8 +6,8 @@ use std::string::ToString;
 use std::sync::arc::Arc;
 use std::sync::once_lock::OnceLock;
 use std::sync::rw_lock::{RWLockModeRead, RWSpinlock, RWSpinlockGuard};
-use std::{boxed::Box, error::ErrorCode, vec::Vec};
-use std::{lock_w_info, println, r_lock_w_info, w_lock_w_info};
+use std::{boxed::Box, error::KernelError, vec::Vec};
+use std::{kerror, kerror_unwrapped, lock_w_info, println, r_lock_w_info, w_lock_w_info};
 
 use crate::drivers::block_device::disk::DirEntry;
 use crate::memory::addresses::*;
@@ -28,7 +28,7 @@ enum NICEntryType {
 
 pub trait NicAdapter: Send + Sync + Debug {
     fn get_mac_address(&self) -> [u8; 6];
-    fn send_packet(&self, data: &[u8]) -> Result<(), ErrorCode>;
+    fn send_packet(&self, data: &[u8]) -> Result<(), KernelError>;
     fn mtu(&self) -> usize;
 }
 
@@ -82,18 +82,18 @@ impl VfsAdapterTrait for NetAdapter {
         _offset_bytes: u64,
         size_bytes: u64,
         buffer: &[PhysAddr],
-    ) -> Result<u64, ErrorCode> {
+    ) -> Result<u64, KernelError> {
         if size_bytes == 0 {
             return Ok(0);
         }
         if buffer.len() != size_bytes.div_ceil(4096) as usize {
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         }
 
         let devices = r_lock_w_info!(self.ether_devices);
         let (device, entry_type) = match get_ether_device_from_inode(&devices, _inode) {
             Some(v) => v,
-            None => return Err(ErrorCode::InodeNotPresent),
+            None => return kerror!(InodeNotPresent),
         };
 
         match entry_type {
@@ -115,12 +115,12 @@ impl VfsAdapterTrait for NetAdapter {
                 unsafe { core::ptr::copy_nonoverlapping(addr_of!(mtu) as *const u8, ptr, read_size as usize) };
                 Ok(read_size)
             }
-            _ => return Err(ErrorCode::UnsupportedOperation),
+            _ => return kerror!(UnsupportedOperation),
         }
     }
 
-    async fn read_dir(&self, inode: crate::vfs::InodeIndex) -> Result<Box<[DirEntry]>, ErrorCode> {
-        let entry_type = get_entry_type_from_inode(inode).ok_or(ErrorCode::InodeNotPresent)?;
+    async fn read_dir(&self, inode: crate::vfs::InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {
+        let entry_type = get_entry_type_from_inode(inode).ok_or(kerror_unwrapped!(InodeNotPresent))?;
 
         return match entry_type {
             NICEntryType::MainFolder => {
@@ -148,34 +148,34 @@ impl VfsAdapterTrait for NetAdapter {
                 });
                 Ok(entries.into_boxed_slice())
             }
-            _ => Err(ErrorCode::UnsupportedOperation),
+            _ => kerror!(UnsupportedOperation),
         };
     }
 
-    async fn write(&self, inode: InodeIndex, _offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), ErrorCode> {
+    async fn write(&self, inode: InodeIndex, _offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), KernelError> {
         if size == 0 {
             return Ok((VfsAdapterTrait::stat(self, inode).await?, 0));
         }
         if buffer.len() != size.div_ceil(4096) as usize {
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         }
 
         let devices = r_lock_w_info!(self.ether_devices);
         let (device, entry_type) = match get_ether_device_from_inode(&devices, inode) {
             Some(v) => v,
-            None => return Err(ErrorCode::InodeNotPresent),
+            None => return kerror!(InodeNotPresent),
         };
 
         match entry_type {
             NICEntryType::Data => {
                 let mtu = device.mtu();
                 if size as usize > mtu {
-                    return Err(ErrorCode::InvalidArgument);
+                    return kerror!(InvalidArgument);
                 }
 
                 if size > 4096 {
                     //for now
-                    return Err(ErrorCode::InvalidArgument);
+                    return kerror!(InvalidArgument);
                 }
 
                 let virt: VirtAddr = buffer[0].into();
@@ -185,14 +185,14 @@ impl VfsAdapterTrait for NetAdapter {
 
                 Ok((VfsAdapterTrait::stat(self, inode).await?, size))
             }
-            _ => return Err(ErrorCode::UnsupportedOperation),
+            _ => return kerror!(UnsupportedOperation),
         }
     }
 
-    async fn stat(&self, inode: crate::vfs::InodeIndex) -> Result<crate::vfs::Inode, ErrorCode> {
+    async fn stat(&self, inode: crate::vfs::InodeIndex) -> Result<crate::vfs::Inode, KernelError> {
         let entry_type = match get_entry_type_from_inode(inode) {
             Some(v) => v,
-            None => return Err(ErrorCode::InodeNotPresent),
+            None => return kerror!(InodeNotPresent),
         };
         let stat = match entry_type {
             NICEntryType::MainFolder => inode::Inode {

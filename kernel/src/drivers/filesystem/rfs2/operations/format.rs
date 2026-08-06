@@ -1,4 +1,4 @@
-use std::{Box, error::ErrorCode, println};
+use std::{Box, error::KernelError, kerror, println};
 
 use crate::{
     drivers::filesystem::rfs2::{
@@ -10,10 +10,10 @@ use crate::{
 
 impl Rfs2 {
     #[heap_future::heap_future]
-    pub async fn format(&mut self) -> Result<(), ErrorCode> {
+    pub async fn format(&mut self) -> Result<(), KernelError> {
         let whole_blocks = self.partition.partition.size_sectors / BLOCK_SIZE_SECTORS;
         if whole_blocks < 5 {
-            return Err(ErrorCode::InsufficientResources);
+            return kerror!(InsufficientResources);
         }
         let whole_groups = whole_blocks / GROUP_SIZE_BLOCKS;
         let last_group_blocks = whole_blocks % GROUP_SIZE_BLOCKS;

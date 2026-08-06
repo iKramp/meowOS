@@ -16,7 +16,8 @@ use crate::proc::namespaces::FilesystemNamespace;
 use crate::proc::namespaces::MemoryNamespace;
 use crate::proc::process_data::CpuStateType;
 use crate::vfs::file::FileHandle;
-use std::error::ErrorCode;
+use std::error::KernelError;
+use std::kerror;
 use std::lock_w_info;
 use std::println;
 use std::string::ToString;
@@ -28,7 +29,7 @@ use super::info::ContextInfo;
 
 const DEFAULT_PROC_STACK_SIZE: usize = 0x1000; // 1kB initial stack
 
-pub fn create_process_from_context(context_info: &ContextInfo, cwd: FileHandle) -> Result<Pid, ErrorCode> {
+pub fn create_process_from_context(context_info: &ContextInfo, cwd: FileHandle) -> Result<Pid, KernelError> {
     println!("creating process with context: {:#?}", context_info);
     let pid = Pid(PROCESS_ID_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed));
     let is_32_bit = context_info.is_32_bit();
@@ -68,7 +69,7 @@ pub fn create_process_from_context(context_info: &ContextInfo, cwd: FileHandle) 
 pub fn build_initialized_memory_namespace(
     context: &ContextInfo,
     mem_namespace: MemoryNamespace,
-) -> Result<MemoryNamespace, ErrorCode> {
+) -> Result<MemoryNamespace, KernelError> {
     let mut perms = VirtualMemoryRangePermissions(0); //allow writing
     perms.set_write(true);
 
@@ -89,7 +90,7 @@ pub fn build_initialized_memory_namespace(
                 "region end {:#x?} exceeds process memory range bounds {:#x?}",
                 end, proc_mem_range_bounds.end.0
             );
-            return Err(ErrorCode::InvalidProcessFile);
+            return kerror!(InvalidProcessFile);
         }
 
         let page_start = start.0 / 0x1000;
@@ -135,7 +136,7 @@ pub fn build_initialized_memory_namespace(
     Ok(mem_namespace)
 }
 
-pub fn build_mem_namespace_for_new_proc(context: &ContextInfo) -> Result<MemoryNamespace, ErrorCode> {
+pub fn build_mem_namespace_for_new_proc(context: &ContextInfo) -> Result<MemoryNamespace, KernelError> {
     let mem_namespace = build_empty_memory_namespace();
 
     let current_root = memory::current_root();
@@ -153,10 +154,10 @@ pub fn build_mem_namespace_for_new_proc(context: &ContextInfo) -> Result<MemoryN
     Ok(mem_namespace)
 }
 
-pub fn add_stack(mem_namespace: &mut MemoryNamespace, stack_size_pages: u8) -> Result<(), ErrorCode> {
+pub fn add_stack(mem_namespace: &mut MemoryNamespace, stack_size_pages: u8) -> Result<(), KernelError> {
     let Some(free_area) = mem_namespace.find_hole(memory::VirtualMemoryRangeCapacity::_1GB) else {
         println!("no free area for stack");
-        return Err(ErrorCode::OutOfMemory);
+        return kerror!(OutOfMemory);
     };
 
     let mut permissions = VirtualMemoryRangePermissions(0);

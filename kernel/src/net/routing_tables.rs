@@ -1,8 +1,8 @@
 use core::sync::atomic::AtomicBool;
 use std::{
     collections::btree_map::BTreeMap,
-    error::ErrorCode,
-    println, r_lock_w_info,
+    error::KernelError,
+    kerror, println, r_lock_w_info,
     sync::{arc::Arc, rw_lock::RWSpinlock},
     vec::Vec,
     w_lock_w_info,
@@ -302,7 +302,7 @@ pub(in crate::net) fn get_own_ipv4_mac(own_ipv4: &Ipv4Address) -> Option<MacAddr
     None
 }
 
-pub(in crate::net) fn add_mac_bridge(domain: u32, mac: MacAddress) -> Result<(), ErrorCode> {
+pub(in crate::net) fn add_mac_bridge(domain: u32, mac: MacAddress) -> Result<(), KernelError> {
     let mut domains = w_lock_w_info!(MAC_BRIDGE_DOMAINS);
     //ensure it's not in any existing domain
     for domain in domains.iter_mut() {
@@ -313,7 +313,7 @@ pub(in crate::net) fn add_mac_bridge(domain: u32, mac: MacAddress) -> Result<(),
         domain.interfaces.push((mac, false));
         Ok(())
     } else {
-        Err(ErrorCode::NoEntry)
+        kerror!(NoEntry)
     }
 }
 

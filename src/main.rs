@@ -18,7 +18,7 @@ impl RunMode {
 
 fn main() {
     //chose whether to debug with GDB
-    let debug = true;
+    let debug = false;
     let uefi = false;
     let snapshot = true;
     let cores = 1;

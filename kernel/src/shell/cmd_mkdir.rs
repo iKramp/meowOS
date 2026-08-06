@@ -1,4 +1,4 @@
-use std::{boxed::Box, error::ErrorCode, println};
+use std::{boxed::Box, error::KernelError, kerror_unwrapped, println};
 
 use crate::{
     proc::CommandSplitter,
@@ -11,8 +11,8 @@ pub(super) fn cmd_mkdir(args: CommandSplitter) -> AsyncCommandRetType {
     Box::pin(cmd_mkdir_internal(args))
 }
 
-async fn cmd_mkdir_internal(mut args: CommandSplitter) -> Result<(), ErrorCode> {
-    let dir_name = args.next().ok_or(ErrorCode::InvalidArgument)?;
+async fn cmd_mkdir_internal(mut args: CommandSplitter) -> Result<(), KernelError> {
+    let dir_name = args.next().ok_or(kerror_unwrapped!(InvalidArgument))?;
 
     let resolved_path = vfs::resolve_path(&dir_name);
     let open_flags = *OpenFlags(0).set_read(true).set_write(true);

@@ -1,8 +1,8 @@
 use core::sync::atomic::{AtomicU64, Ordering};
 use std::{
     boxed::Box,
-    error::ErrorCode,
-    lock_w_info, println, printlnc,
+    error::KernelError,
+    kerror, kerror_unwrapped, lock_w_info, println, printlnc,
     string::ToString,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlockGuard},
     vec::Vec,
@@ -111,19 +111,19 @@ fn remove_disk_slow(uuid: Uuid, mut vfs: NoIntSpinlockGuard<'_, Vfs>) {
 }
 
 #[heap_future::heap_future]
-pub async fn mount_blkdev_partition(part_id: Uuid, mountpoint: ResolvedPath) -> Result<(), ErrorCode> {
+pub async fn mount_blkdev_partition(part_id: Uuid, mountpoint: ResolvedPath) -> Result<(), KernelError> {
     let mut vfs = lock_w_info!(VFS);
     let Some(partition) = vfs.available_partitions.get(&part_id) else {
-        return Err(ErrorCode::NoEntry);
+        return kerror!(NoEntry);
     };
     let partition = partition.clone();
 
     let Some(device_detail) = vfs.devices.get(&partition.device) else {
-        return Err(ErrorCode::InternalFSError);
+        return kerror!(InternalFSError);
     };
     let drive_id = device_detail.drive;
     let Some(disk) = vfs.disks.get_mut(&drive_id) else {
-        return Err(ErrorCode::NoEntry);
+        return kerror!(NoEntry);
     };
     let disk_cloned = disk.0.clone();
 
@@ -131,7 +131,7 @@ pub async fn mount_blkdev_partition(part_id: Uuid, mountpoint: ResolvedPath) -> 
     vfs.print_available_fs_driver_types();
 
     let Some(fs_factory) = vfs.filesystem_driver_factories.get(&partition.fs_type).cloned() else {
-        return Err(ErrorCode::UnsupportedFilesystem);
+        return kerror!(UnsupportedFilesystem);
     };
     drop(vfs);
 
@@ -150,7 +150,7 @@ pub async fn mount_blkdev_partition(part_id: Uuid, mountpoint: ResolvedPath) -> 
 
 ///Not dealing with namespace mounts yet, all is global
 #[heap_future::heap_future]
-async fn mount_filesystem(mountpoint: ResolvedPath, fs: Arc<dyn FileSystem + Send>, part_id: Uuid) -> Result<(), ErrorCode> {
+async fn mount_filesystem(mountpoint: ResolvedPath, fs: Arc<dyn FileSystem + Send>, part_id: Uuid) -> Result<(), KernelError> {
     let root = mountpoint.inner().is_empty();
     println!("Mounting filesystem at {:?}", mountpoint.inner());
 
@@ -174,7 +174,7 @@ async fn mount_filesystem(mountpoint: ResolvedPath, fs: Arc<dyn FileSystem + Sen
     Ok(())
 }
 
-async fn make_new_root_checks(fs: &Arc<dyn FileSystem + Send>) -> Result<(), ErrorCode> {
+async fn make_new_root_checks(fs: &Arc<dyn FileSystem + Send>) -> Result<(), KernelError> {
     let inode_id = InodeIdentifier {
         device_id: fs.device_id(),
         index: ROOT_INODE_INDEX,
@@ -239,7 +239,7 @@ async fn mount_vfs_adapters(fs: &Arc<dyn FileSystem + Send>) {
     }
 }
 
-pub async fn unmount(path: ResolvedPathBorrowed<'_>) -> Result<(), ErrorCode> {
+pub async fn unmount(path: ResolvedPathBorrowed<'_>) -> Result<(), KernelError> {
     if path.inner().is_empty() {
         unimplemented!("Unmounting root filesystem is not supported yet");
         //TODO: update fs_tree root
@@ -252,7 +252,7 @@ pub async fn unmount(path: ResolvedPathBorrowed<'_>) -> Result<(), ErrorCode> {
     let inode = fs_tree::get_child(
         parent_inode,
         path.get(path_len - 1)
-            .ok_or(ErrorCode::InvalidOperation)? //TODO: fix
+            .ok_or(kerror_unwrapped!(InvalidOperation))? //TODO: fix
             .to_string()
             .as_str(),
         false,
@@ -260,7 +260,7 @@ pub async fn unmount(path: ResolvedPathBorrowed<'_>) -> Result<(), ErrorCode> {
     )
     .await?;
 
-    let inodes = fs_tree::resolve_mount_point(inode, None).ok_or(ErrorCode::NoEntry)?;
+    let inodes = fs_tree::resolve_mount_point(inode, None).ok_or(kerror_unwrapped!(NoEntry))?;
 
     unmount_inode(inodes.0);
 
@@ -283,10 +283,10 @@ pub async fn open_file(
     path: ResolvedPathBorrowed<'_>,
     from: Option<InodeIdentifierChain>,
     open_flags: OpenFlags,
-) -> Result<FileHandle, ErrorCode> {
+) -> Result<FileHandle, KernelError> {
     if open_flags.truncate() {
         println!(level:error, "Truncate on open is not supported yet");
-        return Err(ErrorCode::InvalidOperation);
+        return kerror!(InvalidOperation);
     }
 
     let (inode_index, inode_chain) = fs_tree::get_inode_chain(path, from, None).await?;
@@ -305,39 +305,45 @@ pub async fn open_file(
     })
 }
 
-pub async fn get_dir_entries(file_handle: &FileHandle) -> Result<Box<[DirEntry]>, ErrorCode> {
+pub async fn get_dir_entries(file_handle: &FileHandle) -> Result<Box<[DirEntry]>, KernelError> {
     let inode = unsafe { file_handle.open_file.inode.get_read_ptr() };
 
     if !inode.type_mode.is_dir() {
         println!("file {:?} is not a directory", file_handle.inode);
-        return Err(ErrorCode::UnsupportedOperation);
+        return kerror!(UnsupportedOperation);
     }
 
     let mut vfs = lock_w_info!(VFS);
-    let device_details = vfs.devices.get(&inode.device).ok_or(ErrorCode::NoEntry)?;
+    let device_details = vfs.devices.get(&inode.device).ok_or(kerror_unwrapped!(NoEntry))?;
     let partition_id = device_details.partition;
-    let fs = vfs.mounted_filesystems.get_mut(&partition_id).ok_or(ErrorCode::NoEntry)?;
+    let fs = vfs
+        .mounted_filesystems
+        .get_mut(&partition_id)
+        .ok_or(kerror_unwrapped!(NoEntry))?;
     let fs = fs.clone();
     drop(vfs);
     fs.read_dir(file_handle.inode.index).await
 }
 
-pub async fn create_file(parent_dir: &FileHandle, name: &str, inode_type: InodeTypeAndPerms) -> Result<(), ErrorCode> {
+pub async fn create_file(parent_dir: &FileHandle, name: &str, inode_type: InodeTypeAndPerms) -> Result<(), KernelError> {
     if !parent_dir.file_flags.write() {
-        return Err(ErrorCode::InsufficientPermissions);
+        return kerror!(InsufficientPermissions);
     }
     if !parent_dir.file_flags.dir() {
-        return Err(ErrorCode::UnsupportedOperation);
+        return kerror!(UnsupportedOperation);
     }
 
     let mut parent_inode = parent_dir.open_file.inode.lock().await;
     let mut vfs = lock_w_info!(VFS);
-    let device_details = vfs.devices.get(&parent_inode.device).ok_or(ErrorCode::InodeNotPresent)?;
+    let device_details = vfs
+        .devices
+        .get(&parent_inode.device)
+        .ok_or(kerror_unwrapped!(InodeNotPresent))?;
     let partition_id = device_details.partition;
     let fs = vfs
         .mounted_filesystems
         .get_mut(&partition_id)
-        .ok_or(ErrorCode::InodeNotPresent)?;
+        .ok_or(kerror_unwrapped!(InodeNotPresent))?;
     let fs = fs.clone();
     drop(vfs);
 
@@ -356,12 +362,12 @@ pub async fn create_file(parent_dir: &FileHandle, name: &str, inode_type: InodeT
     Ok(())
 }
 
-pub async fn link_file(parent_dir: &FileHandle, name: &str, target: &FileHandle) -> Result<(), ErrorCode> {
+pub async fn link_file(parent_dir: &FileHandle, name: &str, target: &FileHandle) -> Result<(), KernelError> {
     if !parent_dir.file_flags.write() {
-        return Err(ErrorCode::InsufficientPermissions);
+        return kerror!(InsufficientPermissions);
     }
     if !parent_dir.file_flags.dir() {
-        return Err(ErrorCode::UnsupportedOperation);
+        return kerror!(UnsupportedOperation);
     }
 
     let mut parent_inode = parent_dir.open_file.inode.lock().await;
@@ -371,13 +377,19 @@ pub async fn link_file(parent_dir: &FileHandle, name: &str, target: &FileHandle)
     let target_device = target_inode.device;
 
     if parent_device != target_device {
-        return Err(ErrorCode::UnsupportedOperation);
+        return kerror!(UnsupportedOperation);
     }
 
     let mut vfs = lock_w_info!(VFS);
-    let device_details = vfs.devices.get(&parent_inode.device).ok_or(ErrorCode::InodeNotPresent)?;
+    let device_details = vfs
+        .devices
+        .get(&parent_inode.device)
+        .ok_or(kerror_unwrapped!(InodeNotPresent))?;
     let partition_id = device_details.partition;
-    let fs = vfs.mounted_filesystems.get_mut(&partition_id).ok_or(ErrorCode::NoEntry)?;
+    let fs = vfs
+        .mounted_filesystems
+        .get_mut(&partition_id)
+        .ok_or(kerror_unwrapped!(NoEntry))?;
     let fs = fs.clone();
     drop(vfs);
 
@@ -394,20 +406,26 @@ pub async fn link_file(parent_dir: &FileHandle, name: &str, target: &FileHandle)
     Ok(())
 }
 
-pub async fn unlink_file(parent_dir: &FileHandle, name: &str) -> Result<(), ErrorCode> {
+pub async fn unlink_file(parent_dir: &FileHandle, name: &str) -> Result<(), KernelError> {
     if !parent_dir.file_flags.write() {
-        return Err(ErrorCode::InsufficientPermissions);
+        return kerror!(InsufficientPermissions);
     }
     if !parent_dir.file_flags.dir() {
-        return Err(ErrorCode::UnsupportedOperation);
+        return kerror!(UnsupportedOperation);
     }
 
     let mut parent_inode = parent_dir.open_file.inode.lock().await;
 
     let mut vfs = lock_w_info!(VFS);
-    let device_details = vfs.devices.get(&parent_inode.device).ok_or(ErrorCode::InodeNotPresent)?;
+    let device_details = vfs
+        .devices
+        .get(&parent_inode.device)
+        .ok_or(kerror_unwrapped!(InodeNotPresent))?;
     let partition_id = device_details.partition;
-    let fs = vfs.mounted_filesystems.get_mut(&partition_id).ok_or(ErrorCode::NoEntry)?;
+    let fs = vfs
+        .mounted_filesystems
+        .get_mut(&partition_id)
+        .ok_or(kerror_unwrapped!(NoEntry))?;
     let fs = fs.clone();
     drop(vfs);
 
@@ -433,7 +451,7 @@ pub async fn unlink_file(parent_dir: &FileHandle, name: &str) -> Result<(), Erro
     Ok(())
 }
 
-pub async fn write_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, ErrorCode> {
+pub async fn write_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, KernelError> {
     let mut inode = file_handle.open_file.inode.lock().await;
 
     let desired_offset = if file_handle.file_flags.append() {
@@ -443,17 +461,20 @@ pub async fn write_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64
     };
 
     if !file_handle.file_flags.write() {
-        return Err(ErrorCode::InsufficientPermissions);
+        return kerror!(InsufficientPermissions);
     }
 
     if inode.type_mode.is_dir() {
-        return Err(ErrorCode::UnsupportedOperation);
+        return kerror!(UnsupportedOperation);
     }
 
     let mut vfs = lock_w_info!(VFS);
-    let device_details = vfs.devices.get(&inode.device).ok_or(ErrorCode::NoEntry)?;
+    let device_details = vfs.devices.get(&inode.device).ok_or(kerror_unwrapped!(NoEntry))?;
     let partition_id = device_details.partition;
-    let fs = vfs.mounted_filesystems.get_mut(&partition_id).ok_or(ErrorCode::NoEntry)?;
+    let fs = vfs
+        .mounted_filesystems
+        .get_mut(&partition_id)
+        .ok_or(kerror_unwrapped!(NoEntry))?;
     let fs = fs.clone();
     drop(vfs);
 
@@ -474,9 +495,9 @@ pub async fn stat_file(file_handle: &FileHandle) -> Inode {
     file_handle.open_file.inode.lock().await.clone()
 }
 
-pub async fn read_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, ErrorCode> {
+pub async fn read_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, KernelError> {
     if !file_handle.file_flags.read() {
-        return Err(ErrorCode::InsufficientPermissions);
+        return kerror!(InsufficientPermissions);
     }
 
     let offset = file_handle.position.load(Ordering::Relaxed);
@@ -484,13 +505,16 @@ pub async fn read_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64)
     let inode = unsafe { file_handle.open_file.inode.get_read_ptr() };
 
     if inode.type_mode.is_dir() {
-        return Err(ErrorCode::UnsupportedOperation);
+        return kerror!(UnsupportedOperation);
     }
 
     let mut vfs = lock_w_info!(VFS);
-    let device_details = vfs.devices.get(&inode.device).ok_or(ErrorCode::NoEntry)?;
+    let device_details = vfs.devices.get(&inode.device).ok_or(kerror_unwrapped!(NoEntry))?;
     let partition_id = device_details.partition;
-    let fs = vfs.mounted_filesystems.get_mut(&partition_id).ok_or(ErrorCode::NoEntry)?;
+    let fs = vfs
+        .mounted_filesystems
+        .get_mut(&partition_id)
+        .ok_or(kerror_unwrapped!(NoEntry))?;
     let fs = fs.clone();
     drop(vfs);
 

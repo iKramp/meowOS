@@ -1,8 +1,8 @@
 use std::{
     boxed::Box,
     collections::btree_map::BTreeMap,
-    error::ErrorCode,
-    lock_w_info, println, r_lock_w_info,
+    error::KernelError,
+    kerror, kerror_unwrapped, lock_w_info, println, r_lock_w_info,
     sync::no_int_spinlock::{NoIntSpinlock, NoIntSpinlockGuard},
     vec::Vec,
 };
@@ -52,7 +52,7 @@ pub(super) async fn get_inode_chain(
     path: ResolvedPathBorrowed<'_>,
     from: Option<InodeIdentifierChain>,
     namespace_mounts: Option<&BTreeMap<InodeIdentifier, InodeIdentifier>>,
-) -> Result<(InodeIdentifier, InodeIdentifierChain), ErrorCode> {
+) -> Result<(InodeIdentifier, InodeIdentifierChain), KernelError> {
     let mut chain = match from {
         Some(chain) => chain.to_vec(),
         None => Vec::new(),
@@ -126,7 +126,7 @@ pub async fn get_child(
     name: &str,
     resolve_mounts: bool,
     namespace_mounts: Option<&BTreeMap<InodeIdentifier, InodeIdentifier>>,
-) -> Result<InodeIdentifier, ErrorCode> {
+) -> Result<InodeIdentifier, KernelError> {
     let cache = lock_w_info!(INODE_CACHE);
     if let Some(parent_node) = cache.inodes.get(&parent) {
         if let Some((_, child)) = parent_node.children.iter().find(|(n, _)| n.as_ref() == name) {
@@ -149,19 +149,19 @@ pub async fn get_child(
             return Ok(resolve_mount_point(*child, namespace_mounts).map_or_else(|| *child, |(_, overlaid)| overlaid));
         }
     }
-    Err(ErrorCode::NoEntry)
+    kerror!(NoEntry)
 }
 
 /// Loads the directory entries into the cache and returns the lock so cache isn't cleared before a
 /// query is made
-async fn load_dir(current: InodeIdentifier) -> Result<NoIntSpinlockGuard<'static, FsTreeCache>, ErrorCode> {
+async fn load_dir(current: InodeIdentifier) -> Result<NoIntSpinlockGuard<'static, FsTreeCache>, KernelError> {
     let mut vfs = lock_w_info!(VFS);
-    let device_details = vfs.devices.get(&current.device_id).ok_or(ErrorCode::NoEntry)?;
+    let device_details = vfs.devices.get(&current.device_id).ok_or(kerror_unwrapped!(NoEntry))?;
     let partition_id = device_details.partition;
     let fs = vfs
         .mounted_filesystems
         .get_mut(&partition_id)
-        .ok_or(ErrorCode::NoEntry)?
+        .ok_or(kerror_unwrapped!(NoEntry))?
         .clone();
     drop(vfs);
 

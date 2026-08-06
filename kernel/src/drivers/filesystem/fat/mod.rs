@@ -1,6 +1,6 @@
 use bitfield::bitfield;
 use core::{mem::MaybeUninit, slice};
-use std::{println, string::String, sync::arc::Arc, vec::Vec};
+use std::{kerror, println, string::String, sync::arc::Arc, vec::Vec};
 
 use uuid::Uuid;
 
@@ -10,7 +10,7 @@ use crate::{
     vfs::{DeviceId, FileSystem, FileSystemFactory, Inode, InodeIndex, InodeTypeAndPerms},
 };
 
-use std::{boxed::Box, error::ErrorCode};
+use std::{boxed::Box, error::KernelError};
 
 use crate::drivers::block_device::disk::DirEntry;
 
@@ -269,7 +269,7 @@ impl FatDriver {
         Some(self.read_sector(cluster_start + sector_in_cluster).await)
     }
 
-    async fn read_dir_internal(&self, inode_index: InodeIndex) -> Result<Box<[FatDirEntry]>, ErrorCode> {
+    async fn read_dir_internal(&self, inode_index: InodeIndex) -> Result<Box<[FatDirEntry]>, KernelError> {
         let mut sector_offset = 0;
         let mut buf = Vec::new();
         loop {
@@ -308,13 +308,14 @@ impl FileSystem for FatDriver {
         self.partition.partition.part_id
     }
 
-    async fn unmount(&self) -> Result<(), ErrorCode> {
+    async fn unmount(&self) -> Result<(), KernelError> {
         Ok(())
     }
     ///Offset must be page aligned
-    async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, ErrorCode> {
+    async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, KernelError> {
         if !offset_bytes.is_multiple_of(512) {
-            return Err(ErrorCode::IllegalValue);
+            // return Err(KernelError::IllegalValue);
+            return kerror!(IllegalValue);
         }
 
         let size_sectors = size_bytes.div_ceil(512);
@@ -337,7 +338,7 @@ impl FileSystem for FatDriver {
 
         return Ok(size_sectors * 512);
     }
-    async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, ErrorCode> {
+    async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {
         let entries = self.read_dir_internal(inode).await?;
         let vfs_entries: Vec<DirEntry> = entries
             .iter()
@@ -359,15 +360,22 @@ impl FileSystem for FatDriver {
                     name: final_string.into_boxed_str(),
                 }
             })
+            .filter(|entry| *entry.name != *"." && *entry.name != *"..")
             .collect();
 
         return Ok(vfs_entries.into_boxed_slice());
     }
     ///Offset must be page aligned. Returns the new inode
-    async fn write(&self, _inode: InodeIndex, _offset: u64, _size: u64, _buffer: &[PhysAddr]) -> Result<(Inode, u64), ErrorCode> {
-        return Err(ErrorCode::UnsupportedOperation);
+    async fn write(
+        &self,
+        _inode: InodeIndex,
+        _offset: u64,
+        _size: u64,
+        _buffer: &[PhysAddr],
+    ) -> Result<(Inode, u64), KernelError> {
+        return kerror!(UnsupportedOperation);
     }
-    async fn stat(&self, inode: InodeIndex, parent: InodeIndex) -> Result<Inode, ErrorCode> {
+    async fn stat(&self, inode: InodeIndex, parent: InodeIndex) -> Result<Inode, KernelError> {
         if inode == self.header.BPB_RootCluster as u64 {
             return Ok(Inode {
                 index: inode,
@@ -392,7 +400,7 @@ impl FileSystem for FatDriver {
             .iter()
             .find(|e| (e.first_cluster_low as u32 | ((e.first_cluster_high as u32) << 16)) == inode as u32)
         else {
-            return Err(ErrorCode::NoEntry);
+            return kerror!(NoEntry);
         };
 
         let is_dir = entry_to_find.dir_attr.directory();
@@ -415,8 +423,8 @@ impl FileSystem for FatDriver {
             stat_change_time: 0,
         })
     }
-    async fn set_stat(&self, _inode_index: InodeIndex, _parent: InodeIndex, _inode_data: Inode) -> Result<(), ErrorCode> {
-        return Err(ErrorCode::UnsupportedOperation);
+    async fn set_stat(&self, _inode_index: InodeIndex, _parent: InodeIndex, _inode_data: Inode) -> Result<(), KernelError> {
+        return kerror!(UnsupportedOperation);
     }
     ///returns the new parent inode in the first field and the new inode in the second
     async fn create(
@@ -426,25 +434,25 @@ impl FileSystem for FatDriver {
         _type_mode: InodeTypeAndPerms,
         _uid: u16,
         _gid: u16,
-    ) -> Result<(Inode, Inode), ErrorCode> {
-        return Err(ErrorCode::UnsupportedOperation);
+    ) -> Result<(Inode, Inode), KernelError> {
+        return kerror!(UnsupportedOperation);
     }
     //returns the new inodes (parent, child). Reaching link count 0 doesn't remove the file yet
-    async fn unlink(&self, _parent_inode: InodeIndex, _name: &str) -> Result<(Inode, Inode), ErrorCode> {
-        return Err(ErrorCode::UnsupportedOperation);
+    async fn unlink(&self, _parent_inode: InodeIndex, _name: &str) -> Result<(Inode, Inode), KernelError> {
+        return kerror!(UnsupportedOperation);
     }
     //removes the inode and all its data. Link count has to be 0
-    async fn remove_inode(&self, _inode: InodeIndex) -> Result<(), ErrorCode> {
-        return Err(ErrorCode::UnsupportedOperation);
+    async fn remove_inode(&self, _inode: InodeIndex) -> Result<(), KernelError> {
+        return kerror!(UnsupportedOperation);
     }
     ///returns the new inodes (parent, child)
-    async fn link(&self, _inode: InodeIndex, _parent_dir: InodeIndex, _name: &str) -> Result<(Inode, Inode), ErrorCode> {
-        return Err(ErrorCode::UnsupportedOperation);
+    async fn link(&self, _inode: InodeIndex, _parent_dir: InodeIndex, _name: &str) -> Result<(Inode, Inode), KernelError> {
+        return kerror!(UnsupportedOperation);
     }
-    async fn truncate(&self, _inode: InodeIndex, _size: u64) -> Result<(), ErrorCode> {
-        return Err(ErrorCode::UnsupportedOperation);
+    async fn truncate(&self, _inode: InodeIndex, _size: u64) -> Result<(), KernelError> {
+        return kerror!(UnsupportedOperation);
     }
-    async fn rename(&self, _inode: InodeIndex, _parent_inode: InodeIndex, _name: &str) -> Result<(), ErrorCode> {
-        return Err(ErrorCode::UnsupportedOperation);
+    async fn rename(&self, _inode: InodeIndex, _parent_inode: InodeIndex, _name: &str) -> Result<(), KernelError> {
+        return kerror!(UnsupportedOperation);
     }
 }

@@ -1,6 +1,7 @@
 use crate::memory::addresses::*;
 use core::str::{self};
-use std::{boxed::Box, error::ErrorCode, println, string::ToString, vec::Vec};
+use std::kerror;
+use std::{boxed::Box, error::KernelError, println, string::ToString, vec::Vec};
 
 use super::InodeIndex;
 use crate::vfs::InodeIndex as VfsInodeIndex;
@@ -116,11 +117,11 @@ const _: () = {
 };
 
 impl Rfs2 {
-    async fn get_file_root_block(&self, inode_index: InodeIndex) -> Result<BlockPtr, ErrorCode> {
+    async fn get_file_root_block(&self, inode_index: InodeIndex) -> Result<BlockPtr, KernelError> {
         let lock = self.inode_lock.lock().await;
         let Some(block_index) = BTreeNode::find_inode_root(inode_index, self).await else {
             println!("inode {} not found in tree", inode_index);
-            return Err(ErrorCode::InodeNotPresent);
+            return kerror!(InodeNotPresent);
         };
         drop(lock);
         Ok(block_index)
@@ -156,7 +157,7 @@ impl FileSystem for Rfs2 {
         self.partition.partition.part_id
     }
 
-    async fn unmount(&self) -> Result<(), ErrorCode> {
+    async fn unmount(&self) -> Result<(), KernelError> {
         //nothing to do rn
         Ok(())
     }
@@ -167,13 +168,13 @@ impl FileSystem for Rfs2 {
         offset_bytes: u64,
         size_bytes: u64,
         buffer: &[PhysAddr],
-    ) -> Result<u64, ErrorCode> {
+    ) -> Result<u64, KernelError> {
         if !offset_bytes.is_multiple_of(4096) {
             panic!("non-page-aligned offset not yet supported");
         }
         for phys in buffer {
             if phys.0 % 4096 != 0 {
-                return Err(ErrorCode::InvalidArgument);
+                return kerror!(InvalidArgument);
             }
         }
 
@@ -187,7 +188,7 @@ impl FileSystem for Rfs2 {
         res
     }
 
-    async fn read_dir(&self, inode: VfsInodeIndex) -> Result<Box<[VfsDirEntry]>, ErrorCode> {
+    async fn read_dir(&self, inode: VfsInodeIndex) -> Result<Box<[VfsDirEntry]>, KernelError> {
         let lock = self.get_file_lock(inode as InodeIndex);
         let locked = lock.lock();
 
@@ -220,13 +221,13 @@ impl FileSystem for Rfs2 {
         offset_bytes: u64,
         size: u64,
         buffer: &[PhysAddr],
-    ) -> Result<(VfsInode, u64), ErrorCode> {
+    ) -> Result<(VfsInode, u64), KernelError> {
         if !offset_bytes.is_multiple_of(4096) {
             panic!("non-page-aligned offset not yet supported");
         }
         for phys in buffer {
             if phys.0 % 4096 != 0 {
-                return Err(ErrorCode::InvalidArgument);
+                return kerror!(InvalidArgument);
             }
         }
 
@@ -243,13 +244,18 @@ impl FileSystem for Rfs2 {
         Ok((file_info.into_vfs(inode as InodeIndex, self), written))
     }
 
-    async fn stat(&self, inode: VfsInodeIndex, _parent: VfsInodeIndex) -> Result<VfsInode, ErrorCode> {
+    async fn stat(&self, inode: VfsInodeIndex, _parent: VfsInodeIndex) -> Result<VfsInode, KernelError> {
         let file_root = self.get_file_root_block(inode as InodeIndex).await?;
         let inode_info = self.get_file_info(file_root).await;
         Ok(inode_info.into_vfs(inode as InodeIndex, self))
     }
 
-    async fn set_stat(&self, inode_index: VfsInodeIndex, _parent: VfsInodeIndex, inode_data: VfsInode) -> Result<(), ErrorCode> {
+    async fn set_stat(
+        &self,
+        inode_index: VfsInodeIndex,
+        _parent: VfsInodeIndex,
+        inode_data: VfsInode,
+    ) -> Result<(), KernelError> {
         let lock = self.get_file_lock(inode_index as InodeIndex);
         let locked = lock.lock();
 
@@ -273,7 +279,7 @@ impl FileSystem for Rfs2 {
         type_mode: InodeTypeAndPerms,
         uid: u16,
         gid: u16,
-    ) -> Result<(VfsInode, VfsInode), ErrorCode> {
+    ) -> Result<(VfsInode, VfsInode), KernelError> {
         let new_block = self.allocate_block().await;
         let new_inode = self.allocate_inode().await;
 
@@ -311,12 +317,12 @@ impl FileSystem for Rfs2 {
         }
     }
 
-    async fn unlink(&self, parent_inode: VfsInodeIndex, name: &str) -> Result<(VfsInode, VfsInode), ErrorCode> {
+    async fn unlink(&self, parent_inode: VfsInodeIndex, name: &str) -> Result<(VfsInode, VfsInode), KernelError> {
         if name.len() > 256 {
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         }
         if name.is_empty() {
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         }
 
         let parent_lock = self.get_file_lock(parent_inode as InodeIndex);
@@ -325,7 +331,7 @@ impl FileSystem for Rfs2 {
         let (binding, entries) = self.read_direntries(parent_inode).await;
         let Some(pos) = entries.iter_mut().position(|ent| ent.is_name(name)) else {
             drop(parent_locked);
-            return Err(ErrorCode::InodeNotPresent);
+            return kerror!(InodeNotPresent);
         };
 
         let child_inode = entries[pos].inode;
@@ -354,7 +360,7 @@ impl FileSystem for Rfs2 {
         Ok((parent_vfs_inode, child_vfs_inode))
     }
 
-    async fn remove_inode(&self, inode: VfsInodeIndex) -> Result<(), ErrorCode> {
+    async fn remove_inode(&self, inode: VfsInodeIndex) -> Result<(), KernelError> {
         let lock = self.get_file_lock(inode as InodeIndex);
         let locked = lock.lock();
 
@@ -362,7 +368,7 @@ impl FileSystem for Rfs2 {
         let inode_info = self.get_file_info(inode_root).await;
 
         if inode_info.link_count > 0 {
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         }
 
         self.truncate_locked(inode_root, 0).await;
@@ -384,12 +390,12 @@ impl FileSystem for Rfs2 {
         child_inode: VfsInodeIndex,
         parent_inode: VfsInodeIndex,
         name: &str,
-    ) -> Result<(VfsInode, VfsInode), ErrorCode> {
+    ) -> Result<(VfsInode, VfsInode), KernelError> {
         if name.len() > 256 {
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         }
         if name.is_empty() {
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         }
 
         let lock = self.get_file_lock(parent_inode as InodeIndex);
@@ -402,7 +408,7 @@ impl FileSystem for Rfs2 {
         let child_root_res = BTreeNode::find_inode_root(child_inode as InodeIndex, self).await;
         drop(inode_lock);
         if child_root_res.is_none() {
-            return Err(ErrorCode::InodeNotPresent);
+            return kerror!(InodeNotPresent);
         }
 
         let parent_root = self.get_file_root_block(parent_inode as InodeIndex).await?;
@@ -417,7 +423,7 @@ impl FileSystem for Rfs2 {
 
             if entry.is_name(name) {
                 drop(locked);
-                return Err(ErrorCode::InvalidArgument);
+                return kerror!(InvalidArgument);
             }
         }
 
@@ -442,7 +448,7 @@ impl FileSystem for Rfs2 {
         Ok((new_parent_inode, new_child_inode))
     }
 
-    async fn truncate(&self, inode: VfsInodeIndex, size: u64) -> Result<(), ErrorCode> {
+    async fn truncate(&self, inode: VfsInodeIndex, size: u64) -> Result<(), KernelError> {
         let lock = self.get_file_lock(inode as InodeIndex);
         let locked = lock.lock();
 
@@ -454,12 +460,12 @@ impl FileSystem for Rfs2 {
         Ok(())
     }
 
-    async fn rename(&self, inode: VfsInodeIndex, parent_inode: VfsInodeIndex, name: &str) -> Result<(), ErrorCode> {
+    async fn rename(&self, inode: VfsInodeIndex, parent_inode: VfsInodeIndex, name: &str) -> Result<(), KernelError> {
         if name.len() > 256 {
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         }
         if name.is_empty() {
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         }
 
         let lock = self.get_file_lock(parent_inode as InodeIndex);
@@ -468,7 +474,7 @@ impl FileSystem for Rfs2 {
         let (binding, entries) = self.read_direntries(parent_inode).await;
         let Some(entry) = entries.iter_mut().find(|ent| ent.inode == inode as InodeIndex) else {
             drop(locked);
-            return Err(ErrorCode::InodeNotPresent);
+            return kerror!(InodeNotPresent);
         };
         entry.set_name(name);
 

@@ -1,5 +1,5 @@
 use crate::memory::addresses::*;
-use std::{boxed::Box, error::ErrorCode, vec::Vec};
+use std::{boxed::Box, error::KernelError, kerror, vec::Vec};
 
 use crate::{
     drivers::filesystem::rfs2::{BLOCK_SIZE_SECTORS, BlockPtr, Rfs2, operations::PTRS_PER_BLOCK},
@@ -14,12 +14,12 @@ impl Rfs2 {
         offset_blocks: u64,
         size_bytes: u64,
         buffer: &[PhysAddr],
-    ) -> Result<u64, ErrorCode> {
+    ) -> Result<u64, KernelError> {
         if size_bytes == 0 {
             return Ok(0);
         }
         if size_bytes.div_ceil(4096) > buffer.len() as u64 {
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         }
 
         self.increase_file_size(file_root, offset_blocks as usize * 4096 + size_bytes as usize)

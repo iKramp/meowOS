@@ -5,8 +5,8 @@ use core::{
 use scheduler::Scheduler;
 use std::{
     boxed::Box,
-    error::ErrorCode,
-    lock_w_info, println,
+    error::KernelError,
+    kerror, lock_w_info, println,
     string::ToString,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
     vec::Vec,
@@ -107,7 +107,7 @@ pub fn init_ap() {
 }
 
 #[heap_future::heap_future]
-pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &str, cwd: &str) -> Result<Pid, ErrorCode> {
+pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &str, cwd: &str) -> Result<Pid, KernelError> {
     let file_handle = vfs::open_file(path, None, OpenFlags(1)).await?;
     let stat = vfs::stat_file(&file_handle).await;
     let buf_pages = stat.size.div_ceil(4096);
@@ -117,7 +117,7 @@ pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &s
     let phys_buf_vec = phys_buf.get_range().get_addresses().collect::<Vec<_>>();
     let read_res = vfs::read_file(&file_handle, &phys_buf_vec, stat.size).await?;
     if read_res != stat.size {
-        return Err(ErrorCode::InternalFSError);
+        return kerror!(InternalFSError);
     }
 
     let context = match loaders::load_process_context(
@@ -128,7 +128,7 @@ pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &s
         Err(e) => {
             println!(level:error, "Failed to load process from file: {}", path.to_string());
             println!(level:error, "Error: {:?}", e);
-            return Err(ErrorCode::InvalidProcessFile);
+            return kerror!(InvalidProcessFile);
         }
     };
 

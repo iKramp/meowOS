@@ -3,11 +3,11 @@ registers @ page 372 of pdf
 */
 
 use core::{sync::atomic::Ordering, time::Duration};
-use std::{error::ErrorCode, w_lock_w_info};
+use std::{error::KernelError, kerror, w_lock_w_info};
 
 use crate::drivers::net_device::e1000e::{E1000eDevice, PhyAddress, mdio, registers::MDICPtr};
 
-pub fn init_phy(dev: &mut E1000eDevice) -> Result<(), ErrorCode> {
+pub fn init_phy(dev: &mut E1000eDevice) -> Result<(), KernelError> {
     set_phy(dev)?;
     let registers = w_lock_w_info!(dev.registers);
     let mdic_reg = registers.mdic();
@@ -39,7 +39,7 @@ pub fn init_phy(dev: &mut E1000eDevice) -> Result<(), ErrorCode> {
     Ok(())
 }
 
-fn set_phy(dev: &mut E1000eDevice) -> Result<(), ErrorCode> {
+fn set_phy(dev: &mut E1000eDevice) -> Result<(), KernelError> {
     let registers = w_lock_w_info!(dev.registers);
     if let Some(id) = get_phy_id(&registers.mdic(), PhyAddress::ExternalGigabit) {
         dev.phy_addr = PhyAddress::ExternalGigabit;
@@ -51,7 +51,7 @@ fn set_phy(dev: &mut E1000eDevice) -> Result<(), ErrorCode> {
         dev.phy_id = id;
         return Ok(());
     }
-    Err(ErrorCode::NoEntry)
+    kerror!(NoEntry)
 }
 
 fn get_phy_id(mdic_addr: &MDICPtr, addr: PhyAddress) -> Option<u32> {

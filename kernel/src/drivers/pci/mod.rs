@@ -11,8 +11,8 @@ use core::{
     sync::atomic::{AtomicU8, Ordering},
 };
 use std::{
-    boxed::Box, collections::btree_map::BTreeMap, error::ErrorCode, println, printlnc, r_lock_w_info, sync::rw_lock::RWSpinlock,
-    vec::Vec, w_lock_w_info,
+    boxed::Box, collections::btree_map::BTreeMap, error::KernelError, kerror, println, printlnc, r_lock_w_info,
+    sync::rw_lock::RWSpinlock, vec::Vec, w_lock_w_info,
 };
 
 use crate::interrupts::{InterruptProcessorState, handlers::apic_eoi};
@@ -50,9 +50,9 @@ struct PciDeviceLocation {
 }
 
 impl PciDeviceLocation {
-    pub fn new(group: Option<u16>, bus: u8, device: u8, function: u8) -> Result<Self, ErrorCode> {
+    pub fn new(group: Option<u16>, bus: u8, device: u8, function: u8) -> Result<Self, KernelError> {
         if device > 31 || function > 7 {
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         }
         Ok(Self {
             group: group.unwrap_or(0),
@@ -208,7 +208,7 @@ fn common_pci_config(dev: &mut FullPciDevType) {
     );
 }
 
-fn common_pci_unconfig(dev: &mut FullPciDevType) -> Result<(), ErrorCode> {
+fn common_pci_unconfig(dev: &mut FullPciDevType) -> Result<(), KernelError> {
     match dev.get_int_type() {
         InterruptType::Uninitialized => Ok(()),
         InterruptType::Msi => msi::disable_msi(dev),

@@ -2,7 +2,7 @@ use core::{
     any::{Any, TypeId},
     fmt::Debug,
 };
-use std::{boxed::Box, error::ErrorCode, println, sync::arc::Arc, vec::Vec};
+use std::{boxed::Box, error::KernelError, kerror, println, sync::arc::Arc, vec::Vec};
 
 pub use filesystem_namespace::*;
 pub(in crate::proc) use memory_namespace::*;
@@ -19,8 +19,8 @@ use crate::proc::ProcessData;
 
 pub trait ProcNamespace: Debug + Send + Sync + Any + Sized {
     fn get_id(&self) -> u64;
-    fn create_from(id: u64, other: &Self) -> Result<Self, ErrorCode>;
-    fn create_empty(id: u64) -> Result<Self, ErrorCode>;
+    fn create_from(id: u64, other: &Self) -> Result<Self, KernelError>;
+    fn create_empty(id: u64) -> Result<Self, KernelError>;
 }
 
 //update in documentation
@@ -77,7 +77,7 @@ impl ProcNamespaces {
         }
     }
 
-    pub(in crate::proc) fn clone_from_ids(&self, mut ids: NamespaceIds) -> Result<Self, ErrorCode> {
+    pub(in crate::proc) fn clone_from_ids(&self, mut ids: NamespaceIds) -> Result<Self, KernelError> {
         //defaults
         if ids.memory_namespace == 0 {
             ids.memory_namespace = self.memory_namespace.get_id();
@@ -90,13 +90,13 @@ impl ProcNamespaces {
         }
 
         let Some(NamespaceHolder::Mem(memory_namespace)) = self.get_namespace_holder(ids.memory_namespace) else {
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         };
         let Some(NamespaceHolder::Syscall(syscall_namespace)) = self.get_namespace_holder(ids.syscall_namespace) else {
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         };
         let Some(NamespaceHolder::Fs(filesystem_namespace)) = self.get_namespace_holder(ids.filesystem_namespace) else {
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         };
         Ok(Self::new(
             memory_namespace.clone(),
@@ -221,23 +221,23 @@ impl NamespaceHolder {
         }
     }
 
-    pub fn create_from(id: u64, other: &Self) -> Result<Self, ErrorCode> {
+    pub fn create_from(id: u64, other: &Self) -> Result<Self, KernelError> {
         match other {
             NamespaceHolder::Syscall(other_ns) => {
                 let Ok(new_ns) = SyscallNamespace::create_from(id, other_ns) else {
-                    return Err(ErrorCode::InvalidArgument);
+                    return kerror!(InvalidArgument);
                 };
                 Ok(NamespaceHolder::Syscall(Arc::new(new_ns)))
             }
             NamespaceHolder::Mem(other_ns) => {
                 let Ok(new_ns) = MemoryNamespace::create_from(id, other_ns) else {
-                    return Err(ErrorCode::InvalidArgument);
+                    return kerror!(InvalidArgument);
                 };
                 Ok(NamespaceHolder::Mem(Arc::new(new_ns)))
             }
             NamespaceHolder::Fs(other_ns) => {
                 let Ok(new_ns) = FilesystemNamespace::create_from(id, other_ns) else {
-                    return Err(ErrorCode::InvalidArgument);
+                    return kerror!(InvalidArgument);
                 };
                 Ok(NamespaceHolder::Fs(Arc::new(new_ns)))
             }

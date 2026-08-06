@@ -1,8 +1,8 @@
 use core::sync::atomic::{AtomicU64, Ordering};
 use std::{
     collections::btree_map::BTreeMap,
-    error::ErrorCode,
-    lock_w_info, r_lock_w_info,
+    error::KernelError,
+    kerror, lock_w_info, r_lock_w_info,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
     w_lock_w_info,
 };
@@ -82,11 +82,11 @@ impl ProcNamespace for FilesystemNamespace {
         self.id
     }
 
-    fn create_empty(_id: u64) -> Result<Self, ErrorCode> {
-        Err(ErrorCode::InvalidOperation)
+    fn create_empty(_id: u64) -> Result<Self, KernelError> {
+        kerror!(InvalidOperation)
     }
 
-    fn create_from(id: u64, other: &Self) -> Result<Self, ErrorCode> {
+    fn create_from(id: u64, other: &Self) -> Result<Self, KernelError> {
         let other_cwd = lock_w_info!(other.cwd);
         let other_open_files = r_lock_w_info!(other.open_files);
         let counter = other.file_handle_counter.load(Ordering::Relaxed);

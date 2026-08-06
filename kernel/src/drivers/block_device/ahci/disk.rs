@@ -5,8 +5,8 @@ use crate::memory::addresses::*;
 use core::{array, fmt::Debug, mem::MaybeUninit, ops::DerefMut, sync::atomic::AtomicU32, task::Waker, time::Duration};
 use std::{
     boxed::Box,
-    error::ErrorCode,
-    ffi_future, lock_w_info, println,
+    error::KernelError,
+    ffi_future, kerror, kerror_unwrapped, lock_w_info, println,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
     vec::Vec,
     w_lock_w_info,
@@ -49,7 +49,7 @@ impl AhciDriver {
 }
 
 impl LegacyPciDriver for AhciDriver {
-    fn init(&mut self, dev: &pci::LegacyPciDevice) -> Result<(), ErrorCode> {
+    fn init(&mut self, dev: &pci::LegacyPciDevice) -> Result<(), KernelError> {
         println!("AhciController::init: enabling bus mastering");
         dev.enable_bus_mastering();
         let mut controller = AhciController::new(dev)?;
@@ -84,14 +84,14 @@ pub struct AhciController {
 }
 
 impl AhciController {
-    fn new(device: &pci::LegacyPciDevice) -> Result<Self, ErrorCode> {
+    fn new(device: &pci::LegacyPciDevice) -> Result<Self, KernelError> {
         let abar = device
             .bars
             .iter()
             .find(|bar| bar.get_index() == 5)
-            .ok_or(ErrorCode::IllegalValue)?;
+            .ok_or(kerror_unwrapped!(IllegalValue))?;
         let pci::Bar::Memory(abar) = abar else {
-            return Err(ErrorCode::IllegalValue);
+            return kerror!(IllegalValue);
         };
 
         let ghc = unsafe { GenericHostControlPtr::from_ptr(abar.get_address().start.0 as *mut GenericHostControl) };
@@ -427,7 +427,7 @@ impl VirtualPort {
         true
     }
 
-    fn send_identify(&mut self) -> Result<(), ErrorCode> {
+    fn send_identify(&mut self) -> Result<(), KernelError> {
         let mut pmport = H2DRegFisPmport(0);
         pmport.set_command(true);
         let ident_fis = H2DRegisterFis {
@@ -458,7 +458,7 @@ impl VirtualPort {
                 println!("Identify command timeout");
                 self.clean_command(identify_cmd_index);
                 self.release_command_index(identify_cmd_index);
-                return Err(ErrorCode::Timeout);
+                return kerror!(Timeout);
             }
             std::thread::sleep(Duration::from_micros(10));
             ci = self.get_property(0x38);

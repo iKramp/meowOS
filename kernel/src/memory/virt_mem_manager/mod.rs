@@ -1,5 +1,5 @@
 use core::ops::Range;
-use std::{error::ErrorCode, lock_w_info, println, sync::no_int_spinlock::NoIntSpinlock};
+use std::{error::KernelError, lock_w_info, println, sync::no_int_spinlock::NoIntSpinlock};
 
 use crate::memory::{
     addresses::*,
@@ -156,7 +156,7 @@ pub fn userspace_map(
     table_phys: PhysAddr,
     table_level: u8,
     table_page_index: u32,
-) -> Result<(), ErrorCode> {
+) -> Result<(), KernelError> {
     assert!((1..=3).contains(&table_level));
 
     let table = unsafe { get_at_addr::<PageTable, _>(table_phys) };
@@ -164,7 +164,12 @@ pub fn userspace_map(
     Ok(())
 }
 
-pub fn userspace_unmap(pages: Range<u32>, table_phys: PhysAddr, table_level: u8, table_page_index: u32) -> Result<(), ErrorCode> {
+pub fn userspace_unmap(
+    pages: Range<u32>,
+    table_phys: PhysAddr,
+    table_level: u8,
+    table_page_index: u32,
+) -> Result<(), KernelError> {
     assert!((1..=3).contains(&table_level));
 
     let table = unsafe { get_at_addr::<PageTable, _>(table_phys) };

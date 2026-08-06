@@ -9,8 +9,8 @@ use core::{
 };
 use std::{
     boxed::Box,
-    error::ErrorCode,
-    println, r_lock_w_info,
+    error::KernelError,
+    kerror, kerror_unwrapped, println, r_lock_w_info,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
     vec::Vec,
     w_lock_w_info,
@@ -57,7 +57,7 @@ struct E1000eDriver {
 }
 
 impl PcieDriver for E1000eDriver {
-    fn init(&mut self, dev: &pci::PcieDevice) -> Result<(), ErrorCode> {
+    fn init(&mut self, dev: &pci::PcieDevice) -> Result<(), KernelError> {
         let e1000edev = init_e1000e(dev)?;
         self.device = MaybeUninit::new(e1000edev);
         Ok(())
@@ -78,11 +78,11 @@ impl PcieDriver for E1000eDriver {
     }
 }
 
-fn init_e1000e(dev: &pci::PcieDevice) -> Result<Arc<E1000eDevice>, ErrorCode> {
+fn init_e1000e(dev: &pci::PcieDevice) -> Result<Arc<E1000eDevice>, KernelError> {
     println!("Initializing e1000e device");
     let Ok(mut e1000e_device) = E1000eDevice::new(dev) else {
         println!("e1000e device has incorrect bars");
-        return Err(ErrorCode::IllegalValue);
+        return kerror!(IllegalValue);
     };
     dev.enable_bus_mastering();
     init::init(&mut e1000e_device);
@@ -119,17 +119,17 @@ unsafe impl Sync for E1000eDevice {}
 unsafe impl Send for E1000eDevice {}
 
 impl E1000eDevice {
-    pub fn new(device: &pci::PcieDevice) -> Result<Self, ErrorCode> {
+    pub fn new(device: &pci::PcieDevice) -> Result<Self, KernelError> {
         let mem_bar = device
             .bars
             .iter()
             .find(|bar| bar.get_index() == 0)
-            .ok_or(ErrorCode::NoEntry)?;
+            .ok_or(kerror_unwrapped!(NoEntry))?;
         let flash_bar = device
             .bars
             .iter()
             .find(|bar| bar.get_index() == 1)
-            .ok_or(ErrorCode::NoEntry)?;
+            .ok_or(kerror_unwrapped!(NoEntry))?;
 
         let memory_bar = mem_bar.get_address();
         let flash_bar = flash_bar.get_address();

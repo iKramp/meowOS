@@ -1,4 +1,4 @@
-use std::{Box, error::ErrorCode, format, lock_w_info, string::ToString};
+use std::{Box, error::KernelError, format, lock_w_info, string::ToString};
 
 use crate::{
     proc::CommandSplitter,
@@ -12,7 +12,7 @@ pub(super) fn cmd_ls(args: CommandSplitter) -> AsyncCommandRetType {
     Box::pin(cmd_ls_internal(args))
 }
 
-async fn cmd_ls_internal(mut args: CommandSplitter) -> Result<(), ErrorCode> {
+async fn cmd_ls_internal(mut args: CommandSplitter) -> Result<(), KernelError> {
     let path = args.next().unwrap_or_else(|| ".".to_string());
 
     let resolved_path = vfs::resolve_path(&path);

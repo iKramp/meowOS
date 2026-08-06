@@ -1,4 +1,4 @@
-use std::{boxed::Box, error::ErrorCode, lock_w_info, string::ToString, sync::arc::Arc};
+use std::{boxed::Box, error::KernelError, lock_w_info, string::ToString, sync::arc::Arc};
 
 use crate::{
     acpi::{ScheduledEvent, schedule_event},
@@ -105,7 +105,7 @@ pub fn create_process_from_parts(
     start_ptr: u64,
     namespaces: ProcNamespaces,
     name: &str,
-) -> Result<Pid, ErrorCode> {
+) -> Result<Pid, KernelError> {
     let cpu_state = InterruptProcessorState::new_full(
         register_states.r15,
         register_states.r14,

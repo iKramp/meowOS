@@ -1,5 +1,5 @@
 use core::{fmt::Debug, sync::atomic::AtomicU32};
-use std::{boxed::Box, error::ErrorCode};
+use std::{boxed::Box, error::KernelError, kerror};
 
 use crate::{drivers::block_device::disk::DirEntry, memory::addresses::PhysAddr};
 
@@ -45,10 +45,10 @@ impl VfsAdapterDevice {
 pub trait VfsAdapterTrait: Debug + Send + Sync {
     fn device_id(&self) -> DeviceId;
     fn partition_id(&self) -> Uuid;
-    async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, ErrorCode>;
-    async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, ErrorCode>;
-    async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), ErrorCode>;
-    async fn stat(&self, inode: InodeIndex) -> Result<Inode, ErrorCode>;
+    async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, KernelError>;
+    async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, KernelError>;
+    async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), KernelError>;
+    async fn stat(&self, inode: InodeIndex) -> Result<Inode, KernelError>;
 }
 
 #[async_trait::async_trait]
@@ -61,28 +61,28 @@ impl<T: VfsAdapterTrait> FileSystem for T {
         VfsAdapterTrait::partition_id(self)
     }
 
-    async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, ErrorCode> {
+    async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, KernelError> {
         VfsAdapterTrait::read(self, inode, offset_bytes, size_bytes, buffer).await
     }
 
-    async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, ErrorCode> {
+    async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {
         VfsAdapterTrait::read_dir(self, inode).await
     }
 
-    async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), ErrorCode> {
+    async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), KernelError> {
         VfsAdapterTrait::write(self, inode, offset, size, buffer).await
     }
 
-    async fn stat(&self, inode: InodeIndex, _parent: InodeIndex) -> Result<Inode, ErrorCode> {
+    async fn stat(&self, inode: InodeIndex, _parent: InodeIndex) -> Result<Inode, KernelError> {
         VfsAdapterTrait::stat(self, inode).await
     }
 
-    async fn unmount(&self) -> Result<(), ErrorCode> {
-        Err(ErrorCode::UnsupportedOperation)
+    async fn unmount(&self) -> Result<(), KernelError> {
+        kerror!(UnsupportedOperation)
     }
 
-    async fn set_stat(&self, _inode_index: InodeIndex, _parent: InodeIndex, _inode_data: Inode) -> Result<(), ErrorCode> {
-        Err(ErrorCode::UnsupportedOperation)
+    async fn set_stat(&self, _inode_index: InodeIndex, _parent: InodeIndex, _inode_data: Inode) -> Result<(), KernelError> {
+        kerror!(UnsupportedOperation)
     }
 
     async fn create(
@@ -92,27 +92,27 @@ impl<T: VfsAdapterTrait> FileSystem for T {
         _type_mode: super::InodeTypeAndPerms,
         _uid: u16,
         _gid: u16,
-    ) -> Result<(Inode, Inode), ErrorCode> {
-        Err(ErrorCode::UnsupportedOperation)
+    ) -> Result<(Inode, Inode), KernelError> {
+        kerror!(UnsupportedOperation)
     }
 
-    async fn unlink(&self, _parent_inode: InodeIndex, _name: &str) -> Result<(Inode, Inode), ErrorCode> {
-        Err(ErrorCode::UnsupportedOperation)
+    async fn unlink(&self, _parent_inode: InodeIndex, _name: &str) -> Result<(Inode, Inode), KernelError> {
+        kerror!(UnsupportedOperation)
     }
 
-    async fn remove_inode(&self, _inode: InodeIndex) -> Result<(), ErrorCode> {
-        Err(ErrorCode::UnsupportedOperation)
+    async fn remove_inode(&self, _inode: InodeIndex) -> Result<(), KernelError> {
+        kerror!(UnsupportedOperation)
     }
 
-    async fn link(&self, _inode: InodeIndex, _parent_dir: InodeIndex, _name: &str) -> Result<(Inode, Inode), ErrorCode> {
-        Err(ErrorCode::UnsupportedOperation)
+    async fn link(&self, _inode: InodeIndex, _parent_dir: InodeIndex, _name: &str) -> Result<(Inode, Inode), KernelError> {
+        kerror!(UnsupportedOperation)
     }
 
-    async fn truncate(&self, _inode: InodeIndex, _size: u64) -> Result<(), ErrorCode> {
-        Err(ErrorCode::UnsupportedOperation)
+    async fn truncate(&self, _inode: InodeIndex, _size: u64) -> Result<(), KernelError> {
+        kerror!(UnsupportedOperation)
     }
 
-    async fn rename(&self, _inode: InodeIndex, _parent_inode: InodeIndex, _name: &str) -> Result<(), ErrorCode> {
-        Err(ErrorCode::UnsupportedOperation)
+    async fn rename(&self, _inode: InodeIndex, _parent_inode: InodeIndex, _name: &str) -> Result<(), KernelError> {
+        kerror!(UnsupportedOperation)
     }
 }

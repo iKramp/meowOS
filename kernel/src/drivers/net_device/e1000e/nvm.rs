@@ -1,4 +1,4 @@
-use std::{error::ErrorCode, println, w_lock_w_info};
+use std::{error::KernelError, kerror, println, w_lock_w_info};
 
 use crate::{
     drivers::net_device::e1000e::{E1000eDevice, registers::E1000eRegistersPtr},
@@ -22,7 +22,7 @@ pub(super) enum NvmState {
     Unchanged,
 }
 
-fn config_nvm(dev: &mut E1000eDevice) -> Result<NvmState, ErrorCode> {
+fn config_nvm(dev: &mut E1000eDevice) -> Result<NvmState, KernelError> {
     let registers = w_lock_w_info!(dev.registers);
     let mut state = NvmState::Unchanged;
     let mut ecc = registers.eec().read();
@@ -33,13 +33,13 @@ fn config_nvm(dev: &mut E1000eDevice) -> Result<NvmState, ErrorCode> {
         if ecc.nvmtype() {
             //flash
             println!(level:error, "e1000e config_nvm error: NVM type is flash and nvsize is 0");
-            return Err(ErrorCode::IllegalValue);
+            return kerror!(IllegalValue);
         } else {
             //eeprom
             let size: u32 = 128 * (1 << ecc.nvsize());
             if size > 1 << 16 {
                 println!(level:error, "e1000e config_nvm error: Invalid NVM size: {}", size);
-                return Err(ErrorCode::IllegalValue);
+                return kerror!(IllegalValue);
             }
             let addr_size = if size > 1 << 8 { 2 } else { 1 };
             println!("NVM size: {} bytes", size);

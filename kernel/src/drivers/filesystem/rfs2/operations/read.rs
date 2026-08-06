@@ -1,5 +1,5 @@
 use crate::memory::addresses::*;
-use std::{Box, error::ErrorCode, println, vec::Vec};
+use std::{Box, error::KernelError, kerror, println, vec::Vec};
 
 use crate::{
     drivers::filesystem::rfs2::{BLOCK_SIZE_SECTORS, BlockPtr, Rfs2, operations::PTRS_PER_BLOCK},
@@ -47,7 +47,7 @@ impl Rfs2 {
         offset_blocks: u64,
         size_bytes: u64,
         buffer: &[PhysAddr],
-    ) -> Result<u64, ErrorCode> {
+    ) -> Result<u64, KernelError> {
         if size_bytes == 0 {
             println!("size is 0, nothing to read");
             return Ok(0);
@@ -58,7 +58,7 @@ impl Rfs2 {
                 buffer.len(),
                 size_bytes
             );
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         }
 
         let file_info = self.get_file_info(file_root).await;

@@ -1,4 +1,4 @@
-use std::{error::ErrorCode, println, vec::Vec};
+use std::{error::KernelError, println, vec::Vec};
 
 use crate::drivers::pci::{
     LegacyPciDevice, PCI_CAP_PCIE_ID, PciDeviceLocation, device_class::PciClass, device_codes::PciDeviceNumericId, port_access,
@@ -10,7 +10,7 @@ pub(super) mod legacy_device;
 type LegacyPciDevDriverInitFn = ((PciClass, PciDeviceNumericId), fn(LegacyPciDevice));
 
 pub trait LegacyPciDriver: Send + Sync {
-    fn init(&mut self, dev: &LegacyPciDevice) -> Result<(), ErrorCode>;
+    fn init(&mut self, dev: &LegacyPciDevice) -> Result<(), KernelError>;
     fn deinit(&mut self, dev: &LegacyPciDevice);
     fn service_interrupt(&mut self, dev: &LegacyPciDevice);
     /// Called after the device is removed from the system

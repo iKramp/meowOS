@@ -1,5 +1,5 @@
 use crate::memory::addresses::*;
-use std::{error::ErrorCode, println, vec::Vec};
+use std::{error::KernelError, println, vec::Vec};
 
 use crate::{
     acpi::{BaseAddressAllocation, McfgTable},
@@ -21,7 +21,7 @@ pub(super) mod express_device;
 type PcieDevDriverInitFn = ((PciClass, PciDeviceNumericId), fn(PcieDevice));
 
 pub trait PcieDriver: Send + Sync {
-    fn init(&mut self, dev: &PcieDevice) -> Result<(), ErrorCode>;
+    fn init(&mut self, dev: &PcieDevice) -> Result<(), KernelError>;
     fn deinit(&mut self, dev: &PcieDevice);
     /// Called after the device is removed from the system
     /// Either forcibly, or deinit was called earlier

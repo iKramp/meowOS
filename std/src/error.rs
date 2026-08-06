@@ -2,7 +2,7 @@ use core::error::Error;
 
 #[must_use]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ErrorCode {
+pub enum KernelErrorCode {
     Unknown,
     InodeNotPresent,
     InvalidString,
@@ -25,31 +25,66 @@ pub enum ErrorCode {
     OutOfMemory,
 }
 
-impl Error for ErrorCode {}
+#[derive(Debug)]
+pub struct KernelError {
+    pub code: KernelErrorCode,
+    pub line: u32,
+    pub file: &'static str,
+}
 
-impl core::fmt::Display for ErrorCode {
+#[macro_export]
+macro_rules! kerror {
+    ($code:ident) => {
+        Err(KernelError {
+            code: $crate::error::KernelErrorCode::$code,
+            line: line!(),
+            file: file!(),
+        })
+    };
+}
+
+#[macro_export]
+macro_rules! kerror_unwrapped {
+    ($code:ident) => {
+        KernelError {
+            code: $crate::error::KernelErrorCode::$code,
+            line: line!(),
+            file: file!(),
+        }
+    };
+}
+
+impl Error for KernelError {}
+
+impl core::fmt::Display for KernelError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Kernel error: {} at {}:{}", self.code, self.file, self.line)
+    }
+}
+
+impl core::fmt::Display for KernelErrorCode {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            ErrorCode::Unknown => write!(f, "Unknown error"),
-            ErrorCode::InodeNotPresent => write!(f, "Inode not present"),
-            ErrorCode::InvalidString => write!(f, "Invalid string"),
-            ErrorCode::FileSystemInconsistency => write!(f, "File system inconsistency"),
-            ErrorCode::NotMounted => write!(f, "No mountpoint at this inode, or this dev is not mounted"),
-            ErrorCode::InternalFSError => write!(f, "Internal file system error"),
-            ErrorCode::NoEntry => write!(f, "No entry (usually in a map, like filesystem, partition,...)"),
-            ErrorCode::UnsupportedFilesystem => write!(f, "Filesystem type is unsupported"),
-            ErrorCode::InsufficientPermissions => write!(f, "Insufficient permissions"),
-            ErrorCode::UnsupportedOperation => write!(f, "Unsupported operation"),
-            ErrorCode::InvalidPointer => write!(f, "invalid poitner"),
-            ErrorCode::AlreadyMapped => write!(f, "requested virtual address in mmap is already mapped"),
-            ErrorCode::NotMapped => write!(f, "some address had to be mapped, but wasn't"),
-            ErrorCode::InsufficientResources => write!(f, "No resources (OOM, storage,...)"),
-            ErrorCode::InvalidArgument => write!(f, "Invalid argument"),
-            ErrorCode::InvalidOperation => write!(f, "Invalid operation in the current state"),
-            ErrorCode::Timeout => write!(f, "Operation timed out"),
-            ErrorCode::IllegalValue => write!(f, "Illegal value"),
-            ErrorCode::InvalidProcessFile => write!(f, "Invalid process file (not valid ELF)"),
-            ErrorCode::OutOfMemory => write!(f, "Out of memory"),
+            KernelErrorCode::Unknown => write!(f, "Unknown error"),
+            KernelErrorCode::InodeNotPresent => write!(f, "Inode not present"),
+            KernelErrorCode::InvalidString => write!(f, "Invalid string"),
+            KernelErrorCode::FileSystemInconsistency => write!(f, "File system inconsistency"),
+            KernelErrorCode::NotMounted => write!(f, "No mountpoint at this inode, or this dev is not mounted"),
+            KernelErrorCode::InternalFSError => write!(f, "Internal file system error"),
+            KernelErrorCode::NoEntry => write!(f, "No entry (usually in a map, like filesystem, partition,...)"),
+            KernelErrorCode::UnsupportedFilesystem => write!(f, "Filesystem type is unsupported"),
+            KernelErrorCode::InsufficientPermissions => write!(f, "Insufficient permissions"),
+            KernelErrorCode::UnsupportedOperation => write!(f, "Unsupported operation"),
+            KernelErrorCode::InvalidPointer => write!(f, "invalid poitner"),
+            KernelErrorCode::AlreadyMapped => write!(f, "requested virtual address in mmap is already mapped"),
+            KernelErrorCode::NotMapped => write!(f, "some address had to be mapped, but wasn't"),
+            KernelErrorCode::InsufficientResources => write!(f, "No resources (OOM, storage,...)"),
+            KernelErrorCode::InvalidArgument => write!(f, "Invalid argument"),
+            KernelErrorCode::InvalidOperation => write!(f, "Invalid operation in the current state"),
+            KernelErrorCode::Timeout => write!(f, "Operation timed out"),
+            KernelErrorCode::IllegalValue => write!(f, "Illegal value"),
+            KernelErrorCode::InvalidProcessFile => write!(f, "Invalid process file (not valid ELF)"),
+            KernelErrorCode::OutOfMemory => write!(f, "Out of memory"),
         }
     }
 }

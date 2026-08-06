@@ -1,7 +1,7 @@
 use std::{
     boxed::Box,
-    error::ErrorCode,
-    lock_w_info,
+    error::KernelError,
+    kerror, kerror_unwrapped, lock_w_info,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
     vec::Vec,
 };
@@ -31,14 +31,14 @@ impl ProcNamespace for SyscallNamespace {
         self.id
     }
 
-    fn create_empty(id: u64) -> Result<Self, ErrorCode> {
+    fn create_empty(id: u64) -> Result<Self, KernelError> {
         Ok(Self {
             id,
             mapped_syscalls: NoIntSpinlock::new(Vec::new()),
         })
     }
 
-    fn create_from(id: u64, other: &Self) -> Result<Self, ErrorCode> {
+    fn create_from(id: u64, other: &Self) -> Result<Self, KernelError> {
         let new_namespace = Self::create_empty(id)?;
         let other_mapped_syscalls = lock_w_info!(other.mapped_syscalls);
         let mut mapped_syscalls = lock_w_info!(new_namespace.mapped_syscalls);
@@ -75,30 +75,32 @@ impl SyscallNamespace {
         });
     }
 
-    pub fn unmap_syscall_pack_by_offset(&self, offset: u64) -> Result<(), ErrorCode> {
+    pub fn unmap_syscall_pack_by_offset(&self, offset: u64) -> Result<(), KernelError> {
         let mut mapped_syscalls = lock_w_info!(self.mapped_syscalls);
         if let Some(pos) = mapped_syscalls.iter().position(|m| m.pack_id == offset) {
             mapped_syscalls.remove(pos);
             Ok(())
         } else {
-            Err(ErrorCode::InvalidArgument)
+            kerror!(InvalidArgument)
         }
     }
 
-    pub fn disable_syscall(&self, syscall_number: u32) -> Result<(), ErrorCode> {
+    pub fn disable_syscall(&self, syscall_number: u32) -> Result<(), KernelError> {
         let mut mapped_syscalls = lock_w_info!(self.mapped_syscalls);
-        let pack = Self::get_pack_mut(syscall_number, &mut mapped_syscalls).ok_or(ErrorCode::InvalidArgument)?;
-        let in_pack_index = syscall_number.checked_sub(pack.base).ok_or(ErrorCode::InvalidArgument)?;
+        let pack = Self::get_pack_mut(syscall_number, &mut mapped_syscalls).ok_or(kerror_unwrapped!(InvalidArgument))?;
+        let in_pack_index = syscall_number
+            .checked_sub(pack.base)
+            .ok_or(kerror_unwrapped!(InvalidArgument))?;
         pack.mask |= !(1 << in_pack_index);
         Ok(())
     }
 
-    pub fn disable_syscall_by_mask(&self, pack_offset: u32, mask: u32) -> Result<(), ErrorCode> {
+    pub fn disable_syscall_by_mask(&self, pack_offset: u32, mask: u32) -> Result<(), KernelError> {
         let mut mapped_syscalls = lock_w_info!(self.mapped_syscalls);
         let pack = mapped_syscalls
             .iter_mut()
             .find(|m| m.base == pack_offset)
-            .ok_or(ErrorCode::InvalidArgument)?;
+            .ok_or(kerror_unwrapped!(InvalidArgument))?;
         pack.mask |= mask;
         Ok(())
     }

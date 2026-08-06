@@ -5,8 +5,8 @@
 use std::{
     boxed::Box,
     collections::btree_map::BTreeMap,
-    error::ErrorCode,
-    lock_w_info, println,
+    error::KernelError,
+    kerror, lock_w_info, println,
     string::{String, ToString},
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
     vec::Vec,
@@ -83,7 +83,7 @@ impl FileSystem for Dtmpfs {
         DtmpfsFactory::UUID
     }
 
-    async fn unmount(&self) -> Result<(), ErrorCode> {
+    async fn unmount(&self) -> Result<(), KernelError> {
         Ok(())
     }
 
@@ -93,11 +93,11 @@ impl FileSystem for Dtmpfs {
         _offset_bytes: u64,
         _size_bytes: u64,
         _buffer: &[PhysAddr],
-    ) -> Result<u64, ErrorCode> {
-        Err(ErrorCode::UnsupportedOperation)
+    ) -> Result<u64, KernelError> {
+        kerror!(UnsupportedOperation)
     }
 
-    async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, ErrorCode> {
+    async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {
         let inner = lock_w_info!(self.global_lock);
         let mut entries = Vec::new();
         if let Some(node) = inner.inodes.get(&inode) {
@@ -118,11 +118,11 @@ impl FileSystem for Dtmpfs {
         _offset: u64,
         _size: u64,
         _buffer: &[PhysAddr],
-    ) -> Result<(super::Inode, u64), ErrorCode> {
-        Err(ErrorCode::UnsupportedOperation)
+    ) -> Result<(super::Inode, u64), KernelError> {
+        kerror!(UnsupportedOperation)
     }
 
-    async fn stat(&self, inode: InodeIndex, _parent: InodeIndex) -> Result<super::Inode, ErrorCode> {
+    async fn stat(&self, inode: InodeIndex, _parent: InodeIndex) -> Result<super::Inode, KernelError> {
         Ok(super::Inode {
             index: inode,
             device: self.device_id(),
@@ -137,8 +137,13 @@ impl FileSystem for Dtmpfs {
         })
     }
 
-    async fn set_stat(&self, _inode_index: InodeIndex, _parent: InodeIndex, _inode_data: super::Inode) -> Result<(), ErrorCode> {
-        Err(ErrorCode::UnsupportedOperation)
+    async fn set_stat(
+        &self,
+        _inode_index: InodeIndex,
+        _parent: InodeIndex,
+        _inode_data: super::Inode,
+    ) -> Result<(), KernelError> {
+        kerror!(UnsupportedOperation)
     }
 
     async fn create(
@@ -148,14 +153,14 @@ impl FileSystem for Dtmpfs {
         _type_mode: super::InodeTypeAndPerms,
         _uid: u16,
         _gid: u16,
-    ) -> Result<(super::Inode, super::Inode), ErrorCode> {
+    ) -> Result<(super::Inode, super::Inode), KernelError> {
         let mut inner = lock_w_info!(self.global_lock);
         let inode_index = inner.inode_index;
         inner.inode_index += 1;
         inner.inodes.insert(inode_index, DtmpfsNode { children: Vec::new() });
 
         let Some(parent_inode) = inner.inodes.get_mut(&parent_dir) else {
-            return Err(ErrorCode::InodeNotPresent);
+            return kerror!(InodeNotPresent);
         };
 
         parent_inode.children.push((name.to_string(), inode_index));
@@ -166,12 +171,12 @@ impl FileSystem for Dtmpfs {
         ))
     }
 
-    async fn unlink(&self, _parent_inode: InodeIndex, _name: &str) -> Result<(super::Inode, super::Inode), ErrorCode> {
-        return Err(ErrorCode::UnsupportedOperation);
+    async fn unlink(&self, _parent_inode: InodeIndex, _name: &str) -> Result<(super::Inode, super::Inode), KernelError> {
+        return kerror!(UnsupportedOperation);
     }
 
-    async fn remove_inode(&self, _inode: InodeIndex) -> Result<(), ErrorCode> {
-        Err(ErrorCode::UnsupportedOperation)
+    async fn remove_inode(&self, _inode: InodeIndex) -> Result<(), KernelError> {
+        kerror!(UnsupportedOperation)
     }
 
     async fn link(
@@ -179,15 +184,15 @@ impl FileSystem for Dtmpfs {
         _inode: InodeIndex,
         _parent_dir: InodeIndex,
         _name: &str,
-    ) -> Result<(super::Inode, super::Inode), ErrorCode> {
-        Err(ErrorCode::UnsupportedOperation)
+    ) -> Result<(super::Inode, super::Inode), KernelError> {
+        kerror!(UnsupportedOperation)
     }
 
-    async fn truncate(&self, _inode: InodeIndex, _size: u64) -> Result<(), ErrorCode> {
-        Err(ErrorCode::UnsupportedOperation)
+    async fn truncate(&self, _inode: InodeIndex, _size: u64) -> Result<(), KernelError> {
+        kerror!(UnsupportedOperation)
     }
 
-    async fn rename(&self, inode: InodeIndex, parent_inode: InodeIndex, name: &str) -> Result<(), ErrorCode> {
+    async fn rename(&self, inode: InodeIndex, parent_inode: InodeIndex, name: &str) -> Result<(), KernelError> {
         let mut inner = lock_w_info!(self.global_lock);
         let Some(parent_node) = inner.inodes.get_mut(&parent_inode) else {
             return Ok(());

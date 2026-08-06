@@ -1,6 +1,7 @@
 use core::str::FromStr;
 use std::boxed::Box;
-use std::error::ErrorCode;
+use std::error::KernelError;
+use std::kerror_unwrapped;
 
 use uuid::Uuid;
 
@@ -20,14 +21,14 @@ pub(super) fn cmd_mount(args: CommandSplitter) -> AsyncCommandRetType {
 }
 
 #[heap_future::heap_future]
-pub async fn cmd_mount_internal(mut args: CommandSplitter) -> Result<(), ErrorCode> {
-    let mountpoint = args.next().ok_or(ErrorCode::InvalidArgument)?;
-    let part_id = args.next().ok_or(ErrorCode::InvalidArgument)?;
+pub async fn cmd_mount_internal(mut args: CommandSplitter) -> Result<(), KernelError> {
+    let mountpoint = args.next().ok_or(kerror_unwrapped!(InvalidArgument))?;
+    let part_id = args.next().ok_or(kerror_unwrapped!(InvalidArgument))?;
     let resolved_mountpoint = vfs::resolve_path(&mountpoint);
     let part_id = match part_id.as_str() {
         "rfs2" => RFS2_UUID,
         "fat" => FAT_UUID,
-        _ => Uuid::from_str(&part_id).map_err(|_| ErrorCode::InvalidArgument)?,
+        _ => Uuid::from_str(&part_id).map_err(|_| kerror_unwrapped!(InvalidArgument))?,
     };
 
     vfs::mount_blkdev_partition(part_id, resolved_mountpoint).await

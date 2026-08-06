@@ -1,7 +1,7 @@
 use std::{
     boxed::Box,
-    error::ErrorCode,
-    lock_w_info, println,
+    error::KernelError,
+    kerror, kerror_unwrapped, lock_w_info, println,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
     vec::Vec,
 };
@@ -57,7 +57,7 @@ impl ProcNamespace for MemoryNamespace {
         self.id
     }
 
-    fn create_empty(id: u64) -> Result<Self, ErrorCode> {
+    fn create_empty(id: u64) -> Result<Self, KernelError> {
         let owned_page_tree_root = physical_allocator::allocate();
         let page_tree_root = owned_page_tree_root.0;
         core::mem::forget(owned_page_tree_root); //dealloc handled by drop impl
@@ -72,7 +72,7 @@ impl ProcNamespace for MemoryNamespace {
         })
     }
 
-    fn create_from(id: u64, other: &Self) -> Result<MemoryNamespace, ErrorCode> {
+    fn create_from(id: u64, other: &Self) -> Result<MemoryNamespace, KernelError> {
         let new_namespace = MemoryNamespace::create_empty(id)?;
 
         //drop current ranges
@@ -108,11 +108,11 @@ impl MemoryNamespace {
         name: Box<str>,
         range_type: MemoryRangeType,
         map_address: VirtAddr,
-    ) -> Result<u32, ErrorCode> {
+    ) -> Result<u32, KernelError> {
         let new_range = range.reserved_range(map_address);
         if new_range.end.0 >= (1 << 48) {
             //disallow mapping in kernel space
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         }
         let mut dynamic = lock_w_info!(self.dynamic_data);
 
@@ -123,16 +123,16 @@ impl MemoryNamespace {
             }
         });
         if illegal_map {
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         }
 
         let Some(entry) = memory::get_page_table_entry_at_level(self.page_tree_root, map_address, range.level() + 1, true) else {
             println!("checks did not catch invalid map");
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         };
 
         if entry.present() {
-            return Err(ErrorCode::InvalidArgument);
+            return kerror!(InvalidArgument);
         }
 
         *entry = PageTableEntry::new(range.node_addr(), true);
@@ -153,24 +153,24 @@ impl MemoryNamespace {
         Ok(counter)
     }
 
-    pub fn remove_mem_range_by_name(&self, name: &str) -> Result<(), ErrorCode> {
+    pub fn remove_mem_range_by_name(&self, name: &str) -> Result<(), KernelError> {
         let mut dynamic_data = lock_w_info!(self.dynamic_data);
         let index = dynamic_data
             .memory_ranges
             .iter()
             .position(|r| *r.name == *name)
-            .ok_or(ErrorCode::NoEntry)?;
+            .ok_or(kerror_unwrapped!(NoEntry))?;
         self.remove_mem_range_by_index(&mut dynamic_data, index as u32);
         Ok(())
     }
 
-    pub fn remove_mem_range_by_id(&self, id: u32) -> Result<(), ErrorCode> {
+    pub fn remove_mem_range_by_id(&self, id: u32) -> Result<(), KernelError> {
         let mut dynamic_data = lock_w_info!(self.dynamic_data);
         let index = dynamic_data
             .memory_ranges
             .iter()
             .position(|r| r.range_id == id)
-            .ok_or(ErrorCode::NoEntry)?;
+            .ok_or(kerror_unwrapped!(NoEntry))?;
         self.remove_mem_range_by_index(&mut dynamic_data, index as u32);
         Ok(())
     }

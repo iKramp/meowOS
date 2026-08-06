@@ -6,7 +6,7 @@ use crate::{
 use super::{DirEntry, VfsAdapterTrait};
 use std::{
     boxed::Box,
-    error::ErrorCode,
+    error::KernelError,
     lock_w_info, println,
     sync::{arc::Arc, once_lock::OnceLock},
 };
@@ -50,11 +50,11 @@ impl VfsAdapterTrait for ProcAdapter {
         _offset_bytes: u64,
         _size_bytes: u64,
         _buffer: &[PhysAddr],
-    ) -> Result<u64, ErrorCode> {
+    ) -> Result<u64, KernelError> {
         todo!()
     }
 
-    async fn read_dir(&self, _inode: crate::vfs::InodeIndex) -> Result<Box<[DirEntry]>, ErrorCode> {
+    async fn read_dir(&self, _inode: crate::vfs::InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {
         todo!()
     }
 
@@ -64,11 +64,11 @@ impl VfsAdapterTrait for ProcAdapter {
         _offset: u64,
         _size: u64,
         _buffer: &[PhysAddr],
-    ) -> Result<(crate::vfs::Inode, u64), ErrorCode> {
+    ) -> Result<(crate::vfs::Inode, u64), KernelError> {
         todo!()
     }
 
-    async fn stat(&self, inode: crate::vfs::InodeIndex) -> Result<crate::vfs::Inode, ErrorCode> {
+    async fn stat(&self, inode: crate::vfs::InodeIndex) -> Result<crate::vfs::Inode, KernelError> {
         Ok(crate::vfs::Inode {
             index: inode,
             device: self.device_id,

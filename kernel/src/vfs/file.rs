@@ -2,8 +2,8 @@ use core::{future::AsyncDrop, sync::atomic::AtomicU64};
 use std::{
     boxed::Box,
     collections::btree_map::BTreeMap,
-    error::ErrorCode,
-    ffi_future, lock_w_info,
+    error::KernelError,
+    ffi_future, kerror_unwrapped, lock_w_info,
     sync::{self, arc::Arc, async_lock::AsyncSpinlock, no_int_spinlock::NoIntSpinlock},
 };
 
@@ -110,13 +110,13 @@ impl FileFlags {
     }
 }
 
-async fn open_file(inode_id: InodeIdentifier, parent_id: InodeIdentifier) -> Result<Arc<OpenFile>, ErrorCode> {
+async fn open_file(inode_id: InodeIdentifier, parent_id: InodeIdentifier) -> Result<Arc<OpenFile>, KernelError> {
     let vfs = lock_w_info!(VFS);
-    let device = vfs.devices.get(&inode_id.device_id).ok_or(ErrorCode::NoEntry)?;
+    let device = vfs.devices.get(&inode_id.device_id).ok_or(kerror_unwrapped!(NoEntry))?;
     let partition = vfs
         .mounted_filesystems
         .get(&device.partition)
-        .ok_or(ErrorCode::NoEntry)?
+        .ok_or(kerror_unwrapped!(NoEntry))?
         .clone();
     drop(vfs);
     let inode = partition.stat(inode_id.index, parent_id.index).await?;
@@ -128,7 +128,10 @@ async fn open_file(inode_id: InodeIdentifier, parent_id: InodeIdentifier) -> Res
     Ok(open_file)
 }
 
-pub(in crate::vfs) async fn get_file(inode_id: InodeIdentifier, parent_id: InodeIdentifier) -> Result<Arc<OpenFile>, ErrorCode> {
+pub(in crate::vfs) async fn get_file(
+    inode_id: InodeIdentifier,
+    parent_id: InodeIdentifier,
+) -> Result<Arc<OpenFile>, KernelError> {
     let mut file_storage = lock_w_info!(FILE_STORAGE);
     if let Some(open_file) = file_storage.open_files.get(&inode_id) {
         if let Some(open_file) = open_file.upgrade() {
@@ -168,10 +171,10 @@ impl Drop for OpenFile {
 
         let future = async move {
             //move to future
-            let dummy_open_file = dummy_open_file;
-            let dummy_open_file_ptr = &dummy_open_file as *const OpenFile;
+            let mut dummy_open_file = dummy_open_file;
+            let dummy_open_file_ptr = &mut dummy_open_file;
             //we need to drop the open file asynchronously because the inode might have an async lock on it
-            unsafe { core::future::async_drop_in_place(dummy_open_file_ptr as *mut OpenFile).await };
+            unsafe { core::future::async_drop_in_place(dummy_open_file_ptr).await };
             core::mem::forget(dummy_open_file);
         };
         let future = Box::pin(future);
