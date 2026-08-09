@@ -213,6 +213,11 @@ async fn mount_vfs_adapters(fs: &Arc<dyn FileSystem + Send>) {
     let tty_adapter = crate::vfs::adapters::TtyAdapter::get();
     let tty_adapter_partition_id = tty_adapter.partition_id();
 
+    let mut vfs = lock_w_info!(VFS);
+    vfs.mounted_filesystems
+        .insert(proc_adapter_partition_id, proc_adapter.clone());
+    vfs.mounted_filesystems.insert(tty_adapter_partition_id, tty_adapter.clone());
+
     let adapters = [
         ("tty", tty_adapter, tty_adapter_partition_id),
         ("proc", proc_adapter, proc_adapter_partition_id),

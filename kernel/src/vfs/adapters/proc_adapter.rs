@@ -7,7 +7,7 @@ use super::{DirEntry, VfsAdapterTrait};
 use std::{
     boxed::Box,
     error::KernelError,
-    lock_w_info, println,
+    kerror, lock_w_info, println,
     sync::{arc::Arc, once_lock::OnceLock},
 };
 
@@ -55,7 +55,7 @@ impl VfsAdapterTrait for ProcAdapter {
     }
 
     async fn read_dir(&self, _inode: crate::vfs::InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {
-        todo!()
+        kerror!(UnsupportedOperation)
     }
 
     async fn write(

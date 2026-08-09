@@ -1,5 +1,5 @@
 use core::{slice, str};
-use std::{boxed::Box, error::KernelError, format, lock_w_info, string::ToString, vec::Vec};
+use std::{boxed::Box, error::KernelError, format, lock_w_info, println, string::ToString, vec::Vec};
 
 use crate::{
     memory::{addresses::VirtAddr, physical_allocator},
@@ -77,15 +77,21 @@ async fn tree_dir(dir: &FileHandle, path: &mut Vec<Box<str>>, depth: usize) -> R
         let entry_name = entry.name;
         path.push(entry_name);
         let resolved_path = vfs::validate_path(path)?;
-        let Ok(entry_file) = vfs::open_file(resolved_path, None, *vfs::file::OpenFlags(0).set_read(true)).await else {
-            let tty = lock_w_info!(TTY);
-            tty.print(&format!(
-                "{}Couldn't tree {}\n",
-                "-".repeat(depth),
-                path.last().map_or("", |val| val)
-            ));
-            continue;
+        let entry_file = match vfs::open_file((&resolved_path).into(), None, *vfs::file::OpenFlags(0).set_read(true)).await {
+            Ok(file) => file,
+            Err(e) => {
+                let tty = lock_w_info!(TTY);
+                tty.print(&format!(
+                    "{}Couldn't tree {} ({})\n",
+                    "-".repeat(depth),
+                    path.last().map_or("", |val| val),
+                    e
+                ));
+                path.pop();
+                continue;
+            }
         };
+        println!("entry file {}, inode ident: {:?}", resolved_path, entry_file.inode);
 
         let res = tree_inode(&entry_file, path, depth).await;
 
