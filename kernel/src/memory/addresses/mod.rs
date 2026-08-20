@@ -137,6 +137,14 @@ impl core::convert::From<OwnedPhysRange> for OwnedVirtRange {
     }
 }
 
+pub fn owned_phys_slice_to_non_owned(slice: &[OwnedPhysAddr]) -> &[PhysAddr] {
+    const _ASSERT: () = assert!(core::mem::size_of::<OwnedPhysAddr>() == core::mem::size_of::<PhysAddr>());
+
+    let ptr = slice.as_ptr() as *const PhysAddr;
+    let len = slice.len();
+    unsafe { core::slice::from_raw_parts(ptr, len) }
+}
+
 impl_addr_ops!(VirtAddr);
 impl_addr_ops!(PhysAddr);
 impl_addr_ops!(OwnedVirtAddr);

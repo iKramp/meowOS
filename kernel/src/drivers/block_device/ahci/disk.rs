@@ -729,11 +729,12 @@ impl Future for CommandWaiter<'_> {
     fn poll(self: core::pin::Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> core::task::Poll<Self::Output> {
         let waker = cx.waker().clone();
         let cmd_index = self.command_index as usize;
-        *lock_w_info!(self.port.task_wakers[cmd_index]) = Some(waker);
+        //lock early to prevent interrupt after check but before setting waker
+        let mut task_waker_lock = lock_w_info!(self.port.task_wakers[cmd_index]);
         if self.port.is_command_ready(self.command_index) {
-            *lock_w_info!(self.port.task_wakers[cmd_index]) = None;
             core::task::Poll::Ready(())
         } else {
+            *task_waker_lock.deref_mut() = Some(waker);
             core::task::Poll::Pending
         }
     }

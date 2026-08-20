@@ -102,4 +102,8 @@ impl ProcNamespace for FilesystemNamespace {
             cwd: NoIntSpinlock::new(cwd),
         })
     }
+
+    fn get_default(holder: &super::ProcNamespaces) -> Arc<Self> {
+        holder.filesystem_namespace.clone()
+    }
 }

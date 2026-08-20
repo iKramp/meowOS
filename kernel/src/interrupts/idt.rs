@@ -10,8 +10,8 @@ use std::printlnc;
 macro_rules! never_exit_interrupt_message {
     ($message:expr, $func_name:ident) => {
         extern "C" fn $func_name(proc_data: &mut InterruptProcessorState) -> ! {
-            printlnc!((0, 0, 255), "{} exception", $message);
-            printlnc!(
+            printlnc!(level:error, (0, 0, 255), "{} exception", $message);
+            printlnc!(level:error,
                 (0, 0, 255),
                 "segmetn:instruction: {:x}:{:x}",
                 proc_data.interrupt_frame.cs,

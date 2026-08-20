@@ -1,4 +1,9 @@
-use core::{future::Future as StdFuture, pin::Pin, sync::atomic::AtomicU64, task::Context, task::Poll as StdPoll};
+use core::{
+    future::Future as StdFuture,
+    pin::Pin,
+    sync::atomic::{AtomicBool, AtomicU64},
+    task::{Context, Poll as StdPoll},
+};
 use std::{
     boxed::Box,
     ffi_future::future::{Future, Poll},
@@ -27,6 +32,14 @@ pub fn run_repeating_tasks() {
     for task in tasks.iter() {
         task();
     }
+}
+
+pub fn has_tasks_to_process() -> bool {
+    let locals = CpuLocals::get();
+    locals
+        .async_task_data
+        .has_tasks_to_process
+        .load(core::sync::atomic::Ordering::Acquire)
 }
 
 pub fn block_task<T>(task: Future<T>) -> T {
@@ -69,6 +82,7 @@ pub struct AsyncTaskData {
     tasks_to_wake: NoIntSpinlock<Vec<u64>>,
     // waiting_tasks: NoIntSpinlock<BTreeMap<u64, AsyncTaskInternal>>,
     waiting_tasks: NoIntSpinlock<Vec<(u64, AsyncTaskWrapper<'static>)>>,
+    has_tasks_to_process: AtomicBool,
 }
 
 impl AsyncTaskData {
@@ -79,6 +93,7 @@ impl AsyncTaskData {
             tasks_to_wake: NoIntSpinlock::new(Vec::new()),
             // waiting_tasks: NoIntSpinlock::new(BTreeMap::new()),
             waiting_tasks: NoIntSpinlock::new(Vec::new()),
+            has_tasks_to_process: AtomicBool::new(false),
         }
     }
 }
@@ -139,6 +154,10 @@ pub fn wake_task(task_id: u64, apic_id: u8) {
 
     let mut to_wake = lock_w_info!(locals.async_task_data.tasks_to_wake);
     to_wake.push(task_id);
+    locals
+        .async_task_data
+        .has_tasks_to_process
+        .store(true, core::sync::atomic::Ordering::Release);
 }
 
 fn sleep_task(task: AsyncTaskWrapper<'static>) {
@@ -172,6 +191,10 @@ fn wake_tasks_in_list(locals: &mut CpuLocals) {
 
 pub fn process_tasks() {
     let mut locals = CpuLocals::get_mut();
+    locals
+        .async_task_data
+        .has_tasks_to_process
+        .store(false, core::sync::atomic::Ordering::Release);
     wake_tasks_in_list(&mut locals);
     drop(locals);
 

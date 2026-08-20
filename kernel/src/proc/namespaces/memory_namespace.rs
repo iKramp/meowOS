@@ -94,6 +94,10 @@ impl ProcNamespace for MemoryNamespace {
 
         Ok(new_namespace)
     }
+
+    fn get_default(holder: &super::ProcNamespaces) -> Arc<Self> {
+        holder.memory_namespace.clone()
+    }
 }
 
 impl MemoryNamespace {

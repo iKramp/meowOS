@@ -134,7 +134,6 @@ struct FatDriver {
     fat_start_sector: u32,
     fat_sectors: u32,
     root_dir_start_sector: u32,
-    root_dir_sectors: u32,
     data_start_sector: u32,
     data_sectors: u32,
 }
@@ -156,23 +155,36 @@ impl FatDriver {
 
             let header_ref = header.assume_init_ref();
 
-            let fat_size = if header_ref.BPB_FATSize16 != 0 {
-                header_ref.BPB_FATSize16 as u32
-            } else {
-                header_ref.BPB_FATSize32
-            };
-            let total_sectors = if header_ref.BPB_TotalSectors16 != 0 {
-                header_ref.BPB_TotalSectors16 as u32
-            } else {
-                header_ref.BPB_TotalSectors32
-            };
+            if header_ref.BPB_BytesPerSector != 512 {
+                panic!("FAT32 driver only supports 512 bytes per sector");
+            }
+
+            if header_ref.BPB_BytesPerSector * header_ref.BPB_SectorsPerCluster as u16 > 32 * 1024 {
+                panic!("FAT32 driver only supports up to 32KB clusters");
+            }
+
+            if header_ref.BPB_RootEntryCount != 0 {
+                panic!("FAT32 driver only supports FAT32, not FAT12 or FAT16");
+            }
+            if header_ref.BPB_TotalSectors16 != 0 {
+                panic!("FAT32 driver only supports FAT32, not FAT12 or FAT16");
+            }
+            if header_ref.BPB_FATSize16 != 0 {
+                panic!("FAT32 driver only supports FAT32, not FAT12 or FAT16");
+            }
+
+            let fat_size = header_ref.BPB_FATSize32;
+            let total_sectors = header_ref.BPB_TotalSectors32;
 
             let fat_start_sector = header_ref.BPB_ReservedSectorCount as u32;
+
             let fat_sectors = fat_size * header_ref.BPB_NumFATs as u32;
 
             let root_cluster = header_ref.BPB_RootCluster;
-            let root_dir_sectors = (32_u32 * header_ref.BPB_RootEntryCount as u32 + header_ref.BPB_BytesPerSector as u32 - 1)
-                .div_ceil(header_ref.BPB_BytesPerSector as u32);
+            let root_dir_sectors = (32_u32 * header_ref.BPB_RootEntryCount as u32).div_ceil(header_ref.BPB_BytesPerSector as u32);
+            if root_dir_sectors != 0 {
+                panic!("FAT32 driver only supports FAT32, not FAT12 or FAT16");
+            }
 
             let data_start_sector = header_ref.BPB_ReservedSectorCount as u32 + (header_ref.BPB_NumFATs as u32 * fat_size);
             let data_sectors = total_sectors - data_start_sector;
@@ -181,9 +193,9 @@ impl FatDriver {
 
             let count_of_clusters = data_sectors / header_ref.BPB_SectorsPerCluster as u32;
 
-            if count_of_clusters <= 4085 {
+            if count_of_clusters < 4085 {
                 panic!("FAT12 is not supported");
-            } else if count_of_clusters <= 65525 {
+            } else if count_of_clusters < 65525 {
                 panic!("FAT16 is not supported");
             }
 
@@ -193,7 +205,6 @@ impl FatDriver {
                 fat_start_sector,
                 fat_sectors,
                 root_dir_start_sector,
-                root_dir_sectors,
                 data_start_sector,
                 data_sectors,
             };
@@ -213,7 +224,10 @@ impl FatDriver {
     }
 
     fn get_sector_from_cluster(&self, cluster: u32) -> u32 {
-        self.data_start_sector + ((cluster - 2) * self.header.BPB_SectorsPerCluster as u32)
+        println!("Translating cluster {} to sector", cluster);
+        let res = self.data_start_sector + ((cluster - 2) * self.header.BPB_SectorsPerCluster as u32);
+        println!("Cluster {} translates to sector {}", cluster, res);
+        res
     }
 
     fn get_entry_sec_offset(&self, entry: u32) -> (u32, u32) {
@@ -245,7 +259,7 @@ impl FatDriver {
     }
 
     fn entry_is_final(entry_val: u32) -> bool {
-        (0x0FFFFFF8..=0x0FFFFFFF).contains(&entry_val)
+        entry_val >= 0x0FFFFFF8
     }
 
     async fn read_file_sector(&self, sector: u32, file_cluster_start: u32) -> Option<Box<[u8; 512]>> {
@@ -264,9 +278,9 @@ impl FatDriver {
             return None;
         }
 
-        let sector_in_cluster = sector & self.header.BPB_SectorsPerCluster as u32;
-        let cluster_start = self.get_sector_from_cluster(curr_cluster);
-        Some(self.read_sector(cluster_start + sector_in_cluster).await)
+        let sector_in_cluster = sector % self.header.BPB_SectorsPerCluster as u32;
+        let cluster_start_sector = self.get_sector_from_cluster(curr_cluster);
+        Some(self.read_sector(cluster_start_sector + sector_in_cluster).await)
     }
 
     async fn read_dir_internal(&self, inode_index: InodeIndex) -> Result<Box<[FatDirEntry]>, KernelError> {
@@ -281,17 +295,14 @@ impl FatDriver {
             let src_ptr = data.as_ptr() as *const FatDirEntry;
             let len = 512 / core::mem::size_of::<FatDirEntry>();
             let entry_slice = unsafe { slice::from_raw_parts(src_ptr, len) };
-            for (i, entry) in entry_slice.iter().enumerate() {
+            for entry in entry_slice.iter() {
                 if entry.has_long_name() {
-                    println!("entry {} has long name, skipping", i);
                     continue;
                 }
                 if entry.is_used() {
-                    println!("adding entry {} {:?}", i, entry.dir_name);
                     buf.push(entry.clone());
                 }
                 if !entry.has_entries_later() {
-                    println!("entry {} has no entries later, returning", i);
                     return Ok(buf.into_boxed_slice());
                 }
             }
@@ -314,21 +325,28 @@ impl FileSystem for FatDriver {
     ///Offset must be page aligned
     async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, KernelError> {
         if !offset_bytes.is_multiple_of(512) {
-            // return Err(KernelError::IllegalValue);
             return kerror!(IllegalValue);
         }
 
         let size_sectors = size_bytes.div_ceil(512);
+        let size_sectors = size_sectors.min(buffer.len() as u64 * 8);
+
+        println!(
+            "reading {} bytes ({} sectors) from inode {} at offset {}",
+            size_bytes, size_sectors, inode, offset_bytes
+        );
 
         let start_sector = offset_bytes / 512;
 
         for i in start_sector..(start_sector + size_sectors) {
+            let buffer_sector = i - start_sector;
+
             let Some(data) = self.read_file_sector(i as u32, inode as u32).await else {
-                return Ok((i - start_sector) * 512);
+                return Ok((buffer_sector * 512).min(size_bytes));
             };
-            let buffer_phys = buffer[i as usize / 8];
+            let buffer_phys = buffer[buffer_sector as usize / 8];
             let buffer_virt: VirtAddr = buffer_phys.into();
-            let in_buffer_offset = (i % 8) * 512;
+            let in_buffer_offset = (buffer_sector % 8) * 512;
             let ptr_dest = (buffer_virt + in_buffer_offset).0 as *mut u8;
             let ptr_src = data.as_ptr();
             unsafe {
@@ -336,7 +354,7 @@ impl FileSystem for FatDriver {
             }
         }
 
-        return Ok(size_sectors * 512);
+        return Ok((size_sectors * 512).min(size_bytes));
     }
     async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {
         let entries = self.read_dir_internal(inode).await?;

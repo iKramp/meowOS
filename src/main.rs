@@ -23,7 +23,7 @@ fn main() {
     let snapshot = true;
     let cores = 1;
     let net = false;
-    let run_mode = RunMode::Kvm;
+    let run_mode = RunMode::Tcg;
 
     let mut cmd = std::process::Command::new("qemu-system-x86_64");
     //general config

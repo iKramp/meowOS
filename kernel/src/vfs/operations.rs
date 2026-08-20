@@ -485,7 +485,7 @@ pub async fn write_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64
 
     let res = fs.write(inode.index, desired_offset, size, buffer).await?;
 
-    println!("operations::write_file: Wrote {} bytes", res.1);
+    println!("Wrote {} bytes", res.1);
 
     file_handle
         .position
@@ -507,9 +507,15 @@ pub async fn read_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64)
 
     let offset = file_handle.position.load(Ordering::Relaxed);
 
+    println!(
+        "Reading max {} bytes from file {:?} at offset {}",
+        size, file_handle.inode, offset
+    );
+
     let inode = unsafe { file_handle.open_file.inode.get_read_ptr() };
 
     if inode.type_mode.is_dir() {
+        println!("file {:?} is a directory, cannot read", file_handle.inode);
         return kerror!(UnsupportedOperation);
     }
 
@@ -525,7 +531,7 @@ pub async fn read_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64)
 
     let bytes_read = fs.read(inode.index, offset, size, buffer).await?;
 
-    println!("operations::read_file: Read {} bytes", bytes_read);
+    println!("Read {} bytes", bytes_read);
 
     let res = bytes_read.min(size);
     file_handle.position.store(offset + res, Ordering::Relaxed);

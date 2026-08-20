@@ -1,6 +1,9 @@
 use std::lock_w_info;
 
-use crate::{acpi::cpu_locals::CpuLocals, task_runner};
+use crate::{
+    acpi::cpu_locals::CpuLocals,
+    task_runner::{self, has_tasks_to_process},
+};
 
 use super::{PROC_INITIALIZED, ProcessData, SCHEDULER, dispatcher::dispatch};
 
@@ -47,6 +50,8 @@ pub fn no_ret_context_switch() -> ! {
         }
         drop(scheduler_lock);
         //wait here
-        std::thread::sleep(core::time::Duration::from_millis(20));
+        if !has_tasks_to_process() {
+            std::thread::sleep(core::time::Duration::from_millis(20));
+        }
     }
 }

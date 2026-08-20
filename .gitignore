@@ -41,3 +41,5 @@ fat_disk.img
 __pycache__/
 
 perf_analysis/
+
+fat_disk/

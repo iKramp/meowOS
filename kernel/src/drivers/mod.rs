@@ -9,4 +9,5 @@ pub fn init_drivers() {
     block_device::init_drivers();
     net_device::init_drivers();
     filesystem::init_fs_drivers();
+    ps2::init();
 }

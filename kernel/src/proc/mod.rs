@@ -143,6 +143,8 @@ pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &s
         }
     };
 
+    drop(phys_buf); //delay drop
+
     Ok(new_pid)
 }
 

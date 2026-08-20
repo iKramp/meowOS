@@ -54,6 +54,10 @@ impl ProcNamespace for SyscallNamespace {
         drop(mapped_syscalls);
         Ok(new_namespace)
     }
+
+    fn get_default(holder: &super::ProcNamespaces) -> Arc<Self> {
+        holder.syscall_namespace.clone()
+    }
 }
 
 impl SyscallNamespace {

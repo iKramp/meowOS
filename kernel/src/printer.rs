@@ -2,6 +2,7 @@ use core::ptr::addr_of;
 use std::{Print, lock_w_info, print::LogLevel, sync::no_int_spinlock::NoIntSpinlock};
 
 use crate::{
+    cpuid,
     utils::byte_to_port,
     vga::vga_text::{VGA_TEXT, VgaText},
 };
@@ -9,12 +10,19 @@ use crate::{
 static PRINT: NoIntSpinlock<Printer> = NoIntSpinlock::new(Printer::new(&VGA_TEXT));
 
 pub fn init_printer() {
+    if let Some(cpuid_leaf_1) = cpuid::get_cpuid_leaf(1) {
+        let virtualized = cpuid_leaf_1.ecx & (1 << 31) != 0;
+        let mut printer = lock_w_info!(PRINT);
+        printer.in_qemu = virtualized;
+    }
+
     unsafe { std::set_print(addr_of!(PRINT)) };
 }
 
 struct Printer {
     vga_text: &'static NoIntSpinlock<VgaText>,
     log_level: LogLevel,
+    in_qemu: bool,
 }
 
 impl Printer {
@@ -22,11 +30,8 @@ impl Printer {
         Self {
             vga_text,
             log_level: LogLevel::Info,
+            in_qemu: true,
         }
-    }
-
-    pub fn init(&self) {
-        unsafe { std::set_print(core::ptr::addr_of!(PRINT)) };
     }
 }
 
@@ -94,7 +99,7 @@ impl Print for Printer {
 
 impl core::fmt::Write for Printer {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        if self.log_level != LogLevel::Debug {
+        if !self.in_qemu || self.log_level != LogLevel::Debug {
             let mut vga = lock_w_info!(self.vga_text);
             let _ = vga.write_str(s); //ignore errors to vga, serial works either way
         }

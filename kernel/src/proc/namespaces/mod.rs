@@ -21,6 +21,7 @@ pub trait ProcNamespace: Debug + Send + Sync + Any + Sized {
     fn get_id(&self) -> u64;
     fn create_from(id: u64, other: &Self) -> Result<Self, KernelError>;
     fn create_empty(id: u64) -> Result<Self, KernelError>;
+    fn get_default(holder: &ProcNamespaces) -> Arc<Self>;
 }
 
 //update in documentation
@@ -121,23 +122,7 @@ impl ProcNamespaces {
     }
 
     fn get_default_namespace<T: ProcNamespace>(&self) -> Arc<T> {
-        let type_id = TypeId::of::<T>();
-        let syscall_id = TypeId::of::<SyscallNamespace>();
-        let mem_id = TypeId::of::<MemoryNamespace>();
-        let fs_id = TypeId::of::<FilesystemNamespace>();
-        println!("Getting default namespace for type_id: {:#?}", type_id);
-        println!("SyscallNamespace type_id: {:#?}", syscall_id);
-        println!("MemoryNamespace type_id: {:#?}", mem_id);
-        println!("FilesystemNamespace type_id: {:#?}", fs_id);
-
-        let default_id = match TypeId::of::<T>() {
-            id if id == syscall_id => self.syscall_namespace.get_id(),
-            id if id == mem_id => self.memory_namespace.get_id(),
-            id if id == fs_id => self.filesystem_namespace.get_id(),
-            _ => panic!("unsupported namespace type"),
-        };
-        self.get_indexed_namespace(default_id)
-            .expect("default namespace should always be available")
+        T::get_default(self)
     }
 
     pub fn change_namespace(&mut self, namespace_id: u64) -> Result<Option<ChangeNamespaceFn>, ()> {
