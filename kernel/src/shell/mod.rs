@@ -4,7 +4,7 @@ use crate::{
         cmd_cat::cmd_cat, cmd_cp::cmd_cp, cmd_ls::cmd_ls, cmd_mkdir::cmd_mkdir, cmd_mmap::cmd_mmap, cmd_mount::cmd_mount,
         cmd_tree::cmd_tree,
     },
-    task_runner::PidOption,
+    task_runner::{PidOption, add_repeating_task},
     tty::TTY,
     vfs::{self, ResolvedPath, ResolvedPathBorrowed},
 };
@@ -53,10 +53,21 @@ static ASYNC_CMDS: &[(&str, AsyncCmd)] = &[
 ];
 static SYNC_CMDS: &[(&str, SyncCmd)] = &[("mmap", cmd_mmap)];
 
+fn update_shell() {
+    let mut shell_state = lock_w_info!(SHELL_STATE);
+    if let Some(pid) = shell_state.running_proc {
+        let proc = proc::get_proc(pid);
+        if proc.is_none() {
+            shell_state.command_finished();
+        }
+    }
+}
+
 pub fn init() {
     let mut shell_state = lock_w_info!(SHELL_STATE);
     shell_state.current_dir = Some(ResolvedPath::root());
     shell_state.print_prompt();
+    add_repeating_task(Box::new(update_shell));
 }
 
 impl ShellState {

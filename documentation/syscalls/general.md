@@ -73,4 +73,7 @@ A syscall namespace defines what syscalls a process can use and at what indexes 
 A syscall group is a group of related syscalls. For example, all filesystem related syscalls would be in the same group. Syscalls within a group
 are indexed starting from 0. When a process is created, it is assigned a syscall namespace in which each group gets an "offset"
 Specific syscall groups are described in their respective markdown files
+Processes started with run_process_default_env (started from kernel shell) are guaranteed to have:
+ - legacy syscalls mapped at 0
+ - syscall management pack at 0xFFFFFFE0 (highest possible map)
 

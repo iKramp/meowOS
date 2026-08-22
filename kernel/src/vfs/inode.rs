@@ -39,6 +39,21 @@ impl Inode {
         self.modification_time = other.modification_time;
         self.stat_change_time = other.stat_change_time;
     }
+
+    pub unsafe fn empty() -> Self {
+        Self {
+            index: 0,
+            device: unsafe { DeviceId(0) },
+            type_mode: InodeTypeAndPerms(0),
+            link_cnt: 0,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            access_time: 0,
+            modification_time: 0,
+            stat_change_time: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

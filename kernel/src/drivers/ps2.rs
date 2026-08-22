@@ -2,7 +2,6 @@ use std::{lock_w_info, println, sync::no_int_spinlock::NoIntSpinlock, vec::Vec};
 
 use crate::{
     keyboard::KeyboardState,
-    task_runner::add_repeating_task,
     utils::{byte_from_port, byte_to_port},
 };
 

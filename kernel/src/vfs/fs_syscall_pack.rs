@@ -110,6 +110,7 @@ fn fclose(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let fs_namespace = namespaces
         .get_namespace::<FilesystemNamespace>(namespace_id)
         .expect("default fs namespace must exist");
+    drop(proc_mut);
 
     if fs_namespace.close_file_handle(fd).is_some() {
         proc.set_syscall_return(&[0]);
@@ -142,6 +143,7 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let fs_namespace = namespaces
             .get_namespace::<FilesystemNamespace>(namespace_id)
             .expect("default fs namespace must exist");
+        drop(proc_mut);
         if let Some(f_handle) = fs_namespace.get_file_handle(fd) {
             f_handle
         } else {
@@ -210,6 +212,7 @@ fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let fs_namespace = namespaces
             .get_namespace::<FilesystemNamespace>(namespace_id)
             .expect("default fs namespace must exist");
+        drop(proc_mut);
         if let Some(f_handle) = fs_namespace.get_file_handle(fd) {
             f_handle
         } else {
@@ -279,6 +282,7 @@ fn fseek(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let fs_namespace = namespaces
             .get_namespace::<FilesystemNamespace>(namespace_id)
             .expect("default fs namespace must exist");
+        drop(proc_mut);
         if let Some(f_handle) = fs_namespace.get_file_handle(fd) {
             f_handle
         } else {
@@ -290,7 +294,7 @@ fn fseek(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
 
     let proc_clone = proc.downgrade();
     let task = async move {
-        let inode = file_handle.open_file.inode.lock().await;
+        let inode = file_handle.open_file.inode.lock_read().await;
         let f_size = inode.size;
         let current_pos = file_handle.position.load(Ordering::Acquire);
 
@@ -342,6 +346,7 @@ fn fcreate(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let fs_namespace = namespaces
         .get_namespace::<FilesystemNamespace>(namespace_id)
         .expect("default fs namespace must exist");
+    drop(proc_mut);
 
     let Some(parent_dir) = fs_namespace.get_file_handle(fd) else {
         println!("fcreate: invalid fd {fd}");
@@ -392,6 +397,7 @@ fn flink(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let fs_namespace = namespaces
         .get_namespace::<FilesystemNamespace>(namespace_id)
         .expect("default fs namespace must exist");
+    drop(proc_mut);
 
     let Some(parent_dir) = fs_namespace.get_file_handle(parent_fd) else {
         println!("fcreate: invalid fd {parent_fd}");
@@ -447,6 +453,7 @@ fn funlink(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let fs_namespace = namespaces
         .get_namespace::<FilesystemNamespace>(namespace_id)
         .expect("default fs namespace must exist");
+    drop(proc_mut);
 
     let Some(parent_dir) = fs_namespace.get_file_handle(parent_fd) else {
         println!("funlink: invalid fd {parent_fd}");
@@ -487,6 +494,7 @@ fn fstat(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let fs_namespace = namespaces
         .get_namespace::<FilesystemNamespace>(namespace_id)
         .expect("default fs namespace must exist");
+    drop(proc_mut);
     let Some(file_handle) = fs_namespace.get_file_handle(fd) else {
         println!("fstat: invalid fd {fd}");
         proc.set_syscall_return(&[u64::MAX]);

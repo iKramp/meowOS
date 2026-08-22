@@ -20,9 +20,9 @@ use crate::{
     proc::{self, Pid, ProcessData},
 };
 
-static REPEATING_TASKS: RWSpinlock<Vec<fn()>> = RWSpinlock::new(Vec::new());
+static REPEATING_TASKS: RWSpinlock<Vec<Box<dyn Fn() + Send>>> = RWSpinlock::new(Vec::new());
 
-pub fn add_repeating_task(task: fn()) {
+pub fn add_repeating_task(task: Box<dyn Fn() + Send>) {
     let mut tasks = w_lock_w_info!(REPEATING_TASKS);
     tasks.push(task);
 }

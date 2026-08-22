@@ -19,7 +19,7 @@ use crate::{
     memory::addresses::PhysAddr,
     vfs::{
         GLOBAL_MOUNTS, Inode, InodeIdentifier,
-        file::{OpenFlags, get_file},
+        file::{OpenFlags, get_open_file},
     },
 };
 
@@ -297,8 +297,8 @@ pub async fn open_file(
     let (inode_index, inode_chain) = fs_tree::get_inode_chain(path, from, None).await?;
     let chain_len = inode_chain.len();
     let parent_in_chain_index = if chain_len == 1 { 0 } else { chain_len - 2 };
-    let open_file = get_file(inode_index, inode_chain[parent_in_chain_index]).await?;
-    let is_dir = unsafe { open_file.inode.get_read_ptr().type_mode.is_dir() };
+    let open_file = get_open_file(inode_index, inode_chain[parent_in_chain_index]).await?;
+    let is_dir = open_file.inode.lock_read().await.type_mode.is_dir();
     let file_flags = FileFlags::new_with_flags(open_flags.read(), open_flags.write(), open_flags.append(), is_dir);
     //TODO: check permissions
     Ok(FileHandle {
@@ -311,7 +311,7 @@ pub async fn open_file(
 }
 
 pub async fn get_dir_entries(file_handle: &FileHandle) -> Result<Box<[DirEntry]>, KernelError> {
-    let inode = unsafe { file_handle.open_file.inode.get_read_ptr() };
+    let inode = file_handle.open_file.inode.lock_read().await;
 
     if !inode.type_mode.is_dir() {
         println!("file {:?} is not a directory", file_handle.inode);
@@ -338,7 +338,7 @@ pub async fn create_file(parent_dir: &FileHandle, name: &str, inode_type: InodeT
         return kerror!(UnsupportedOperation);
     }
 
-    let mut parent_inode = parent_dir.open_file.inode.lock().await;
+    let mut parent_inode = parent_dir.open_file.inode.lock_write().await;
     let mut vfs = lock_w_info!(VFS);
     let device_details = vfs
         .devices
@@ -375,8 +375,8 @@ pub async fn link_file(parent_dir: &FileHandle, name: &str, target: &FileHandle)
         return kerror!(UnsupportedOperation);
     }
 
-    let mut parent_inode = parent_dir.open_file.inode.lock().await;
-    let target_inode = unsafe { target.open_file.inode.get_read_ptr() };
+    let mut parent_inode = parent_dir.open_file.inode.lock_write().await;
+    let target_inode = target.open_file.inode.lock_read().await;
 
     let parent_device = parent_inode.device;
     let target_device = target_inode.device;
@@ -406,7 +406,10 @@ pub async fn link_file(parent_dir: &FileHandle, name: &str, target: &FileHandle)
     };
     fs_tree::link_inode(parent_dir.inode, name.to_string().into_boxed_str(), child_id);
     parent_inode.update_from(&new_parent_inode);
-    target.open_file.inode.lock().await.link_cnt += 1;
+
+    let mut write_lock = target_inode.upgrade_to_write().await;
+
+    write_lock.link_cnt += 1;
 
     Ok(())
 }
@@ -419,7 +422,7 @@ pub async fn unlink_file(parent_dir: &FileHandle, name: &str) -> Result<(), Kern
         return kerror!(UnsupportedOperation);
     }
 
-    let mut parent_inode = parent_dir.open_file.inode.lock().await;
+    let mut parent_inode = parent_dir.open_file.inode.lock_write().await;
 
     let mut vfs = lock_w_info!(VFS);
     let device_details = vfs
@@ -439,7 +442,7 @@ pub async fn unlink_file(parent_dir: &FileHandle, name: &str) -> Result<(), Kern
     fs_tree::unlink_inode(parent_dir.inode, name);
 
     parent_inode.update_from(&new_parent_inode);
-    let child_file = get_file(
+    let child_file = get_open_file(
         InodeIdentifier {
             device_id: parent_inode.device,
             index: new_child_inode.index,
@@ -450,14 +453,14 @@ pub async fn unlink_file(parent_dir: &FileHandle, name: &str) -> Result<(), Kern
         },
     )
     .await?;
-    let mut child_inode = child_file.inode.lock().await;
+    let mut child_inode = child_file.inode.lock_write().await;
     child_inode.link_cnt -= 1;
 
     Ok(())
 }
 
 pub async fn write_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, KernelError> {
-    let mut inode = file_handle.open_file.inode.lock().await;
+    let mut inode = file_handle.open_file.inode.lock_write().await;
 
     let desired_offset = if file_handle.file_flags.append() {
         inode.size
@@ -497,7 +500,7 @@ pub async fn write_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64
 }
 
 pub async fn stat_file(file_handle: &FileHandle) -> Inode {
-    file_handle.open_file.inode.lock().await.clone()
+    file_handle.open_file.inode.lock_read().await.clone()
 }
 
 pub async fn read_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, KernelError> {
@@ -506,13 +509,13 @@ pub async fn read_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64)
     }
 
     let offset = file_handle.position.load(Ordering::Relaxed);
+    let inode = file_handle.open_file.inode.lock_read().await;
+    let size = size.min(inode.size.saturating_sub(offset));
 
     println!(
         "Reading max {} bytes from file {:?} at offset {}",
         size, file_handle.inode, offset
     );
-
-    let inode = unsafe { file_handle.open_file.inode.get_read_ptr() };
 
     if inode.type_mode.is_dir() {
         println!("file {:?} is a directory, cannot read", file_handle.inode);

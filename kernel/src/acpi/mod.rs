@@ -25,6 +25,7 @@ pub use smp::ap_startup::ap_startup;
 pub use smp::cpu_locals;
 
 use crate::{
+    acpi::smp::cpu_init_common,
     limine::LIMINE_BOOTLOADER_REQUESTS,
     memory::{self, addresses::*},
     println, printlnc,
@@ -92,6 +93,8 @@ pub fn init_acpi() {
     printlnc!(level:info, (0, 255, 0), "ACPI initialized and APs started");
     memory::unmap_lower_half();
 
+    cpu_init_common();
+
     //after loading dsdt
     /*
         for table in &rsdt.get_tables() {
@@ -116,4 +119,6 @@ pub fn init_acpi_ap(processor_id: u8) {
         };
         apic::enable_apic(platform_info, processor_id);
     }
+
+    cpu_init_common();
 }

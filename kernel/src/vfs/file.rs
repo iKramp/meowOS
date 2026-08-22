@@ -1,17 +1,22 @@
-use core::{future::AsyncDrop, sync::atomic::AtomicU64};
+use core::{future::AsyncDrop, mem::ManuallyDrop, sync::atomic::AtomicU64};
 use std::{
     boxed::Box,
     collections::btree_map::BTreeMap,
     error::KernelError,
     ffi_future, kerror_unwrapped, lock_w_info,
-    sync::{self, arc::Arc, async_lock::AsyncSpinlock, no_int_spinlock::NoIntSpinlock},
+    sync::{
+        self,
+        arc::Arc,
+        async_rw_lock::{AsyncRWLockModeWrite, AsyncRWlock, AsyncRWlockGuard},
+        no_int_spinlock::NoIntSpinlock,
+    },
 };
 
 use bitfield::bitfield;
 
 use crate::{
     task_runner::{self, PidOption},
-    vfs::{DeviceId, Inode, InodeTypeAndPerms, VFS},
+    vfs::{Inode, VFS},
 };
 
 use super::{InodeIdentifier, InodeIdentifierChain};
@@ -50,7 +55,7 @@ impl FileHandle {
 
 #[derive(Debug)]
 pub(in crate::vfs) struct OpenFile {
-    pub inode: AsyncSpinlock<Inode>,
+    pub inode: ManuallyDrop<Arc<AsyncRWlock<Inode>>>,
 }
 
 bitfield! {
@@ -110,7 +115,11 @@ impl FileFlags {
     }
 }
 
-async fn open_file(inode_id: InodeIdentifier, parent_id: InodeIdentifier) -> Result<Arc<OpenFile>, KernelError> {
+async fn fill_inode_data(
+    inode_id: InodeIdentifier,
+    parent_id: InodeIdentifier,
+    inode_lock: &mut AsyncRWlockGuard<'_, Inode, AsyncRWLockModeWrite>,
+) -> Result<(), KernelError> {
     let vfs = lock_w_info!(VFS);
     let device = vfs.devices.get(&inode_id.device_id).ok_or(kerror_unwrapped!(NoEntry))?;
     let partition = vfs
@@ -120,15 +129,11 @@ async fn open_file(inode_id: InodeIdentifier, parent_id: InodeIdentifier) -> Res
         .clone();
     drop(vfs);
     let inode = partition.stat(inode_id.index, parent_id.index).await?;
-
-    let open_file = Arc::new(OpenFile {
-        inode: AsyncSpinlock::new(inode),
-    });
-    lock_w_info!(FILE_STORAGE).open_files.insert(inode_id, open_file.downgrade());
-    Ok(open_file)
+    **inode_lock = inode;
+    Ok(())
 }
 
-pub(in crate::vfs) async fn get_file(
+pub(in crate::vfs) async fn get_open_file(
     inode_id: InodeIdentifier,
     parent_id: InodeIdentifier,
 ) -> Result<Arc<OpenFile>, KernelError> {
@@ -139,34 +144,32 @@ pub(in crate::vfs) async fn get_file(
         }
         file_storage.open_files.remove(&inode_id);
     }
+
+    let empty_inode = unsafe { Inode::empty() };
+    let dummy_open_file = Arc::new(OpenFile {
+        inode: ManuallyDrop::new(Arc::new(AsyncRWlock::new(empty_inode))),
+    });
+    let open_file_clone = dummy_open_file.clone();
+    let mut inode_lock = open_file_clone.inode.lock_write().await; //instant because no other holders exist
+    file_storage.open_files.insert(inode_id, Arc::downgrade(&dummy_open_file));
+
     drop(file_storage);
-    open_file(inode_id, parent_id).await
+
+    fill_inode_data(inode_id, parent_id, &mut inode_lock).await?;
+
+    Ok(dummy_open_file)
 }
 
 impl Drop for OpenFile {
     fn drop(&mut self) {
-        let mut dummy_inode = Inode {
-            index: 0,
-            device: unsafe { DeviceId(0) },
-            type_mode: InodeTypeAndPerms::new_file(0),
-            link_cnt: 0,
-            uid: 0,
-            gid: 0,
-            size: 0,
-            access_time: 0,
-            modification_time: 0,
-            stat_change_time: 0,
-        };
+        //anything as long as arc doesn't error. It's in ManuallyDrop
+        let dummy_arc = unsafe { Arc::from_raw(0x1000 as *const AsyncRWlock<Inode>) };
+        let mut dummy_manually_drop = ManuallyDrop::new(dummy_arc);
 
-        let open_inode = unsafe { self.inode.get_read_ptr() as *const Inode };
-        //safe because we're in drop (no other references)
-        //due to safety (casting const to mut) open_inode should not be used again
-        let open_inode_mut = open_inode as *mut Inode;
-
-        unsafe { core::ptr::swap(open_inode_mut, &mut dummy_inode) }
+        core::mem::swap(&mut self.inode, &mut dummy_manually_drop);
 
         let dummy_open_file = OpenFile {
-            inode: AsyncSpinlock::new(dummy_inode),
+            inode: dummy_manually_drop, //now taken from self
         };
 
         let future = async move {
@@ -175,7 +178,7 @@ impl Drop for OpenFile {
             let dummy_open_file_ptr = &mut dummy_open_file;
             //we need to drop the open file asynchronously because the inode might have an async lock on it
             unsafe { core::future::async_drop_in_place(dummy_open_file_ptr).await };
-            core::mem::forget(dummy_open_file);
+            core::mem::forget(dummy_open_file); //don't retrigger drop
         };
         let future = Box::pin(future);
         let ffi_fut = ffi_future::future::into_ffi_future(future);
@@ -185,6 +188,6 @@ impl Drop for OpenFile {
 
 impl AsyncDrop for OpenFile {
     async fn drop(self: core::pin::Pin<&mut Self>) {
-        //First flush to disk, then clean up/invalidate any cached data
+        unsafe { ManuallyDrop::drop(&mut self.get_mut().inode) };
     }
 }

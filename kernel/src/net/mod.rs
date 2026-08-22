@@ -13,6 +13,7 @@ use core::hash::Hash;
 use core::hash::Hasher;
 use core::hash::SipHasher;
 use core::mem::MaybeUninit;
+use std::boxed::Box;
 use std::cow::Acow;
 use std::lock_w_info;
 use std::println;
@@ -92,7 +93,7 @@ pub fn init() {
         NET_HASHER = MaybeUninit::new(SipHasher::new_with_keys(rand_u64(), rand_u64()));
     }
     protocols::init();
-    task_runner::add_repeating_task(process_packets);
+    task_runner::add_repeating_task(Box::new(process_packets));
 
     unsafe {
         NET_INITIALIZED = true;

@@ -172,6 +172,9 @@ impl FatDriver {
             if header_ref.BPB_FATSize16 != 0 {
                 panic!("FAT32 driver only supports FAT32, not FAT12 or FAT16");
             }
+            if header_ref.BPB_ExtFlags & (1 << 7) != 0 {
+                panic!("don't support non-mirrored FAT");
+            }
 
             let fat_size = header_ref.BPB_FATSize32;
             let total_sectors = header_ref.BPB_TotalSectors32;
@@ -230,7 +233,7 @@ impl FatDriver {
         res
     }
 
-    fn get_entry_sec_offset(&self, entry: u32) -> (u32, u32) {
+    fn get_fat_entry_sec_offset(&self, entry: u32) -> (u32, u32) {
         let sec_num = self.header.BPB_ReservedSectorCount as u32 + (entry * 4 / self.header.BPB_BytesPerSector as u32);
         let offset = (entry * 4) % self.header.BPB_BytesPerSector as u32;
         (sec_num, offset)
@@ -250,12 +253,11 @@ impl FatDriver {
         data
     }
 
-    async fn read_fat_entry(&self, entry: u32) -> u32 {
-        let (sector, offset) = self.get_entry_sec_offset(entry);
+    async fn read_fat_entry(&self, entry_index: u32) -> u32 {
+        let (sector, offset) = self.get_fat_entry_sec_offset(entry_index);
         let data = self.read_sector(sector).await;
         let data_ptr = data.as_ptr() as *const u32;
-        let entry_val = unsafe { data_ptr.byte_add(offset as usize).read() };
-        entry_val & 0x0FFFFFFF
+        unsafe { data_ptr.byte_add(offset as usize).read() }
     }
 
     fn entry_is_final(entry_val: u32) -> bool {
@@ -263,19 +265,16 @@ impl FatDriver {
     }
 
     async fn read_file_sector(&self, sector: u32, file_cluster_start: u32) -> Option<Box<[u8; 512]>> {
-        let nth_entry = sector / self.header.BPB_SectorsPerCluster as u32;
+        let nth_cluster = sector / self.header.BPB_SectorsPerCluster as u32;
+
+        //not the value of the cluster, but the index of the cluster in the chain
         let mut curr_cluster = file_cluster_start;
-        for _ in 0..nth_entry {
-            if curr_cluster == 0 {
-                return None;
-            }
-            if Self::entry_is_final(curr_cluster) {
-                return None;
-            }
+        for _ in 0..nth_cluster {
             curr_cluster = self.read_fat_entry(curr_cluster).await;
-        }
-        if curr_cluster == 0 || Self::entry_is_final(curr_cluster) {
-            return None;
+            if curr_cluster == 0 || Self::entry_is_final(curr_cluster) {
+                return None;
+            }
+            curr_cluster &= 0x0FFFFFFF; //mask to 28 bits, as per FAT32 spec
         }
 
         let sector_in_cluster = sector % self.header.BPB_SectorsPerCluster as u32;

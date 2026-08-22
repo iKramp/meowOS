@@ -1,4 +1,4 @@
-use std::{boxed::Box, sync::arc::Arc};
+use std::{boxed::Box, println, sync::arc::Arc};
 
 use crate::{
     memory::safe_memcpy_to_user,
@@ -30,14 +30,15 @@ struct MappedPackInfo {
 
 fn lspacks(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_id = args.get_namespace_id();
-    let packs_buf_ptr = args.get_arg(0);
-    let packs_buf_size = args.get_arg(1);
+    let packs_buf_size = args.get_arg(0);
+    let packs_buf_ptr = args.get_arg(1);
 
     let proc_mutable = proc.get_mutable();
     let Some(syscall_namespace) = proc_mutable.get_namespaces().get_namespace::<SyscallNamespace>(namespace_id) else {
         proc.set_syscall_return(&[u64::MAX]);
         return;
     };
+    drop(proc_mutable);
     let mapped_syscalls = syscall_namespace.get_mapped_syscalls();
     let names = syscall_registry::get_names(mapped_syscalls.iter().map(|mapped| mapped.2));
 
@@ -80,8 +81,8 @@ fn lspacks(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
 }
 
 fn lsallpacks(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
-    let packs_buf_ptr = args.get_arg(0);
-    let packs_buf_size = args.get_arg(1);
+    let packs_buf_size = args.get_arg(0);
+    let packs_buf_ptr = args.get_arg(1);
 
     let all_packs = syscall_registry::get_all_pack_info();
     let to_write = all_packs.iter().enumerate();
@@ -130,6 +131,8 @@ fn map_pack(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         return;
     };
 
+    println!("Mapping syscall pack '{pack_name}' at base index {base_index} in namespace {namespace_id}");
+
     let (pack, pack_id) = match syscall_registry::get_syscall_pack(&pack_name) {
         Some(info) => info,
         None => {
@@ -143,8 +146,12 @@ fn map_pack(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         proc.set_syscall_return(&[u64::MAX]);
         return;
     };
+    drop(proc_mutable);
 
-    syscall_namespace.map_syscall_pack(base_index as u32, pack, pack_id);
+    if syscall_namespace.map_syscall_pack(base_index as u32, pack, pack_id).is_err() {
+        proc.set_syscall_return(&[u64::MAX]);
+        return;
+    }
 
     proc.set_syscall_return(&[0]);
 }

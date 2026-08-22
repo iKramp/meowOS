@@ -1,3 +1,4 @@
+use core::fmt::Debug;
 use std::{boxed::Box, println, string::String};
 
 use super::{
@@ -190,7 +191,7 @@ extern "C" fn handler(saved_regs_ptr: u64) -> ! {
     save_cpu_state(&StackCpuStateData::Syscall(saved_regs), &curr_proc);
 
     let syscall_number = saved_regs.get_syscall_number();
-    println!("Syscall number: {}, state: {:#X?}", syscall_number, saved_regs);
+    println!("Syscall number: {:X}, state: {:#X?}", syscall_number, saved_regs);
 
     let Some(syscall_namespace) = curr_proc.get_mutable().get_namespaces().get_namespace::<SyscallNamespace>(0) else {
         proc::kill_process(curr_proc.pid(), u64::MAX);
@@ -203,14 +204,14 @@ extern "C" fn handler(saved_regs_ptr: u64) -> ! {
         syscall_handler(saved_regs, &curr_proc);
     } else {
         println!(level:warn, "Invalid syscall number: {}", syscall_number);
-        syscall::handlers::illegal(saved_regs, &curr_proc);
+        curr_proc.set_syscall_return(&[u64::MAX, 0]);
     };
 
     release_current_proc(&curr_proc);
     no_ret_context_switch();
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 #[repr(C)]
 pub struct SyscallCpuState {
     pub rcx: u64,
@@ -266,5 +267,24 @@ impl SyscallCpuState {
 
     pub fn get_namespace_id(&self) -> u64 {
         self.rbx
+    }
+}
+
+impl Debug for SyscallCpuState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SyscallCpuState")
+            .field("syscall_number", &self.rax)
+            .field("namespace_id", &self.rbx)
+            .field("arg0", &self.rdx)
+            .field("arg1", &self.rdi)
+            .field("arg2", &self.rsi)
+            .field("arg3", &self.r8)
+            .field("arg4", &self.r9)
+            .field("arg5", &self.r10)
+            .field("arg6", &self.r12)
+            .field("arg7", &self.r13)
+            .field("arg8", &self.r14)
+            .field("arg9", &self.r15)
+            .finish()
     }
 }

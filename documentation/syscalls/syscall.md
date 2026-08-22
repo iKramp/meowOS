@@ -9,6 +9,10 @@
 | 3 | unmappack | Unmaps a pack from the process's syscall namespace |
 | 4 | restrict | Restricts the syscall useage |
 
+
+## GENERAL INFO
+All packs must be mapped to a 32 index boundary
+
 ## DETAILED SYSCALL DOCUMENTATION
 
 ### Syscall 0: lspacks

@@ -87,12 +87,13 @@ impl<T: ?Sized> Arc<T> {
     }
 }
 
+#[inline]
 unsafe fn data_offset<T: ?Sized>(ptr: *const T) -> usize {
     unsafe { data_offset_alignment(align_of_val_raw(ptr)) }
 }
 
 #[inline]
-fn data_offset_alignment(alignment: usize) -> usize {
+const fn data_offset_alignment(alignment: usize) -> usize {
     let layout = Layout::new::<ArcInner<()>>();
     layout.size() + layout.padding_needed_for(unsafe { Alignment::new_unchecked(alignment) })
 }

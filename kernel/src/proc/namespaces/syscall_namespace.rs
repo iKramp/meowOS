@@ -1,7 +1,7 @@
 use std::{
     boxed::Box,
     error::KernelError,
-    kerror, kerror_unwrapped, lock_w_info,
+    kerror, kerror_unwrapped, lock_w_info, println,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
     vec::Vec,
 };
@@ -62,30 +62,56 @@ impl ProcNamespace for SyscallNamespace {
 
 impl SyscallNamespace {
     pub fn default(id: u64) -> Self {
-        let (legacy_pack, pack_id) = syscall::get_syscall_pack("legacy").expect("legacy syscall pack not found");
         let ns = Self::create_empty(id).expect("can't fail to create empty syscall namespace");
-        ns.map_syscall_pack(0, legacy_pack, pack_id);
+
+        let (legacy_pack, pack_id) = syscall::get_syscall_pack("legacy").expect("legacy syscall pack not found");
+        ns.map_syscall_pack(0, legacy_pack, pack_id).expect("args should be valid");
+
+        let (syscall_pack, pack_id) = syscall::get_syscall_pack("syscall_management").expect("syscall pack not found");
+        ns.map_syscall_pack(0xFFFFFFE0, syscall_pack, pack_id)
+            .expect("args should be valid");
+
         ns
     }
 
-    pub fn map_syscall_pack(&self, base_index: u32, pack: Arc<SyscallPack>, pack_id: u64) {
+    pub fn map_syscall_pack(&self, base_index: u32, pack: Arc<SyscallPack>, pack_id: u64) -> Result<(), KernelError> {
+        if base_index > u32::MAX - 31 {
+            return kerror!(InvalidArgument);
+        }
+
+        if base_index % 32 != 0 {
+            return kerror!(InvalidArgument);
+        }
+
         let mut mapped_syscalls = lock_w_info!(self.mapped_syscalls);
 
-        mapped_syscalls.push(MappedSyscallPack {
-            base: base_index,
-            mask: u32::MAX,
-            pack,
-            pack_id,
-        });
+        let Err(pos) = mapped_syscalls.binary_search_by(|e| e.base.cmp(&base_index)) else {
+            //already mapped
+            return kerror!(InvalidArgument);
+        };
+
+        mapped_syscalls.insert(
+            pos,
+            MappedSyscallPack {
+                base: base_index,
+                mask: u32::MAX,
+                pack,
+                pack_id,
+            },
+        );
+
+        Ok(())
     }
 
     pub fn unmap_syscall_pack_by_offset(&self, offset: u64) -> Result<(), KernelError> {
         let mut mapped_syscalls = lock_w_info!(self.mapped_syscalls);
-        if let Some(pos) = mapped_syscalls.iter().position(|m| m.pack_id == offset) {
-            mapped_syscalls.remove(pos);
-            Ok(())
-        } else {
-            kerror!(InvalidArgument)
+        let pos = mapped_syscalls.binary_search_by(|m| m.pack_id.cmp(&offset));
+        match pos {
+            Ok(pos) => {
+                mapped_syscalls.remove(pos);
+                Ok(())
+            }
+            Err(_) => kerror!(InvalidArgument),
         }
     }
 
@@ -113,6 +139,12 @@ impl SyscallNamespace {
         let mapped_syscalls = lock_w_info!(self.mapped_syscalls);
         let pack = Self::get_pack(syscall_number, &mapped_syscalls)?;
         let in_pack_index = syscall_number.checked_sub(pack.base)?;
+
+        println!(
+            "syscall_number: {syscall_number:X}, pack.base: {:X}, in_pack_index: {:X}",
+            pack.base, in_pack_index
+        );
+
         if pack.mask & (1 << in_pack_index) == 0 {
             return None;
         }
@@ -125,7 +157,11 @@ impl SyscallNamespace {
             Ok(pos) => pos,
             Err(pos) => pos.saturating_sub(1), //err returns pos where it could be inserted
         };
-        mapped_syscalls.get(pos)
+        let found = mapped_syscalls.get(pos)?;
+        if syscall_number < found.base || syscall_number as u64 >= found.base as u64 + 32 {
+            return None;
+        }
+        Some(found)
     }
 
     fn get_pack_mut(syscall_number: u32, mapped_syscalls: &mut [MappedSyscallPack]) -> Option<&mut MappedSyscallPack> {
@@ -134,7 +170,11 @@ impl SyscallNamespace {
             Ok(pos) => pos,
             Err(pos) => pos.saturating_sub(1), //err returns pos where it could be inserted
         };
-        mapped_syscalls.get_mut(pos)
+        let found = mapped_syscalls.get_mut(pos)?;
+        if syscall_number < found.base || syscall_number as u64 >= found.base as u64 + 32 {
+            return None;
+        }
+        Some(found)
     }
 
     /// Returns a list of (base, mask, pack_id) for all mapped syscall packs

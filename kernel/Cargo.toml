@@ -17,6 +17,7 @@ vec_init_then_push = "allow" #don't have vec! macro in no_std
 explicit_counter_loop = "allow" #wants to rewrite into a less clear iterator loop
 wrong_self_convention = "allow" #shush clippy
 collapsible_if = "allow" #often it is not collapsed for conveying additional info
+manual_is_multiple_of = "allow" #is_multiple_of is an ugly function
 
 [[bin]]
 name = "kernel"
