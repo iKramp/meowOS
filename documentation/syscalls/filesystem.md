@@ -54,9 +54,27 @@ Closes the given file descriptor, releasing any associated resources and flushin
 1. u64 fd - file descriptor to read from
 1. u64 count - number of bytes to read
 1. *u8 buf - buffer to read data into
+1. u64 flags - read mode flags (ReadModeFlags)
 #### Return Value:
- - On success, returns the number of bytes read in the first return arg. Second contains additional information (e.g. EOF)
+ - On success, returns the number of bytes read in the first return arg.
  - On failure, returns -1
+ - Second return arg specifies the current file state according to enum ReadFileState
+#### ReadFileState:
+```rust
+enum ReadFileState {
+    Normal = 0,
+    TemporaryEOF = 1, //normal files, net sockets and pipes while peer is connected
+    PermanentEOF = 2, //net sockets and pipes when peer disconnects
+}
+```
+#### ReadModeFlags:
+```rust
+bitfield! {
+    struct ReadModeFlags(u64);
+    impl Debug;
+    pub nonblocking, set_nonblocking: 0;
+}
+```
 #### Description:
 Reads up to count bytes from the file descriptor fd into the buffer buf. The actual number of bytes read may be less than count.
 

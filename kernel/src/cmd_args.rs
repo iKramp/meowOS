@@ -1,30 +1,66 @@
-use core::str::FromStr;
-use uuid::{self, Uuid};
+use std::{string::String, vec::Vec};
 
 #[derive(Debug)]
 pub struct CmdArgs {
-    pub root_partition: Uuid,
+    pub init_commands: Vec<String>,
 }
 
 impl CmdArgs {
     pub fn new(arg_str: &str) -> Self {
-        let args = arg_str.split_whitespace();
-        let mut root_partition = None;
-        for arg in args {
-            // let (key, value) = arg.split_at(arg.find("=").unwrap());
-            let Some(pos) = arg.find('=') else {
-                continue;
-            };
-            let (key, value) = arg.split_at(pos);
-            if key == "root" {
-                //value is in uuid format
-                let uuid = Uuid::from_str(&value[1..]).expect("Invalid UUID format for root partition");
-                root_partition = Some(uuid);
+        let splitter = CmdArgsSplitter::new(arg_str);
+        let mut init_commands = Vec::new();
+        for (key, value) in splitter {
+            if key == "init" {
+                init_commands.push(value.replace("\\ ", " ").replace("\\\\", "\\"));
             }
         }
+        Self { init_commands }
+    }
+}
 
-        Self {
-            root_partition: root_partition.expect("Root partition not specified in cmd args"),
+struct CmdArgsSplitter<'a> {
+    remaining: &'a str,
+}
+
+impl<'a> CmdArgsSplitter<'a> {
+    pub fn new(arg_str: &'a str) -> Self {
+        Self { remaining: arg_str }
+    }
+}
+
+impl<'a> Iterator for CmdArgsSplitter<'a> {
+    type Item = (&'a str, &'a str); // (key, value)
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining.is_empty() {
+            return None;
+        }
+
+        let next_equal_pos = self.remaining.find('=')?;
+        let key = &self.remaining[..next_equal_pos];
+        let mut search_start = next_equal_pos + 1;
+        let initial_search_start = search_start;
+        loop {
+            let next_space_pos = self.remaining[search_start..]
+                .find(' ')
+                .unwrap_or(self.remaining.len() - search_start)
+                + search_start;
+            let prev_char = if next_space_pos > 0 {
+                self.remaining.as_bytes()[next_space_pos - 1] as char
+            } else {
+                ' '
+            };
+            if prev_char != '\\' {
+                let value = &self.remaining[initial_search_start..next_space_pos];
+                self.remaining = if next_space_pos < self.remaining.len() {
+                    &self.remaining[next_space_pos + 1..]
+                } else {
+                    ""
+                };
+                return Some((key, value));
+            } else {
+                search_start = next_space_pos + 1;
+            }
         }
     }
 }

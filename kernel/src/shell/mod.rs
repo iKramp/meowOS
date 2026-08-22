@@ -4,7 +4,7 @@ use crate::{
         cmd_cat::cmd_cat, cmd_cp::cmd_cp, cmd_ls::cmd_ls, cmd_mkdir::cmd_mkdir, cmd_mmap::cmd_mmap, cmd_mount::cmd_mount,
         cmd_tree::cmd_tree,
     },
-    task_runner::{PidOption, add_repeating_task},
+    task_runner::{PidOption, add_repeating_task, yield_now},
     tty::TTY,
     vfs::{self, ResolvedPath, ResolvedPathBorrowed},
 };
@@ -16,6 +16,7 @@ use std::{
     format, lock_w_info, println,
     string::{String, ToString},
     sync::no_int_spinlock::NoIntSpinlock,
+    vec::Vec,
 };
 
 mod cmd_cat;
@@ -63,11 +64,27 @@ fn update_shell() {
     }
 }
 
-pub fn init() {
+pub fn init(init_commands: Vec<String>) {
     let mut shell_state = lock_w_info!(SHELL_STATE);
     shell_state.current_dir = Some(ResolvedPath::root());
     shell_state.print_prompt();
     add_repeating_task(Box::new(update_shell));
+    drop(shell_state);
+
+    let task = Box::pin(async move {
+        for cmd in init_commands {
+            let mut shell_state = lock_w_info!(SHELL_STATE);
+            while !shell_state.can_consume_shell_command() {
+                drop(shell_state);
+                yield_now().await;
+                shell_state = lock_w_info!(SHELL_STATE);
+            }
+            shell_state.consume_shell_command((cmd, false));
+        }
+    });
+
+    let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
+    crate::task_runner::add_task(ffi_safe_task, PidOption::None);
 }
 
 impl ShellState {

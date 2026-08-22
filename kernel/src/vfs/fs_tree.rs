@@ -174,16 +174,11 @@ async fn load_dir(current: InodeIdentifier) -> Result<NoIntSpinlockGuard<'static
         return Ok(lock_w_info!(INODE_CACHE));
     }
     for dir_entry in dir.iter() {
-        let inode_stat = fs.stat(dir_entry.inode, current.index).await;
-        if let Err(e) = inode_stat {
-            println!(level:error, "Failed to stat inode {} while loading directory: {e}", dir_entry.inode);
-            continue;
-        }
-        let inode = unsafe { inode_stat.unwrap_unchecked() };
+        let device_id = current.device_id;
 
         let inode_index = InodeIdentifier {
-            device_id: inode.device,
-            index: inode.index,
+            device_id,
+            index: dir_entry.inode,
         };
 
         let mut cache = lock_w_info!(INODE_CACHE);

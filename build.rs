@@ -3,6 +3,7 @@ use std::{path::PathBuf, process::Command};
 fn main() {
     println!("cargo:rerun-if-changed=scripts/make_disk.sh");
     println!("cargo:rerun-if-changed=kernel/src");
+    println!("cargo:rerun-if-changed=assets/limine.conf");
 
     // set by cargo, build scripts should use this directory for output files
     let _out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR variable not set"));

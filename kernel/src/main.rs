@@ -41,9 +41,8 @@ mod utils;
 mod vfs;
 mod vga;
 use limine::LIMINE_BOOTLOADER_REQUESTS;
-use vfs::ResolvedPath;
 
-use crate::{memory::addresses::VirtAddr, task_runner::block_task};
+use crate::memory::addresses::VirtAddr;
 
 const TIME_PRINTER: &[u8] = include_bytes!("../../assets/time_printer");
 
@@ -60,9 +59,6 @@ extern "C" fn _start() -> ! {
     printer::init_printer();
     vga::clear_screen();
 
-    let cmd_line_info = unsafe { &(*LIMINE_BOOTLOADER_REQUESTS.cmd_line_request.info) };
-    let str = unsafe { ffi::CStr::from_ptr(cmd_line_info.cmdline) };
-
     println!(level:info, "starting RustOs...");
     println!(level:info, "stack pointer: {:?}", stack_pointer);
 
@@ -72,12 +68,11 @@ extern "C" fn _start() -> ! {
 
     interrupts::init_interrupts();
 
-    let cmd_args = cmd_args::CmdArgs::new(str.to_str().expect("Invalid UTF-8 in cmdline"));
-    println!(level:info, "cmd_args: {:?}", cmd_args);
+    let cmd_line_info = unsafe { &(*LIMINE_BOOTLOADER_REQUESTS.cmd_line_request.info) };
+    let cmd_line = unsafe { ffi::CStr::from_ptr(cmd_line_info.cmdline) };
 
-    let test_ptr = acpi::read_tables as *const () as u64;
-    let probe_res = memory::probe_ptr_u64(test_ptr);
-    println!(level:info, "probe read_tables pointer: {:#x} - result: {:?}", test_ptr, probe_res);
+    let cmd_args = cmd_args::CmdArgs::new(cmd_line.to_str().expect("Invalid UTF-8 in cmdline"));
+    println!(level:info, "cmd_args: {:?}", cmd_args);
 
     acpi::read_tables();
 
@@ -94,16 +89,8 @@ extern "C" fn _start() -> ! {
     vfs::init();
     net::init();
 
-    let future = vfs::mount_blkdev_partition(cmd_args.root_partition, ResolvedPath::root());
-    let ffi_future = std::ffi_future::future::into_ffi_future(future);
-    let res = block_task(ffi_future);
-    if let Err(e) = res {
-        println!(level:error, "{}", e);
-        panic!("Failed to mount root partition");
-    }
-
     proc::init();
-    shell::init();
+    shell::init(cmd_args.init_commands);
 
     // //start first proc
     unsafe { core::arch::asm!("int 254") };
