@@ -2,14 +2,14 @@ use core::{
     any::{Any, TypeId},
     fmt::Debug,
 };
-use std::{boxed::Box, error::KernelError, kerror, println, sync::arc::Arc, vec::Vec};
+use std::{boxed::Box, error::KernelError, kerror, sync::arc::Arc, vec::Vec};
 
 pub use filesystem_namespace::*;
 pub(in crate::proc) use memory_namespace::*;
 pub(in crate::proc) use syscall_namespace::*;
 
 mod filesystem_namespace;
-mod memory_namespace;
+pub mod memory_namespace;
 mod namespace_management_pack;
 mod syscall_namespace;
 

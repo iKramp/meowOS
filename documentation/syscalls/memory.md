@@ -15,7 +15,7 @@
 
 ### Syscall 0: make_region
 #### Args:
-1. u64 address - starting address of the region
+1. u64 address - starting address of the region. 0 means kernel chooses an address
 2. u8  order
 3. u8  permissions
 4. u8  region_type
@@ -23,7 +23,7 @@
 6. u64 region_name_len
 7. u64 region_name_ptr - utf8 valid
 #### Return Value:
- - On success, returns ID of the created region
+ - On success, returns ID of the created region in the first register and address of the region in the second register
  - On failure, returns -1
 
 #### Order:

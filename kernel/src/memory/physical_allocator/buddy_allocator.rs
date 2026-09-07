@@ -2,6 +2,7 @@ use std::lock_w_info;
 use std::sync::no_int_spinlock::NoIntSpinlock;
 
 use crate::memory::addresses::*;
+use crate::memory::physical_allocator::PhysicalAllocatorStats;
 use crate::memory::{log2_rounded_up, printlnc};
 
 use crate::{limine, println};
@@ -77,20 +78,40 @@ pub fn print_state() {
 
 ///# Safety
 ///addr must be a page aligned, currently allocated physical frame address
-pub(super) unsafe fn deallocate_frame(addr: PhysAddr) {
-    lock_w_info!(BUDDY_ALLOCATOR).deallocate_frame(addr)
+pub(super) unsafe fn deallocate<T: OwnedPhysicalRangeData>(addr: &T) {
+    let range = addr.get_range();
+    if range.n_pages == 0 || range.start.0 == 0 {
+        return;
+    }
+    let mut allocator = lock_w_info!(BUDDY_ALLOCATOR);
+    for i in 0..range.n_pages {
+        allocator.deallocate_frame(PhysAddr(range.start.0 + i * 4096));
+    }
 }
 
-pub(super) fn allocate_frame() -> PhysAddr {
-    lock_w_info!(BUDDY_ALLOCATOR).allocate_frame()
+pub(super) fn stat() -> PhysicalAllocatorStats {
+    let allocator = lock_w_info!(BUDDY_ALLOCATOR);
+    PhysicalAllocatorStats {
+        total_pages: allocator.n_pages as u32,
+        free_pages: (allocator.n_pages - allocator.allocated_pages) as u32,
+        allocated_pages: allocator.allocated_pages as u32,
+    }
 }
 
-pub(super) fn allocate_contiguous(n_pages: u64) -> PhysAddr {
-    lock_w_info!(BUDDY_ALLOCATOR).allocate_contiguius_high(n_pages)
+pub(super) fn allocate_frame() -> OwnedPhysAddr {
+    OwnedPhysAddr(lock_w_info!(BUDDY_ALLOCATOR).allocate_frame())
 }
 
-pub(super) fn reserve_low() -> PhysAddr {
-    lock_w_info!(BUDDY_ALLOCATOR).allocate_frame_low()
+pub(super) fn allocate_contiguous(n_pages: u32) -> OwnedPhysRange {
+    let addr = lock_w_info!(BUDDY_ALLOCATOR).allocate_contiguius_high(n_pages.into());
+    OwnedPhysRange(PhysRange {
+        start: addr,
+        n_pages: n_pages.into(),
+    })
+}
+
+pub(super) fn reserve_low() -> OwnedPhysAddr {
+    OwnedPhysAddr(lock_w_info!(BUDDY_ALLOCATOR).allocate_frame_low())
 }
 
 impl BuddyAllocator {

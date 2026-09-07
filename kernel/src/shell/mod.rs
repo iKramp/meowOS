@@ -2,9 +2,9 @@ use crate::{
     proc::{self, Pid},
     shell::{
         cmd_cat::cmd_cat, cmd_cp::cmd_cp, cmd_ls::cmd_ls, cmd_mkdir::cmd_mkdir, cmd_mmap::cmd_mmap, cmd_mount::cmd_mount,
-        cmd_tree::cmd_tree,
+        cmd_pmstat::cmd_pmstat, cmd_tree::cmd_tree,
     },
-    task_runner::{PidOption, add_repeating_task, yield_now},
+    task_runner::{PidOption, yield_now},
     tty::TTY,
     vfs::{self, ResolvedPath, ResolvedPathBorrowed},
 };
@@ -25,6 +25,7 @@ mod cmd_ls;
 mod cmd_mkdir;
 mod cmd_mmap;
 mod cmd_mount;
+mod cmd_pmstat;
 mod cmd_rm;
 mod cmd_tree;
 
@@ -52,23 +53,12 @@ static ASYNC_CMDS: &[(&str, AsyncCmd)] = &[
     ("cp", cmd_cp),
     ("tree", cmd_tree),
 ];
-static SYNC_CMDS: &[(&str, SyncCmd)] = &[("mmap", cmd_mmap)];
-
-fn update_shell() {
-    let mut shell_state = lock_w_info!(SHELL_STATE);
-    if let Some(pid) = shell_state.running_proc {
-        let proc = proc::get_proc(pid);
-        if proc.is_none() {
-            shell_state.command_finished();
-        }
-    }
-}
+static SYNC_CMDS: &[(&str, SyncCmd)] = &[("mmap", cmd_mmap), ("pmstat", cmd_pmstat)];
 
 pub fn init(init_commands: Vec<String>) {
     let mut shell_state = lock_w_info!(SHELL_STATE);
     shell_state.current_dir = Some(ResolvedPath::root());
     shell_state.print_prompt();
-    add_repeating_task(Box::new(update_shell));
     drop(shell_state);
 
     let task = Box::pin(async move {
@@ -208,6 +198,14 @@ impl ShellState {
             let run_proc_future = proc::run_process_default_env((&resolved_path).into(), &cmd_cloned, "/").await;
             match run_proc_future {
                 Ok(pid) => {
+                    let Some(proc) = proc::get_proc(pid) else {
+                        lock_w_info!(SHELL_STATE).command_finished();
+                        return;
+                    };
+                    proc.add_exit_hook(Box::new(move |exit_code| {
+                        lock_w_info!(TTY).print(&format!("Process {:?} exited with code {}\n", pid, exit_code));
+                        lock_w_info!(SHELL_STATE).command_finished();
+                    }));
                     let mut self_state = lock_w_info!(SHELL_STATE);
                     self_state.running_proc = Some(pid);
                     self_state.started_proc = false;

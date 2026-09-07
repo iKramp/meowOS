@@ -13,10 +13,7 @@ use crate::{
     },
     interrupts::enable_interrupts,
     memory, msr,
-    proc::{
-        self, SyscallNamespace,
-        syscall::{self, legacy_syscall_pack::init_legacy_syscalls},
-    },
+    proc::{self, SyscallNamespace, syscall::legacy_syscall_pack::init_legacy_syscalls},
 };
 
 mod handlers;

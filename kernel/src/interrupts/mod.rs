@@ -8,8 +8,8 @@ pub mod idt;
 mod macros;
 mod page_fault;
 use crate::utils::byte_to_port;
-pub use macros::InterruptProcessorState;
 pub use macros::general_interrupt_handler;
+pub use macros::{InterruptProcessorState, InterruptReturnType};
 
 const PIC1: u16 = 0x20;
 const PIC2: u16 = 0xA0; /* IO base address for slave PIC */
@@ -39,6 +39,25 @@ pub fn disable_interrupts() -> bool {
     }
     core::sync::atomic::fence(Ordering::Acquire);
     (prev_rflags & (1 << 9)) != 0
+}
+
+pub fn assert_interrupts_state(expected_enabled: bool) {
+    let rflags: u64;
+    unsafe {
+        core::arch::asm!(
+            "pushfq",
+            "pop {}",
+            out(reg) rflags,
+            options(nostack)
+        );
+    }
+    let interrupts_enabled = (rflags & (1 << 9)) != 0;
+    if interrupts_enabled != expected_enabled {
+        panic!(
+            "Interrupts state assertion failed. Expected: {}, Actual: {}",
+            expected_enabled, interrupts_enabled
+        );
+    }
 }
 
 pub fn init_interrupts() {

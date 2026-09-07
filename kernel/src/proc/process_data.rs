@@ -1,8 +1,12 @@
-use core::sync::atomic::{AtomicBool, AtomicU64};
+use core::{
+    fmt::Debug,
+    sync::atomic::{AtomicBool, AtomicU64},
+};
 use std::{
     boxed::Box,
     lock_w_info,
     sync::no_int_spinlock::{NoIntSpinlock, NoIntSpinlockGuard},
+    vec::Vec,
 };
 
 use crate::{
@@ -13,8 +17,9 @@ use crate::{
 
 use super::Pid;
 
+type ProcExitHook = Box<dyn FnOnce(u64) + Send>;
+
 ///Describes the process metadata like memory mapping, open files, etc.
-#[derive(Debug)]
 pub struct ProcessData {
     pid: Pid,
     sleeping: AtomicBool,
@@ -22,12 +27,25 @@ pub struct ProcessData {
     page_tree_root: AtomicU64,
     cmdline: Box<str>,
     internal: NoIntSpinlock<ProcessDataMutable>,
+    exit_hooks: NoIntSpinlock<Vec<ProcExitHook>>,
+}
+
+impl Debug for ProcessData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProcessData")
+            .field("pid", &self.pid)
+            .field("sleeping", &self.sleeping)
+            .field("is_32_bit", &self.is_32_bit)
+            .field("page_tree_root", &self.page_tree_root)
+            .field("cmdline", &self.cmdline)
+            .field("internal", &self.internal)
+            .finish()
+    }
 }
 
 #[derive(Debug)]
 pub struct ProcessDataMutable {
     cpu_state: CpuStateType,
-    return_status: Option<u64>,
     namespaces: ProcNamespaces,
 }
 
@@ -68,16 +86,25 @@ impl ProcessData {
             is_32_bit,
             page_tree_root: AtomicU64::new(root.0),
             cmdline,
-            internal: NoIntSpinlock::new(ProcessDataMutable {
-                return_status: None,
-                cpu_state,
-                namespaces,
-            }),
+            internal: NoIntSpinlock::new(ProcessDataMutable { cpu_state, namespaces }),
+            exit_hooks: NoIntSpinlock::new(Vec::new()),
         }
     }
 
     pub fn get_mutable<'a>(&'a self) -> NoIntSpinlockGuard<'a, ProcessDataMutable> {
         lock_w_info!(self.internal)
+    }
+
+    pub fn call_exit_hooks(&self, exit_code: u64) {
+        let mut hooks = lock_w_info!(self.exit_hooks);
+        for hook in hooks.drain(..) {
+            hook(exit_code);
+        }
+    }
+
+    pub fn add_exit_hook(&self, hook: Box<dyn FnOnce(u64) + Send>) {
+        let mut hooks = lock_w_info!(self.exit_hooks);
+        hooks.push(hook);
     }
 
     pub fn set_legacy_syscall_return(&self, val: u64, err: u64) {
@@ -111,11 +138,6 @@ impl ProcessData {
     pub fn set_cpu_data(&self, cpu_state: CpuStateType) {
         let internal = &mut lock_w_info!(self.internal);
         internal.cpu_state = cpu_state;
-    }
-
-    pub fn set_exit_status(&self, status: u64) {
-        let internal = &mut lock_w_info!(self.internal);
-        internal.return_status = Some(status);
     }
 
     pub fn pid(&self) -> Pid {

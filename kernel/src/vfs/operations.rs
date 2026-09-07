@@ -217,6 +217,7 @@ async fn mount_vfs_adapters(fs: &Arc<dyn FileSystem + Send>) {
     vfs.mounted_filesystems
         .insert(proc_adapter_partition_id, proc_adapter.clone());
     vfs.mounted_filesystems.insert(tty_adapter_partition_id, tty_adapter.clone());
+    drop(vfs);
 
     let adapters = [
         ("tty", tty_adapter, tty_adapter_partition_id),

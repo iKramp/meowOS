@@ -1,7 +1,10 @@
 use super::PhysicalAllocator;
 use std::{lock_w_info, println, sync::no_int_spinlock::NoIntSpinlock};
 
-use crate::{limine, memory::addresses::*};
+use crate::{
+    limine,
+    memory::{addresses::*, physical_allocator::PhysicalAllocatorStats},
+};
 
 #[derive(Debug, Clone)]
 #[repr(C)]
@@ -12,10 +15,16 @@ struct RegionMetadata {
 
 struct SimplePhysicalAllocator {
     start_region: PhysAddr,
+    stats: PhysicalAllocatorStats,
 }
 
 static SIMPLE_PHYS_ALLOCATOR: NoIntSpinlock<SimplePhysicalAllocator> = NoIntSpinlock::new(SimplePhysicalAllocator {
     start_region: PhysAddr(0),
+    stats: PhysicalAllocatorStats {
+        total_pages: 0,
+        free_pages: 0,
+        allocated_pages: 0,
+    },
 });
 
 impl SimplePhysicalAllocator {
@@ -90,7 +99,12 @@ impl PhysicalAllocator for SimplePhysicalAllocator {
         addr
     }
 
+    fn stat(&self) -> PhysicalAllocatorStats {
+        self.stats.clone()
+    }
+
     fn allocate_contiguous(&mut self, n_pages: u32) -> OwnedPhysRange {
+        self.stats.free_pages -= n_pages;
         let mut current_base = self.start_region;
         let mut prev_base = None;
         loop {
@@ -136,6 +150,7 @@ impl PhysicalAllocator for SimplePhysicalAllocator {
     }
 
     fn deallocate<T: OwnedPhysicalRangeData>(&mut self, addr: &T) {
+        self.stats.free_pages += addr.get_range().n_pages as u32;
         if addr.get_range().n_pages == 0 {
             return;
         }
@@ -154,6 +169,9 @@ impl PhysicalAllocator for SimplePhysicalAllocator {
 pub fn init(mem_regions: &mut [&'static mut limine::MemoryMapEntry]) {
     let mut previous_region = None;
     let mut first_region = PhysAddr(0);
+    let mut total_pages = 0;
+    let mut total_free_pages = 0;
+    let total_allocated_pages = 0;
     for region in mem_regions {
         if !region.is_usable() {
             continue;
@@ -163,6 +181,10 @@ pub fn init(mem_regions: &mut [&'static mut limine::MemoryMapEntry]) {
             size_pages: region.length.div_ceil(4096),
             next: PhysAddr(0),
         };
+
+        total_pages += metadata.size_pages;
+        total_free_pages += metadata.size_pages;
+
         unsafe { set_at_addr(PhysAddr(region.base), metadata) };
         println!(
             "Created a region at base {:X?} with size frames {:X}",
@@ -184,7 +206,13 @@ pub fn init(mem_regions: &mut [&'static mut limine::MemoryMapEntry]) {
         previous_region = Some(PhysAddr(region.base))
     }
 
-    lock_w_info!(SIMPLE_PHYS_ALLOCATOR).start_region = first_region;
+    let mut allocator = lock_w_info!(SIMPLE_PHYS_ALLOCATOR);
+    allocator.start_region = first_region;
+    allocator.stats = PhysicalAllocatorStats {
+        total_pages: total_pages as u32,
+        free_pages: total_free_pages as u32,
+        allocated_pages: total_allocated_pages,
+    };
     println!("set first region to {:X?}", first_region);
 }
 
@@ -202,4 +230,8 @@ pub unsafe fn deallocate<T: OwnedPhysicalRangeData>(addr: &T) {
 
 pub fn reserve_low() -> OwnedPhysAddr {
     lock_w_info!(SIMPLE_PHYS_ALLOCATOR).reserve_low()
+}
+
+pub fn stat() -> PhysicalAllocatorStats {
+    lock_w_info!(SIMPLE_PHYS_ALLOCATOR).stat()
 }

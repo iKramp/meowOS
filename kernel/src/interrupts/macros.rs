@@ -1,3 +1,4 @@
+#[cfg(debug_assertions)]
 use crate::{
     acpi::cpu_locals::{CpuLocals, PageFaultHandleMode},
     proc::{StackCpuStateData, interrupt_context_switch, release_current_proc, save_cpu_state},
@@ -11,6 +12,12 @@ macro_rules! handler {
         $name:ident $(, $flag:ident )* $(,)?
     ) => {{
         use $crate::interrupts::general_interrupt_handler;
+
+        //Force type checking
+        let _: extern "C" fn(
+            &mut $crate::interrupts::InterruptProcessorState,
+        ) -> $crate::interrupts::InterruptReturnType = $name;
+
         #[unsafe(naked)]
         extern "C" fn wrapper() -> ! {
             //TODO: any kind of change here should be matched with the one in dispatcher.rs
@@ -186,9 +193,9 @@ macro_rules! handler {
 }
 
 pub extern "C" fn general_interrupt_handler(
-    proc_data: &mut InterruptProcessorState,                   //rdi
-    atomic_int: u64,                                           //rsi
-    main_handler: extern "C" fn(&mut InterruptProcessorState), //rdx
+    proc_data: &mut InterruptProcessorState,                                          //rdi
+    atomic_int: u64,                                                                  //rsi
+    main_handler: extern "C" fn(&mut InterruptProcessorState) -> InterruptReturnType, //rdx
 ) {
     let mut locals = CpuLocals::get_mut();
     let prev_atomic = locals.atomic_context;
@@ -203,31 +210,39 @@ pub extern "C" fn general_interrupt_handler(
         enable_interrupts();
     }
 
-    main_handler(proc_data);
+    let return_type = main_handler(proc_data);
+
+    disable_interrupts();
 
     //proc is depth 0, root int is depth 1
 
     let mut locals = CpuLocals::get_mut();
-    if locals.int_depth > 1 || locals.atomic_context {
-        locals.int_depth -= 1;
-        locals.atomic_context = prev_atomic;
-        locals.page_fault_handle_mode = prev_mode;
-        return;
+    let root_int = !(locals.int_depth > 1 || locals.atomic_context);
+
+    //for now we always reschedule if we're root int so ForceReschedule is not needed. Use if
+    //sometimes we want to return to proc instead of rescheduling
+
+    let reschedule = root_int; //use return_type == InterruptReturnType::ForceReschedule;
+    if reschedule {
+        if let Some(curr_proc) = locals.current_process.clone() {
+            //save current process state
+            save_cpu_state(&StackCpuStateData::Interrupt(proc_data), &curr_proc);
+            //can't hold locals through this call
+            drop(locals);
+            release_current_proc(&curr_proc);
+        } else {
+            drop(locals);
+        }
+
+        interrupt_context_switch();
+
+        if return_type == InterruptReturnType::ForceReschedule {
+            panic!("Process was killed during interrupt handling, but no reschedule was performed");
+        }
+
+        locals = CpuLocals::get_mut();
     }
-    if let Some(curr_proc) = locals.current_process.as_mut() {
-        //save current process state
-        save_cpu_state(&StackCpuStateData::Interrupt(proc_data), curr_proc);
-        release_current_proc(curr_proc);
-    }
-    drop(locals);
 
-    interrupt_context_switch();
-
-    //did not context switch -> PROC not initialized or some other "error"
-
-    disable_interrupts();
-
-    let mut locals = CpuLocals::get_mut();
     locals.int_depth -= 1;
     locals.atomic_context = prev_atomic;
     locals.page_fault_handle_mode = prev_mode;
@@ -268,6 +283,13 @@ pub struct InterruptFrame {
     pub rflags: u64,
     pub rsp: u64,
     pub ss: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterruptReturnType {
+    Normal,
+    ForceReschedule, //if proc was killed
 }
 
 impl InterruptProcessorState {

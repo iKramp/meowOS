@@ -35,7 +35,7 @@ fn make_region(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         proc.set_syscall_return(&[u64::MAX]);
         return;
     };
-    let start_addr = range_capacity.align_down(VirtAddr(start_addr));
+    let mut start_addr = range_capacity.align_down(VirtAddr(start_addr));
     let permissions = memory::VirtualMemoryRangePermissions(permissions);
     let Some(region_type) = MemoryRangeType::from_u32(region_type as u32) else {
         proc.set_syscall_return(&[u64::MAX]);
@@ -49,10 +49,21 @@ fn make_region(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
 
     let mutable = proc.get_mutable();
     let namespaces = mutable.get_namespaces();
-    let Some(memory_namespace) = namespaces.get_namespace::<MemoryNamespace>(namespace_id) else {
+    let memory_namespace = namespaces.get_namespace::<MemoryNamespace>(namespace_id);
+    drop(mutable);
+    let Some(memory_namespace) = memory_namespace else {
         proc.set_syscall_return(&[u64::MAX]);
         return;
     };
+
+    if start_addr.0 == 0 {
+        if let Some(addr) = memory_namespace.find_hole(range_capacity) {
+            start_addr = addr;
+        } else {
+            proc.set_syscall_return(&[u64::MAX]);
+            return;
+        }
+    }
 
     //------checks passed------
 
@@ -64,8 +75,13 @@ fn make_region(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         region_type,
         start_addr,
     );
-    let err_code = if res.is_ok() { 0 } else { u64::MAX };
-    proc.set_syscall_return(&[err_code]);
+
+    let Ok(res) = res else {
+        proc.set_syscall_return(&[u64::MAX]);
+        return;
+    };
+
+    proc.set_syscall_return(&[res as u64, start_addr.0]);
 }
 
 fn remove_region(args: &SyscallCpuState, proc: &Arc<ProcessData>) {

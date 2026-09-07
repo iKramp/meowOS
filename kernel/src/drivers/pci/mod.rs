@@ -4,7 +4,8 @@ use crate::{
         common_info::CommonInfo,
         driver_store::{PciDriverFactory, get_pci_driver_factory},
     },
-    handler, interrupts,
+    handler,
+    interrupts::{self, InterruptReturnType},
 };
 use core::{
     fmt::Debug,
@@ -252,8 +253,9 @@ fn common_pci_interrupt_handler(irq_index: u8) {
 fn init_interrupts() {
     for i in 128..160 {
         {
-            extern "C" fn pci_interrupt_handler(_state: &mut InterruptProcessorState) {
+            extern "C" fn pci_interrupt_handler(_state: &mut InterruptProcessorState) -> interrupts::InterruptReturnType {
                 common_pci_interrupt_handler((i - 128) as u8);
+                InterruptReturnType::Normal
             }
             unsafe { interrupts::idt::IDT.set(interrupts::idt::Entry::new(handler!(pci_interrupt_handler)), i) };
         }

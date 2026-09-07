@@ -41,10 +41,10 @@ pub(in crate::proc) struct OwnedVirtualMemoryRange {
 }
 
 #[derive(Debug)]
-pub(in crate::proc) struct MemoryNamespace {
+pub struct MemoryNamespace {
     id: u64,
     page_tree_root: PhysAddr,
-    pub dynamic_data: NoIntSpinlock<MemoryNamespaceDynamicData>,
+    pub(in crate::proc) dynamic_data: NoIntSpinlock<MemoryNamespaceDynamicData>,
 }
 #[derive(Debug)]
 pub(in crate::proc) struct MemoryNamespaceDynamicData {
@@ -106,7 +106,7 @@ impl MemoryNamespace {
     }
 
     ///returns ID
-    pub fn add_mem_range(
+    pub(in crate::proc) fn add_mem_range(
         &self,
         range: Arc<VirtualMemoryRange>,
         name: Box<str>,
@@ -242,6 +242,49 @@ impl MemoryNamespace {
             }
         }
         None
+    }
+
+    /// Tries to handle a page fault and returns true if it was handled. If it returns false, the
+    /// proc has to be killed
+    pub fn handle_page_fault(&self, addr: VirtAddr, write: bool, instruction_fetch: bool, user_mode: bool) -> bool {
+        if !user_mode {
+            return false;
+        }
+        let Some((range, base_addr)) = self.get_range_from_address(addr) else {
+            return false;
+        };
+        if !range.permissions().write() && write {
+            return false;
+        }
+        if !range.permissions().execute() && instruction_fetch {
+            return false;
+        }
+
+        #[cfg(debug_assertions)]
+        'dbg_scope: {
+            // if get_page_table_entry(addr, None).is_some() {
+            //     panic!("page fault in userspace with mapped page, user only tried reading")
+            // }
+            let entry = memory::get_page_table_entry(addr, None);
+            let Some(entry) = entry else {
+                break 'dbg_scope;
+            };
+            if !entry.present() {
+                break 'dbg_scope;
+            }
+
+            if entry.writeable() != range.permissions().write() {
+                panic!("page fault in userspace with mapped page, writeable mismatch");
+            }
+            if !entry.no_execute() != range.permissions().execute() {
+                panic!("page fault in userspace with mapped page, executable mismatch");
+            }
+
+            panic!("Page fault at mapped userspace address, write/execute align with both region and page entry permissions")
+        }
+
+        //unmapped page
+        range.expand_to_address(base_addr, addr, 1).is_ok()
     }
 }
 

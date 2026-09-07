@@ -1,7 +1,11 @@
-use crate::memory::addresses::*;
+use crate::{
+    interrupts::InterruptReturnType,
+    memory::addresses::*,
+    proc::{kill_process, namespaces::memory_namespace::MemoryNamespace},
+};
 use std::{println, printlnc};
 
-use crate::{acpi::cpu_locals::PageFaultHandleMode, interrupts::InterruptProcessorState, memory};
+use crate::{interrupts::InterruptProcessorState, memory};
 
 #[derive(Debug)]
 #[allow(dead_code)] //not actually dead, is used in println
@@ -25,11 +29,7 @@ impl From<u64> for PageFaultErrorCode {
     }
 }
 
-pub extern "C" fn page_fault(proc_data: &mut InterruptProcessorState) {
-    let locals = crate::acpi::cpu_locals::CpuLocals::get();
-    let page_fault_mode = locals.page_fault_handle_mode;
-    drop(locals);
-
+pub extern "C" fn page_fault(proc_data: &mut InterruptProcessorState) -> InterruptReturnType {
     let page_fault_addr: u64;
     unsafe {
         core::arch::asm!("mov {}, cr2", out(reg) page_fault_addr);
@@ -40,14 +40,15 @@ pub extern "C" fn page_fault(proc_data: &mut InterruptProcessorState) {
     {
         println!(level:warn, "Page fault at a probe function, returning failure");
         proc_data.interrupt_frame.rip = crate::memory::probe_fail as *const () as u64;
-        return;
+        return InterruptReturnType::Normal;
     }
 
-    match page_fault_mode {
-        PageFaultHandleMode::KernelPanic => fatal_page_fault(proc_data, page_fault_addr),
-        PageFaultHandleMode::User => {
-            todo!()
-        }
+    let page_fault_code = PageFaultErrorCode::from(proc_data.err_code);
+
+    if !page_fault_code.user_mode {
+        fatal_page_fault(proc_data, page_fault_addr)
+    } else {
+        user_page_fault(proc_data, page_fault_addr, page_fault_code)
     }
 }
 
@@ -76,4 +77,36 @@ fn fatal_page_fault(proc_data: &InterruptProcessorState, page_fault_addr: u64) -
             core::arch::asm!("hlt");
         }
     }
+}
+
+fn user_page_fault(
+    proc_data: &InterruptProcessorState,
+    page_fault_addr: u64,
+    error_code: PageFaultErrorCode,
+) -> InterruptReturnType {
+    let locals = crate::acpi::cpu_locals::CpuLocals::get();
+    let Some(process) = &locals.current_process else {
+        drop(locals);
+        fatal_page_fault(proc_data, page_fault_addr);
+    };
+
+    let proc_mut = process.get_mutable();
+    let namespaces = proc_mut.get_namespaces();
+    let mem_namespace = namespaces
+        .get_namespace::<MemoryNamespace>(0)
+        .expect("Process should always have a memory namespace");
+
+    let handled = mem_namespace.handle_page_fault(
+        VirtAddr(page_fault_addr),
+        error_code.caused_by_write,
+        error_code.instruction_fetch,
+        true,
+    );
+
+    if handled {
+        return InterruptReturnType::Normal;
+    }
+
+    kill_process(process.pid(), 0xDEAD);
+    InterruptReturnType::ForceReschedule
 }

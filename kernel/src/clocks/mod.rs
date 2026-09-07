@@ -3,7 +3,8 @@ use std::{boxed::Box, println, time::Instant};
 
 use crate::{
     clocks::{hpet::HpetWrapper, tsc::TscWrapper},
-    handler, interrupts,
+    handler,
+    interrupts::{self, InterruptProcessorState, InterruptReturnType},
 };
 
 mod hpet;
@@ -54,6 +55,7 @@ fn try_use_timer(timer: &mut Box<dyn Timer>) -> bool {
     success
 }
 
-fn service_interrupt() {
+extern "C" fn service_interrupt(_state: &mut InterruptProcessorState) -> InterruptReturnType {
     unsafe { SELECTED_TIMER.assume_init_ref().service_interrupt() };
+    InterruptReturnType::Normal
 }

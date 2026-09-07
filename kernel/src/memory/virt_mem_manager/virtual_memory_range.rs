@@ -95,6 +95,24 @@ impl VirtualMemoryRange {
         self.allocated_pages.load(core::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Returns the currently mapped range of a kernel managed region
+    pub fn current_range(&self, start_addr: VirtAddr) -> Result<Range<VirtAddr>, KernelError> {
+        let current_pages = self.current_size_pages();
+        match self.mem_range_type {
+            VirtualMemoryRangeManagementMode::Managed(grow_direction) => {
+                let range = match grow_direction {
+                    VirtualMemoryRangeGrowDirection::Up => start_addr..(start_addr + current_pages as u64 * 4096),
+                    VirtualMemoryRangeGrowDirection::Down => {
+                        let end_addr = start_addr + self.max_size().pages() as u64 * 4096;
+                        (end_addr - current_pages as u64 * 4096)..end_addr
+                    }
+                };
+                Ok(range)
+            }
+            VirtualMemoryRangeManagementMode::Manual => kerror!(InvalidOperation),
+        }
+    }
+
     fn set_current_size_pages(&self, new_size: u32) {
         self.allocated_pages.store(new_size, core::sync::atomic::Ordering::Relaxed);
     }
@@ -164,6 +182,36 @@ impl VirtualMemoryRange {
 
         self.allocate_manual(range)?;
         Ok(())
+    }
+
+    pub fn expand_to_address(
+        &self,
+        current_mapped_addr: VirtAddr,
+        new_end_addr: VirtAddr,
+        max_new_pages: usize,
+    ) -> Result<(), KernelError> {
+        let new_end_aligned = self.max_size().align_down(new_end_addr);
+        let reserved_range = self.reserved_range(current_mapped_addr);
+        if new_end_aligned < reserved_range.start || new_end_aligned > reserved_range.end {
+            return kerror!(InvalidArgument);
+        }
+        let curr_range = self.current_range(current_mapped_addr)?;
+        let new_pages = if new_end_aligned < curr_range.start {
+            let new_start_page = (new_end_aligned.0 / 4096) as u32;
+            let curr_start_page = (curr_range.start.0 / 4096) as u32;
+            curr_start_page.saturating_sub(new_start_page)
+        } else if new_end_aligned >= curr_range.end {
+            let new_end_page = (new_end_aligned.0 / 4096) as u32;
+            let curr_end_page = ((curr_range.end.0 - 1) / 4096) as u32;
+            new_end_page.saturating_sub(curr_end_page)
+        } else {
+            return Ok(());
+        };
+        if new_pages as usize > max_new_pages {
+            return kerror!(InvalidArgument);
+        }
+
+        self.expand_by(new_pages)
     }
 
     pub fn shrink_by(&mut self, n_pages: u32) -> Result<(), KernelError> {

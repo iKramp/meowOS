@@ -5,7 +5,7 @@ use crate::{
     acpi::apic::LapicRegistersPtr,
     handler,
     interrupts::{
-        InterruptProcessorState, TIMER_DESIRED_FREQUENCY, disable_interrupts, enable_interrupts,
+        InterruptProcessorState, InterruptReturnType, TIMER_DESIRED_FREQUENCY, disable_interrupts, enable_interrupts,
         handlers::apic_eoi,
         idt::{Entry, IDT},
     },
@@ -180,9 +180,10 @@ pub fn set_timeout(duration: Duration) {
     lapic_registers.initial_count().bytes().write(ticks as u32);
 }
 
-pub extern "C" fn apic_interrupt_handler(_proc_data: &mut InterruptProcessorState) {
+pub extern "C" fn apic_interrupt_handler(_proc_data: &mut InterruptProcessorState) -> InterruptReturnType {
     handle_scheduled_events();
     apic_eoi();
+    InterruptReturnType::Normal
 }
 
 pub fn handle_scheduled_events() {

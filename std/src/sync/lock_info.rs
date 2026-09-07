@@ -38,7 +38,10 @@ impl LockInfo {
         }
     }
 
-    pub fn inc_spinlocks(&mut self, prev_int_state: bool, location: LockLocationInfo) {
+    pub(super) fn inc_spinlocks(&mut self, prev_int_state: bool, location: LockLocationInfo) {
+        // serial_print_unlocked(location.0);
+        // serial_print_unlocked("++\n");
+
         let prev_val = self.num_no_int_spinlocks;
         self.num_no_int_spinlocks = prev_val + 1;
         if prev_val == 0 {
@@ -48,6 +51,8 @@ impl LockInfo {
         {
             let is_mem_loc = location.0.contains("memory");
             if is_mem_loc {
+                // serial_print_unlocked(location.0);
+                // serial_print_unlocked("++\n");
                 self.memory_locked += 1;
             }
             if self.memory_locked == 0 && get_heap_initialized() {
@@ -57,17 +62,14 @@ impl LockInfo {
     }
 
     /// returns whether interrupts should be re-enabled
-    pub fn dec_spinlocks(&mut self, location: &LockLocationInfo) -> bool {
-        // let test_ptr = &self.num_no_int_spinlocks as *const _ as *const u8;
-        // byte_to_port(0xe9, unsafe { *(test_ptr) });
-        // byte_to_port(0xe9, unsafe { *(test_ptr.byte_add(1)) });
-        // serial_print_unlocked("mmmmmmmmmmmmmmmmm");
-        //
+    pub(super) fn dec_spinlocks(&mut self, location: &LockLocationInfo) -> bool {
         self.num_no_int_spinlocks -= 1;
         #[cfg(debug_assertions)]
         {
             let is_mem_loc = location.0.contains("memory");
             if is_mem_loc {
+                // serial_print_unlocked(location.0);
+                // serial_print_unlocked("--\n");
                 self.memory_locked -= 1;
             }
             if get_heap_initialized() {
@@ -87,41 +89,14 @@ impl LockInfo {
     }
 
     pub fn blocking_task(&mut self) {
-        let prev_rflags: u64;
-        unsafe {
-            core::arch::asm!(
-                "pushfq",
-                "pop {}",
-                "cli",
-                out(reg) prev_rflags,
-            );
+        if self.blocking_task {
+            panic!("Recursive blocking task detected");
         }
-        let prev_int_state = (prev_rflags & (1 << 9)) != 0;
         self.blocking_task = true;
-        if prev_int_state {
-            unsafe {
-                core::arch::asm!("sti");
-            }
-        }
     }
 
     pub fn unblocking_task(&mut self) {
-        let prev_rflags: u64;
-        unsafe {
-            core::arch::asm!(
-                "pushfq",
-                "pop {}",
-                "cli",
-                out(reg) prev_rflags,
-            );
-        }
-        let prev_int_state = (prev_rflags & (1 << 9)) != 0;
         self.blocking_task = false;
-        if prev_int_state {
-            unsafe {
-                core::arch::asm!("sti");
-            }
-        }
     }
 
     pub fn is_blocking_task(&self) -> bool {

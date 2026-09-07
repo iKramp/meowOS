@@ -1,5 +1,5 @@
 use crate::handler;
-use crate::interrupts::macros::InterruptProcessorState;
+use crate::interrupts::macros::{InterruptProcessorState, InterruptReturnType};
 use crate::interrupts::page_fault::page_fault;
 
 use super::gdt::{DEBUG_IST, DOUBLE_FAULT_IST, MACHINE_CHECK_IST, NMI_IST};
@@ -9,7 +9,7 @@ use std::printlnc;
 
 macro_rules! never_exit_interrupt_message {
     ($message:expr, $func_name:ident) => {
-        extern "C" fn $func_name(proc_data: &mut InterruptProcessorState) -> ! {
+        extern "C" fn $func_name(proc_data: &mut InterruptProcessorState) -> InterruptReturnType {
             printlnc!(level:error, (0, 0, 255), "{} exception", $message);
             printlnc!(level:error,
                 (0, 0, 255),

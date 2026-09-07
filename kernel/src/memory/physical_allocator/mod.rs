@@ -4,14 +4,22 @@ use crate::{limine, memory::addresses::*};
 mod buddy_allocator;
 mod simple_phys_allocator;
 
-// use buddy_allocator as phys_allocator;
-use simple_phys_allocator as phys_allocator;
+use buddy_allocator as phys_allocator;
+// use simple_phys_allocator as phys_allocator;
 
 trait PhysicalAllocator {
     fn allocate(&mut self) -> OwnedPhysAddr;
     fn allocate_contiguous(&mut self, n_pages: u32) -> OwnedPhysRange;
     fn deallocate<T: OwnedPhysicalRangeData>(&mut self, addr: &T);
     fn reserve_low(&mut self) -> OwnedPhysAddr;
+    fn stat(&self) -> PhysicalAllocatorStats;
+}
+
+#[derive(Debug, Clone)]
+pub struct PhysicalAllocatorStats {
+    pub total_pages: u32,
+    pub free_pages: u32,
+    pub allocated_pages: u32,
 }
 
 pub static mut MAX_RAM_ADDR: PhysAddr = PhysAddr(0);
@@ -27,6 +35,10 @@ pub fn allocate() -> OwnedPhysAddr {
 pub unsafe fn deallocate<T: Into<OwnedPhysRange>>(addr: T) {
     let addr: OwnedPhysRange = addr.into();
     drop(addr); //techinaclly unneeded but more explicit
+}
+
+pub fn stat() -> PhysicalAllocatorStats {
+    phys_allocator::stat()
 }
 
 /// Safety:

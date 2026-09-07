@@ -44,7 +44,6 @@ pub fn has_tasks_to_process() -> bool {
 
 pub fn block_task<T>(task: Future<T>) -> T {
     let mut locals = CpuLocals::get_mut();
-    let before_blocking = locals.lock_info.is_blocking_task();
     locals.lock_info.blocking_task();
     let data = loop {
         match unsafe { (task.poll_fn)(task.data, Waker::noop()) } {
@@ -52,9 +51,7 @@ pub fn block_task<T>(task: Future<T>) -> T {
             Poll::Pending => {}
         }
     };
-    if !before_blocking {
-        locals.lock_info.unblocking_task();
-    }
+    locals.lock_info.unblocking_task();
     data
 }
 
