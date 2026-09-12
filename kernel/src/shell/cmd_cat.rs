@@ -37,7 +37,7 @@ async fn cmd_cat_internal(mut args: CommandSplitter) -> Result<(), KernelError> 
 
     for _ in 0..chunks {
         let non_owned_buffer = owned_phys_slice_to_non_owned(&buffer);
-        vfs::read_file(&file_handle, non_owned_buffer, READ_CHUNK_SIZE.min(remaining_size)).await?;
+        vfs::read_file(&file_handle, non_owned_buffer, READ_CHUNK_SIZE.min(remaining_size), false).await?;
         remaining_size -= READ_CHUNK_SIZE.min(remaining_size);
 
         let mut read_data = 0;

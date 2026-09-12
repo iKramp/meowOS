@@ -48,7 +48,7 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let buffer_alloc = crate::memory::physical_allocator::allocate_contiguous(pages as u32);
         let buffers = buffer_alloc.get_range().get_addresses().collect::<Vec<PhysAddr>>();
 
-        let read_result = crate::vfs::read_file(f_handle.get(), &buffers, size).await;
+        let read_result = crate::vfs::read_file(f_handle.get(), &buffers, size, true).await;
         let Some(proc) = proc.upgrade() else {
             return; //proc was killed
         };

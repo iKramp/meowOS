@@ -132,6 +132,10 @@ impl ShellState {
         self.print_prompt();
     }
 
+    pub fn get_running_proc(&self) -> Option<Pid> {
+        self.running_proc
+    }
+
     fn print_prompt(&self) {
         let path: String = self
             .current_dir
@@ -142,16 +146,6 @@ impl ShellState {
             })
             .unwrap_or_else(|| "/".to_string());
         lock_w_info!(TTY).print(&format!("\n{}> ", path));
-    }
-
-    pub fn kill_proc(&mut self) {
-        if let Some(pid) = self.running_proc {
-            proc::kill_process(pid, 0);
-            self.running_proc = None;
-            self.started_proc = false;
-        }
-
-        self.print_prompt();
     }
 
     fn run_async_cmd(&mut self, cmd: AsyncCmd, args: proc::CommandSplitter) {

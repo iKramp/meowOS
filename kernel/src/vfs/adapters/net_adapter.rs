@@ -82,6 +82,7 @@ impl VfsAdapterTrait for NetAdapter {
         _offset_bytes: u64,
         size_bytes: u64,
         buffer: &[PhysAddr],
+        blocking: bool,
     ) -> Result<u64, KernelError> {
         if size_bytes == 0 {
             return Ok(0);
@@ -206,6 +207,7 @@ impl VfsAdapterTrait for NetAdapter {
                 access_time: 0,
                 modification_time: 0,
                 stat_change_time: 0,
+                internal_synchronization: true,
             },
             NICEntryType::MacAddress | NICEntryType::Mtu => inode::Inode {
                 index: inode,
@@ -218,6 +220,7 @@ impl VfsAdapterTrait for NetAdapter {
                 access_time: 0,
                 modification_time: 0,
                 stat_change_time: 0,
+                internal_synchronization: true,
             },
             NICEntryType::Data => inode::Inode {
                 index: inode,
@@ -230,6 +233,7 @@ impl VfsAdapterTrait for NetAdapter {
                 access_time: 0,
                 modification_time: 0,
                 stat_change_time: 0,
+                internal_synchronization: true,
             },
         };
         Ok(stat)

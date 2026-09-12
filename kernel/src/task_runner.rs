@@ -256,8 +256,13 @@ fn ros_waker(data: Box<WakerData>) -> Waker {
 }
 
 fn process_single_task(task: AsyncTaskWrapper<'static>) {
+    let mut locals = CpuLocals::get_mut();
+    let apic_id = locals.apic_id;
+    locals.current_async_task_id = Some(task.id);
+    drop(locals);
+
     let waker_data = Box::new(WakerData {
-        apic_id: CpuLocals::get().apic_id,
+        apic_id,
         task_id: task.id,
     });
     // let result = task.task.as_mut().poll(&mut Context::from_waker(&ros_waker(waker_data)));

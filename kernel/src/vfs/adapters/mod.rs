@@ -45,7 +45,14 @@ impl VfsAdapterDevice {
 pub trait VfsAdapterTrait: Debug + Send + Sync {
     fn device_id(&self) -> DeviceId;
     fn partition_id(&self) -> Uuid;
-    async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, KernelError>;
+    async fn read(
+        &self,
+        inode: InodeIndex,
+        offset_bytes: u64,
+        size_bytes: u64,
+        buffer: &[PhysAddr],
+        blocking: bool,
+    ) -> Result<u64, KernelError>;
     async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, KernelError>;
     async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), KernelError>;
     async fn stat(&self, inode: InodeIndex) -> Result<Inode, KernelError>;
@@ -61,8 +68,15 @@ impl<T: VfsAdapterTrait> FileSystem for T {
         VfsAdapterTrait::partition_id(self)
     }
 
-    async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, KernelError> {
-        VfsAdapterTrait::read(self, inode, offset_bytes, size_bytes, buffer).await
+    async fn read(
+        &self,
+        inode: InodeIndex,
+        offset_bytes: u64,
+        size_bytes: u64,
+        buffer: &[PhysAddr],
+        blocking: bool,
+    ) -> Result<u64, KernelError> {
+        VfsAdapterTrait::read(self, inode, offset_bytes, size_bytes, buffer, blocking).await
     }
 
     async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {

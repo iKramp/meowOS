@@ -50,6 +50,7 @@ impl VfsAdapterTrait for ProcAdapter {
         _offset_bytes: u64,
         _size_bytes: u64,
         _buffer: &[PhysAddr],
+        _blocking: bool,
     ) -> Result<u64, KernelError> {
         todo!()
     }
@@ -80,6 +81,7 @@ impl VfsAdapterTrait for ProcAdapter {
             access_time: 0,
             modification_time: 0,
             stat_change_time: 0,
+            internal_synchronization: true,
         })
     }
 }

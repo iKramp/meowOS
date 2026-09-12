@@ -2,7 +2,6 @@ use bitfield::bitfield;
 
 use super::{DeviceId, InodeIndex};
 
-//this is returned by the stat() syscall
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub struct Inode {
@@ -26,6 +25,13 @@ pub struct Inode {
     pub modification_time: u64,
     //RW
     pub stat_change_time: u64,
+
+    //-----mostly kernel internal stuff here
+    ///Does this inode use an internal synchronization and thus does not need VFS RW lock
+    ///At the same time implies internal size calculation and similar. Reads will NOT rely on the
+    ///VFS information and instead request as much data as the process requests
+    ///Mainly intended for virtual filesystems
+    pub internal_synchronization: bool,
 }
 
 impl Inode {
@@ -52,6 +58,7 @@ impl Inode {
             access_time: 0,
             modification_time: 0,
             stat_change_time: 0,
+            internal_synchronization: false,
         }
     }
 }

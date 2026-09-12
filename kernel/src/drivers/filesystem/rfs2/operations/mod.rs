@@ -93,6 +93,7 @@ impl InodeInfo {
             access_time: 0,
             modification_time: self.modification_seconds_since_epoch,
             stat_change_time: self.stat_change_seconds_since_epoch,
+            internal_synchronization: false, //possibly true but... meh
         }
     }
 
@@ -168,6 +169,7 @@ impl FileSystem for Rfs2 {
         offset_bytes: u64,
         size_bytes: u64,
         buffer: &[PhysAddr],
+        _blocking: bool,
     ) -> Result<u64, KernelError> {
         if !offset_bytes.is_multiple_of(4096) {
             panic!("non-page-aligned offset not yet supported");

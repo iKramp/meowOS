@@ -8,6 +8,7 @@ use std::{
 
 use crate::{
     keyboard::{self, Key, KeyEvent},
+    proc::kill_process,
     shell,
     vga::vga_text,
 };
@@ -23,6 +24,7 @@ enum HandleInputResult {
 pub struct TtyState {
     done_streams: Vec<(String, bool)>, //(stream, ends with EOF)
     input_buffer: String,
+    input_hook: Option<fn()>,
 }
 
 pub fn handle_input(input: Box<[(Key, KeyEvent)]>, modifier_state: &keyboard::KeyboardState) {
@@ -33,9 +35,12 @@ pub fn handle_input(input: Box<[(Key, KeyEvent)]>, modifier_state: &keyboard::Ke
             tty.done_streams.clear();
             tty.input_buffer.clear();
             drop(tty);
-            let mut shell = lock_w_info!(shell::SHELL_STATE);
-            shell.kill_proc();
+            let shell = lock_w_info!(shell::SHELL_STATE);
+            let pid = shell.get_running_proc();
             drop(shell);
+            if let Some(pid) = pid {
+                kill_process(pid, u64::MAX);
+            }
             tty = lock_w_info!(TTY);
         }
     }
@@ -54,7 +59,12 @@ impl TtyState {
         Self {
             done_streams: Vec::new(),
             input_buffer: String::new(),
+            input_hook: None,
         }
+    }
+
+    pub fn set_input_hook(&mut self, hook: Option<fn()>) {
+        self.input_hook = hook;
     }
 
     pub fn data_len(&self) -> usize {
@@ -265,5 +275,8 @@ impl TtyState {
         }
         self.done_streams.push((done_stream, eof_line));
         lock_w_info!(vga_text::VGA_TEXT).do_newline();
+        if let Some(hook) = self.input_hook {
+            hook();
+        }
     }
 }

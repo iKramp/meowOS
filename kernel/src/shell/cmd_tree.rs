@@ -55,7 +55,7 @@ async fn tree_file(file: &FileHandle, depth: usize) -> Result<(), KernelError> {
     let phys_frame = physical_allocator::allocate();
     let buf = [phys_frame.0];
     let file_size = vfs::stat_file(file).await.size.min(64);
-    let bytes_read = vfs::read_file(file, &buf, file_size).await?.min(file_size);
+    let bytes_read = vfs::read_file(file, &buf, file_size, false).await?.min(file_size);
     let virt: VirtAddr = phys_frame.0.into();
     let ptr = virt.0 as *const u8;
     let str = unsafe { str::from_utf8(slice::from_raw_parts(ptr, bytes_read as usize)) };

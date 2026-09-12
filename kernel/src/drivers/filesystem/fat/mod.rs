@@ -322,7 +322,14 @@ impl FileSystem for FatDriver {
         Ok(())
     }
     ///Offset must be page aligned
-    async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, KernelError> {
+    async fn read(
+        &self,
+        inode: InodeIndex,
+        offset_bytes: u64,
+        size_bytes: u64,
+        buffer: &[PhysAddr],
+        _blocking: bool,
+    ) -> Result<u64, KernelError> {
         if !offset_bytes.is_multiple_of(512) {
             return kerror!(IllegalValue);
         }
@@ -405,6 +412,7 @@ impl FileSystem for FatDriver {
                 access_time: 0,
                 modification_time: 0,
                 stat_change_time: 0,
+                internal_synchronization: false,
             });
         }
 
@@ -438,6 +446,7 @@ impl FileSystem for FatDriver {
             access_time: 0,
             modification_time: 0,
             stat_change_time: 0,
+            internal_synchronization: false,
         })
     }
     async fn set_stat(&self, _inode_index: InodeIndex, _parent: InodeIndex, _inode_data: Inode) -> Result<(), KernelError> {

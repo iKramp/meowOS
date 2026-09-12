@@ -1,3 +1,4 @@
+use bitfield::bitfield;
 use core::sync::atomic::Ordering;
 use std::boxed::Box;
 use std::println;
@@ -35,6 +36,12 @@ impl FileSeekMode {
             _ => None,
         }
     }
+}
+
+bitfield! {
+    struct ReadModeFlags(u64);
+    impl Debug;
+    pub nonblocking, set_nonblocking: 0;
 }
 
 fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
@@ -124,6 +131,7 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let fd = args.get_arg(0);
     let size = args.get_arg(1);
     let buf_ptr = args.get_arg(2);
+    let read_mode_flags = ReadModeFlags(args.get_arg(3));
     let pid = proc.pid();
 
     if size == 0 {
@@ -159,7 +167,7 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let buffer_alloc = physical_allocator::allocate_contiguous(pages as u32);
         let buffers = buffer_alloc.get_range().get_addresses().collect::<Vec<PhysAddr>>();
 
-        let read_result = crate::vfs::read_file(f_handle.get(), &buffers, size).await;
+        let read_result = crate::vfs::read_file(f_handle.get(), &buffers, size, !read_mode_flags.nonblocking()).await;
         let Some(proc) = proc_clone.upgrade() else {
             return; //proc was killed
         };
@@ -167,6 +175,7 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
             proc.set_syscall_return(&[u64::MAX]);
             return;
         };
+
         //copy to user buffer
         let dst = buf_ptr;
         let buffer_alloc_virt: VirtAddr = buffer_alloc.0.start.into();

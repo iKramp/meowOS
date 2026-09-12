@@ -4,12 +4,16 @@ use std::{
     collections::btree_map::BTreeMap,
     error::KernelError,
     ffi_future, kerror_unwrapped, lock_w_info,
+    queue::DataQueueHead,
+    r_lock_w_info,
     sync::{
         self,
         arc::Arc,
         async_rw_lock::{AsyncRWLockModeWrite, AsyncRWlock, AsyncRWlockGuard},
         no_int_spinlock::NoIntSpinlock,
+        rw_lock::RWSpinlock,
     },
+    w_lock_w_info,
 };
 
 use bitfield::bitfield;
@@ -169,7 +173,7 @@ impl Drop for OpenFile {
         core::mem::swap(&mut self.inode, &mut dummy_manually_drop);
 
         let dummy_open_file = OpenFile {
-            inode: dummy_manually_drop, //now taken from self
+            inode: dummy_manually_drop,
         };
 
         let future = async move {

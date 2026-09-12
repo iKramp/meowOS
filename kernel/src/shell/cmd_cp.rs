@@ -142,7 +142,7 @@ async fn copy_file(
             break;
         }
 
-        let mut bytes_read = vfs::read_file(source, &buffer_slice[..], total_size.min(4096)).await?;
+        let mut bytes_read = vfs::read_file(source, &buffer_slice[..], total_size.min(4096), false).await?;
         bytes_read = bytes_read.min(total_size);
 
         if bytes_read == 0 {

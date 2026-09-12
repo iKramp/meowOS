@@ -44,12 +44,14 @@ pub struct CpuLocals {
     //id of scheduled event for preemtion, used to cancel preemption
     pub preemtion_id: Option<u64>,
 
+    pub async_task_data: AsyncTaskData,
+    pub current_async_task_id: Option<u64>,
+
     pub apic_id: u8,
     pub processor_id: u8,
     pub int_depth: u32,
     pub proc_initialized: bool,
     pub atomic_context: bool,
-    pub async_task_data: AsyncTaskData,
     pub lock_info: LockInfo,
     pub page_fault_handle_mode: PageFaultHandleMode,
     lock_addr: VirtAddr,
@@ -134,12 +136,14 @@ impl CpuLocals {
             current_process: None,
             preemtion_id: None,
 
+            async_task_data: AsyncTaskData::new(),
+            current_async_task_id: None,
+
             apic_id,
             processor_id,
             int_depth: 0,
             proc_initialized: false,
             atomic_context: false,
-            async_task_data: AsyncTaskData::new(),
             lock_info: LockInfo::new(),
             page_fault_handle_mode: PageFaultHandleMode::KernelPanic,
             lock_addr: VirtAddr(0),

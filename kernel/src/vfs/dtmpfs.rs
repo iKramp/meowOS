@@ -93,6 +93,7 @@ impl FileSystem for Dtmpfs {
         _offset_bytes: u64,
         _size_bytes: u64,
         _buffer: &[PhysAddr],
+        _blocking: bool,
     ) -> Result<u64, KernelError> {
         kerror!(UnsupportedOperation)
     }
@@ -134,6 +135,7 @@ impl FileSystem for Dtmpfs {
             access_time: 0,
             modification_time: 0,
             stat_change_time: 0,
+            internal_synchronization: true,
         })
     }
 

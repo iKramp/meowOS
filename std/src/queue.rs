@@ -98,4 +98,30 @@ impl<T> DataQueueHead<T> {
     pub fn is_empty(&self) -> bool {
         self.curr_nodes == 0
     }
+
+    pub fn take_queue(&mut self) -> DataQueueHead<T> {
+        let mut new_queue = DataQueueHead {
+            first_node: None,
+            last_node: None,
+            max_nodes: self.max_nodes,
+            curr_nodes: 0,
+        };
+
+        core::mem::swap(&mut new_queue, self);
+        new_queue
+    }
+}
+
+impl<T> Default for DataQueueHead<T> {
+    fn default() -> Self {
+        Self::new(usize::MAX)
+    }
+}
+
+impl<T> Iterator for DataQueueHead<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.get_first()
+    }
 }

@@ -461,9 +461,21 @@ pub async fn unlink_file(parent_dir: &FileHandle, name: &str) -> Result<(), Kern
 }
 
 pub async fn write_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, KernelError> {
-    let mut inode = file_handle.open_file.inode.lock_write().await;
+    let inode_read_ref = unsafe { file_handle.open_file.inode.get_read_reference() };
+    let internal_sync = inode_read_ref.internal_synchronization;
+    let is_dir = inode_read_ref.type_mode.is_dir();
+    let device = inode_read_ref.device;
+    let inode_index = inode_read_ref.index;
 
-    let desired_offset = if file_handle.file_flags.append() {
+    let mut inode = if internal_sync {
+        None
+    } else {
+        Some(file_handle.open_file.inode.lock_write().await)
+    };
+
+    let desired_offset = if file_handle.file_flags.append()
+        && let Some(inode) = &inode
+    {
         inode.size
     } else {
         file_handle.position.load(Ordering::Relaxed)
@@ -473,12 +485,12 @@ pub async fn write_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64
         return kerror!(InsufficientPermissions);
     }
 
-    if inode.type_mode.is_dir() {
+    if is_dir {
         return kerror!(UnsupportedOperation);
     }
 
     let mut vfs = lock_w_info!(VFS);
-    let device_details = vfs.devices.get(&inode.device).ok_or(kerror_unwrapped!(NoEntry))?;
+    let device_details = vfs.devices.get(&device).ok_or(kerror_unwrapped!(NoEntry))?;
     let partition_id = device_details.partition;
     let fs = vfs
         .mounted_filesystems
@@ -487,7 +499,7 @@ pub async fn write_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64
     let fs = fs.clone();
     drop(vfs);
 
-    let res = fs.write(inode.index, desired_offset, size, buffer).await?;
+    let res = fs.write(inode_index, desired_offset, size, buffer).await?;
 
     println!("Wrote {} bytes", res.1);
 
@@ -495,7 +507,11 @@ pub async fn write_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64
         .position
         .store(res.1.min(size) + desired_offset, Ordering::Relaxed);
 
-    inode.update_from(&res.0);
+    if let Some(inode) = &mut inode {
+        inode.update_from(&res.0);
+    }
+
+    drop(inode); //keep alive until here
 
     Ok(res.1)
 }
@@ -504,27 +520,43 @@ pub async fn stat_file(file_handle: &FileHandle) -> Inode {
     file_handle.open_file.inode.lock_read().await.clone()
 }
 
-pub async fn read_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64) -> Result<u64, KernelError> {
+pub async fn read_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64, blocking: bool) -> Result<u64, KernelError> {
     if !file_handle.file_flags.read() {
         return kerror!(InsufficientPermissions);
     }
 
+    let inode_read_ref = unsafe { file_handle.open_file.inode.get_read_reference() };
+    let internal_sync = inode_read_ref.internal_synchronization;
+    let is_dir = inode_read_ref.type_mode.is_dir();
+    let device = inode_read_ref.device;
+    let inode_index = inode_read_ref.index;
+
+    //disallow using blocking reads if a filesystem can't sync by itself (most physical filesystems)
+    if blocking && !internal_sync {
+        return kerror!(InvalidOperation);
+    }
+
     let offset = file_handle.position.load(Ordering::Relaxed);
-    let inode = file_handle.open_file.inode.lock_read().await;
-    let size = size.min(inode.size.saturating_sub(offset));
+    let (size, inode) = if internal_sync {
+        (size, None)
+    } else {
+        let inode = file_handle.open_file.inode.lock_read().await;
+        let size = size.min(inode.size.saturating_sub(offset));
+        (size, Some(inode))
+    };
 
     println!(
         "Reading max {} bytes from file {:?} at offset {}",
         size, file_handle.inode, offset
     );
 
-    if inode.type_mode.is_dir() {
+    if is_dir {
         println!("file {:?} is a directory, cannot read", file_handle.inode);
         return kerror!(UnsupportedOperation);
     }
 
     let mut vfs = lock_w_info!(VFS);
-    let device_details = vfs.devices.get(&inode.device).ok_or(kerror_unwrapped!(NoEntry))?;
+    let device_details = vfs.devices.get(&device).ok_or(kerror_unwrapped!(NoEntry))?;
     let partition_id = device_details.partition;
     let fs = vfs
         .mounted_filesystems
@@ -533,11 +565,10 @@ pub async fn read_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64)
     let fs = fs.clone();
     drop(vfs);
 
-    let bytes_read = fs.read(inode.index, offset, size, buffer).await?;
-
-    println!("Read {} bytes", bytes_read);
+    let bytes_read = fs.read(inode_index, offset, size, buffer, blocking).await?;
 
     let res = bytes_read.min(size);
     file_handle.position.store(offset + res, Ordering::Relaxed);
+    drop(inode); //keep alive until here
     Ok(res)
 }

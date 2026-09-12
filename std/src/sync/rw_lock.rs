@@ -195,3 +195,9 @@ impl<T: ?Sized, M> Deref for RWSpinlockGuard<'_, T, M> {
         unsafe { &*self.lock.data.get() }
     }
 }
+
+impl<T: Default> Default for RWSpinlock<T> {
+    fn default() -> Self {
+        Self::new(T::default())
+    }
+}

@@ -24,7 +24,14 @@ pub trait FileSystem: Debug + Send + Sync {
     fn partition_id(&self) -> Uuid;
     async fn unmount(&self) -> Result<(), KernelError>;
     ///Offset must be page aligned
-    async fn read(&self, inode: InodeIndex, offset_bytes: u64, size_bytes: u64, buffer: &[PhysAddr]) -> Result<u64, KernelError>;
+    async fn read(
+        &self,
+        inode: InodeIndex,
+        offset_bytes: u64,
+        size_bytes: u64,
+        buffer: &[PhysAddr],
+        blocking: bool,
+    ) -> Result<u64, KernelError>;
     async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, KernelError>;
     ///Offset must be page aligned. Returns the new inode
     async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), KernelError>;

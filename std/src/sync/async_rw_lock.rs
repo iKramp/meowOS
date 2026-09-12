@@ -79,6 +79,12 @@ impl<T> AsyncRWlock<T> {
         }
         .await
     }
+
+    ///# Safety
+    ///Only to be used for read only data within the struct
+    pub unsafe fn get_read_reference(&self) -> &T {
+        unsafe { &*self.data.get() }
+    }
 }
 
 impl<'a, T: 'a> AsyncRWlockGuard<'a, T, AsyncRWLockModeRead> {

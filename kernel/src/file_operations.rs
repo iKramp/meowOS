@@ -234,7 +234,7 @@ impl ReadFileOperation {
         let file = block_task(ffi_open_file_future).expect("fopen failed in debug function");
 
         let addresses = buffer.iter().map(|e| e.0).collect::<Vec<_>>();
-        let read_future = vfs::read_file(&file, &addresses, real_length);
+        let read_future = vfs::read_file(&file, &addresses, real_length, false);
         let ffi_read_future = into_ffi_future(read_future);
         block_task(ffi_read_future).expect("file read failed in debug function");
 

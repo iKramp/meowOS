@@ -1,5 +1,8 @@
+use core::pin::Pin;
+use core::task::{Poll, Waker};
 use std::boxed::Box;
 use std::error::KernelError;
+use std::queue::DataQueueHead;
 use std::sync::arc::Arc;
 use std::sync::no_int_spinlock::NoIntSpinlock;
 use std::sync::once_lock::OnceLock;
@@ -8,7 +11,7 @@ use std::{kerror, lock_w_info, println};
 use uuid::Uuid;
 
 use crate::memory::addresses::{PhysAddr, VirtAddr};
-use crate::tty;
+use crate::tty::{self, TTY};
 use crate::vfs::{DeviceId, FileSystem, Inode, InodeIndex, InodeTypeAndPerms};
 
 use super::{DirEntry, VfsAdapterTrait};
@@ -28,6 +31,7 @@ impl TtyAdapter {
             .get_or_init(|| {
                 let device_details = crate::vfs::VFS_ADAPTER_DEVICE.allocate_device(&mut lock_w_info!(crate::vfs::VFS));
                 println!("tty adapter created with device_id: {:?}", device_details.0);
+                lock_w_info!(TTY).set_input_hook(Some(wake_tty_readers));
                 Arc::new(Self {
                     device_id: device_details.0,
                     device_details: device_details.1,
@@ -49,6 +53,34 @@ impl TtyAdapter {
             access_time: 0,
             modification_time: 0,
             stat_change_time: 0,
+            internal_synchronization: true,
+        }
+    }
+}
+
+fn wake_tty_readers() {
+    let mut wait_queue = lock_w_info!(WAIT_QUEUE);
+    let readers = wait_queue.take_queue();
+    drop(wait_queue);
+    for waker in readers {
+        waker.wake();
+    }
+}
+
+static WAIT_QUEUE: NoIntSpinlock<DataQueueHead<Waker>> = NoIntSpinlock::new(DataQueueHead::new(usize::MAX));
+
+struct TtyWaiter;
+
+impl Future for TtyWaiter {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
+        let mut wait_queue = lock_w_info!(WAIT_QUEUE);
+        if lock_w_info!(tty::TTY).data_len() > 0 {
+            Poll::Ready(())
+        } else {
+            wait_queue.push(cx.waker().clone());
+            Poll::Pending
         }
     }
 }
@@ -69,9 +101,20 @@ impl VfsAdapterTrait for TtyAdapter {
         _offset_bytes: u64,
         size_bytes: u64,
         buffer: &[PhysAddr],
+        blocking: bool,
     ) -> Result<u64, KernelError> {
-        let Some(mut ready_input) = lock_w_info!(tty::TTY).get_input(size_bytes) else {
-            return Ok(0);
+        let mut ready_input = loop {
+            let input = lock_w_info!(tty::TTY).get_input(size_bytes);
+            match input {
+                Some(input) => break input,
+                None => {
+                    if !blocking {
+                        return Ok(0);
+                    }
+                    drop(input);
+                    TtyWaiter.await;
+                }
+            }
         };
         let mut block = 0;
         let mut read_size = 0;
