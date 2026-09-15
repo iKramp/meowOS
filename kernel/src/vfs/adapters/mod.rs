@@ -1,7 +1,7 @@
 use core::{fmt::Debug, sync::atomic::AtomicU32};
 use std::{boxed::Box, error::KernelError, kerror};
 
-use crate::{drivers::block_device::disk::DirEntry, memory::addresses::PhysAddr};
+use crate::{drivers::block_device::disk::DirEntry, memory::addresses::PhysAddr, vfs::FileReadResult};
 
 use super::{DeviceDetails, DeviceId, Inode, InodeIndex, Vfs, filesystem_trait::FileSystem};
 
@@ -52,7 +52,7 @@ pub trait VfsAdapterTrait: Debug + Send + Sync {
         size_bytes: u64,
         buffer: &[PhysAddr],
         blocking: bool,
-    ) -> Result<u64, KernelError>;
+    ) -> Result<(u64, FileReadResult), KernelError>;
     async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, KernelError>;
     async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), KernelError>;
     async fn stat(&self, inode: InodeIndex) -> Result<Inode, KernelError>;
@@ -75,7 +75,7 @@ impl<T: VfsAdapterTrait> FileSystem for T {
         size_bytes: u64,
         buffer: &[PhysAddr],
         blocking: bool,
-    ) -> Result<u64, KernelError> {
+    ) -> Result<(u64, FileReadResult), KernelError> {
         VfsAdapterTrait::read(self, inode, offset_bytes, size_bytes, buffer, blocking).await
     }
 

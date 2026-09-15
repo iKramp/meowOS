@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::{
     drivers::block_device::disk::MountedPartition,
     memory::{addresses::*, physical_allocator},
-    vfs::{DeviceId, FileSystem, FileSystemFactory, Inode, InodeIndex, InodeTypeAndPerms},
+    vfs::{DeviceId, FileReadResult, FileSystem, FileSystemFactory, Inode, InodeIndex, InodeTypeAndPerms},
 };
 
 use std::{boxed::Box, error::KernelError};
@@ -329,7 +329,7 @@ impl FileSystem for FatDriver {
         size_bytes: u64,
         buffer: &[PhysAddr],
         _blocking: bool,
-    ) -> Result<u64, KernelError> {
+    ) -> Result<(u64, FileReadResult), KernelError> {
         if !offset_bytes.is_multiple_of(512) {
             return kerror!(IllegalValue);
         }
@@ -348,7 +348,7 @@ impl FileSystem for FatDriver {
             let buffer_sector = i - start_sector;
 
             let Some(data) = self.read_file_sector(i as u32, inode as u32).await else {
-                return Ok((buffer_sector * 512).min(size_bytes));
+                return Ok(((buffer_sector * 512).min(size_bytes), FileReadResult::Invalid));
             };
             let buffer_phys = buffer[buffer_sector as usize / 8];
             let buffer_virt: VirtAddr = buffer_phys.into();
@@ -360,7 +360,7 @@ impl FileSystem for FatDriver {
             }
         }
 
-        return Ok((size_sectors * 512).min(size_bytes));
+        return Ok(((size_sectors * 512).min(size_bytes), FileReadResult::Invalid));
     }
     async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {
         let entries = self.read_dir_internal(inode).await?;

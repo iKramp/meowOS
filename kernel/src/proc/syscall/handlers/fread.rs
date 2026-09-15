@@ -52,7 +52,7 @@ pub fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let Some(proc) = proc.upgrade() else {
             return; //proc was killed
         };
-        let Ok(bytes_read) = read_result else {
+        let Ok((bytes_read, _)) = read_result else {
             let proc_lock = proc.get();
             proc_lock.set_legacy_syscall_return(u64::MAX, 1);
             return;

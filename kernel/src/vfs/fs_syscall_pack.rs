@@ -171,7 +171,7 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let Some(proc) = proc_clone.upgrade() else {
             return; //proc was killed
         };
-        let Ok(bytes_read) = read_result else {
+        let Ok((bytes_read, read_result)) = read_result else {
             proc.set_syscall_return(&[u64::MAX]);
             return;
         };
@@ -187,7 +187,7 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         }
 
         //return
-        proc.set_syscall_return(&[bytes_read]);
+        proc.set_syscall_return(&[bytes_read, read_result as u64]);
         crate::proc::wake_process(proc.pid())
     };
 

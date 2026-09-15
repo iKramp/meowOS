@@ -1,4 +1,7 @@
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{
+    AtomicBool, AtomicU64,
+    Ordering::{self, Relaxed},
+};
 use std::{
     boxed::Box,
     error::KernelError,
@@ -29,6 +32,14 @@ use super::{
     filesystem_trait::FileSystem,
     fs_tree::{self},
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileReadResult {
+    Normal = 0,
+    TemporaryEof = 1,
+    PermanentEof = 2,
+    Invalid = 3,
+}
 
 pub async fn add_disk(disk: Arc<dyn BlockDevice>) -> Uuid {
     //for now only GPT
@@ -306,6 +317,7 @@ pub async fn open_file(
         inode: inode_index,
         parent_chain: inode_chain,
         position: AtomicU64::new(0),
+        reached_eof: AtomicBool::new(false),
         file_flags,
         open_file,
     })
@@ -520,8 +532,13 @@ pub async fn stat_file(file_handle: &FileHandle) -> Inode {
     file_handle.open_file.inode.lock_read().await.clone()
 }
 
-pub async fn read_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64, blocking: bool) -> Result<u64, KernelError> {
-    if !file_handle.file_flags.read() {
+pub async fn read_file(
+    file_handle: &FileHandle,
+    buffer: &[PhysAddr],
+    size: u64,
+    blocking: bool,
+) -> Result<(u64, FileReadResult), KernelError> {
+    if !file_handle.file_flags.read() || file_handle.reached_eof.load(Relaxed) {
         return kerror!(InsufficientPermissions);
     }
 
@@ -536,7 +553,7 @@ pub async fn read_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64,
         return kerror!(InvalidOperation);
     }
 
-    let offset = file_handle.position.load(Ordering::Relaxed);
+    let offset = file_handle.position.load(Relaxed);
     let (size, inode) = if internal_sync {
         (size, None)
     } else {
@@ -565,10 +582,22 @@ pub async fn read_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64,
     let fs = fs.clone();
     drop(vfs);
 
-    let bytes_read = fs.read(inode_index, offset, size, buffer, blocking).await?;
+    let (bytes_read, mut read_result) = fs.read(inode_index, offset, size, buffer, blocking).await?;
+
+    if !internal_sync {
+        read_result = if bytes_read == size {
+            FileReadResult::Normal
+        } else {
+            FileReadResult::TemporaryEof
+        }
+    }
+
+    if read_result == FileReadResult::PermanentEof {
+        file_handle.reached_eof.store(true, Relaxed);
+    }
 
     let res = bytes_read.min(size);
     file_handle.position.store(offset + res, Ordering::Relaxed);
     drop(inode); //keep alive until here
-    Ok(res)
+    Ok((res, read_result))
 }

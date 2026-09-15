@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::{
     drivers::block_device::disk::{DirEntry, MountedPartition},
     memory::addresses::PhysAddr,
-    vfs::DeviceId,
+    vfs::{DeviceId, FileReadResult},
 };
 
 use super::{Inode, InodeIndex, InodeTypeAndPerms};
@@ -31,7 +31,7 @@ pub trait FileSystem: Debug + Send + Sync {
         size_bytes: u64,
         buffer: &[PhysAddr],
         blocking: bool,
-    ) -> Result<u64, KernelError>;
+    ) -> Result<(u64, FileReadResult), KernelError>;
     async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, KernelError>;
     ///Offset must be page aligned. Returns the new inode
     async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), KernelError>;

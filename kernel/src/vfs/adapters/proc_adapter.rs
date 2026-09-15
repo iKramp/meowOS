@@ -1,6 +1,6 @@
 use crate::{
     memory::addresses::*,
-    vfs::{DeviceId, FileSystem, InodeTypeAndPerms},
+    vfs::{DeviceId, FileReadResult, FileSystem, InodeTypeAndPerms},
 };
 
 use super::{DirEntry, VfsAdapterTrait};
@@ -51,7 +51,7 @@ impl VfsAdapterTrait for ProcAdapter {
         _size_bytes: u64,
         _buffer: &[PhysAddr],
         _blocking: bool,
-    ) -> Result<u64, KernelError> {
+    ) -> Result<(u64, FileReadResult), KernelError> {
         todo!()
     }
 

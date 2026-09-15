@@ -14,7 +14,7 @@ use std::{
 
 use uuid::Uuid;
 
-use crate::{drivers::block_device::disk::DirEntry, memory::addresses::*};
+use crate::{drivers::block_device::disk::DirEntry, memory::addresses::*, vfs::FileReadResult};
 
 use super::{
     DeviceId, InodeIndex, InodeTypeAndPerms, ROOT_INODE_INDEX,
@@ -94,7 +94,7 @@ impl FileSystem for Dtmpfs {
         _size_bytes: u64,
         _buffer: &[PhysAddr],
         _blocking: bool,
-    ) -> Result<u64, KernelError> {
+    ) -> Result<(u64, FileReadResult), KernelError> {
         kerror!(UnsupportedOperation)
     }
 

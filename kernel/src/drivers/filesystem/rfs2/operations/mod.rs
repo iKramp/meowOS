@@ -4,8 +4,8 @@ use std::kerror;
 use std::{boxed::Box, error::KernelError, println, string::ToString, vec::Vec};
 
 use super::InodeIndex;
-use crate::vfs::InodeIndex as VfsInodeIndex;
 use crate::vfs::{DeviceId, Inode as VfsInode};
+use crate::vfs::{FileReadResult, InodeIndex as VfsInodeIndex};
 use crate::{
     drivers::{
         block_device::disk::DirEntry as VfsDirEntry,
@@ -170,7 +170,7 @@ impl FileSystem for Rfs2 {
         size_bytes: u64,
         buffer: &[PhysAddr],
         _blocking: bool,
-    ) -> Result<u64, KernelError> {
+    ) -> Result<(u64, FileReadResult), KernelError> {
         if !offset_bytes.is_multiple_of(4096) {
             panic!("non-page-aligned offset not yet supported");
         }
@@ -187,7 +187,7 @@ impl FileSystem for Rfs2 {
         let offset_blocks = offset_bytes / 4096;
         let res = self.read_locked(file_root, offset_blocks, size_bytes, buffer).await;
         drop(locked);
-        res
+        res.map(|read| (read, FileReadResult::Invalid))
     }
 
     async fn read_dir(&self, inode: VfsInodeIndex) -> Result<Box<[VfsDirEntry]>, KernelError> {

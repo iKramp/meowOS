@@ -12,7 +12,7 @@ use std::{kerror, kerror_unwrapped, lock_w_info, println, r_lock_w_info, w_lock_
 use crate::drivers::block_device::disk::DirEntry;
 use crate::memory::addresses::*;
 use crate::vfs::adapters::VfsAdapterTrait;
-use crate::vfs::{DeviceId, FileSystem, Inode, InodeIndex, InodeTypeAndPerms, inode};
+use crate::vfs::{DeviceId, FileReadResult, FileSystem, Inode, InodeIndex, InodeTypeAndPerms, inode};
 
 const ENTRIES_PER_NIC_DEVICE: u64 = 2;
 const _: () = assert!(ENTRIES_PER_NIC_DEVICE.is_power_of_two());
@@ -82,10 +82,10 @@ impl VfsAdapterTrait for NetAdapter {
         _offset_bytes: u64,
         size_bytes: u64,
         buffer: &[PhysAddr],
-        blocking: bool,
-    ) -> Result<u64, KernelError> {
+        _blocking: bool,
+    ) -> Result<(u64, FileReadResult), KernelError> {
         if size_bytes == 0 {
-            return Ok(0);
+            return Ok((0, FileReadResult::Normal));
         }
         if buffer.len() != size_bytes.div_ceil(4096) as usize {
             return kerror!(InvalidArgument);
@@ -105,7 +105,7 @@ impl VfsAdapterTrait for NetAdapter {
                 let first_buffer_virt: VirtAddr = first_buffer.into();
                 let ptr = first_buffer_virt.0 as *mut u8;
                 unsafe { core::ptr::copy_nonoverlapping(addr_of!(mac_address) as *const u8, ptr, read_size as usize) };
-                Ok(read_size)
+                Ok((read_size, FileReadResult::Normal))
             }
             NICEntryType::Mtu => {
                 let mtu = device.mtu() as u32;
@@ -114,7 +114,7 @@ impl VfsAdapterTrait for NetAdapter {
                 let first_buffer_virt: VirtAddr = first_buffer.into();
                 let ptr = first_buffer_virt.0 as *mut u8;
                 unsafe { core::ptr::copy_nonoverlapping(addr_of!(mtu) as *const u8, ptr, read_size as usize) };
-                Ok(read_size)
+                Ok((read_size, FileReadResult::Normal))
             }
             _ => return kerror!(UnsupportedOperation),
         }

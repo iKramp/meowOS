@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::memory::addresses::{PhysAddr, VirtAddr};
 use crate::tty::{self, TTY};
-use crate::vfs::{DeviceId, FileSystem, Inode, InodeIndex, InodeTypeAndPerms};
+use crate::vfs::{DeviceId, FileReadResult, FileSystem, Inode, InodeIndex, InodeTypeAndPerms};
 
 use super::{DirEntry, VfsAdapterTrait};
 
@@ -102,14 +102,14 @@ impl VfsAdapterTrait for TtyAdapter {
         size_bytes: u64,
         buffer: &[PhysAddr],
         blocking: bool,
-    ) -> Result<u64, KernelError> {
+    ) -> Result<(u64, FileReadResult), KernelError> {
         let mut ready_input = loop {
             let input = lock_w_info!(tty::TTY).get_input(size_bytes);
             match input {
                 Some(input) => break input,
                 None => {
                     if !blocking {
-                        return Ok(0);
+                        return Ok((0, FileReadResult::TemporaryEof));
                     }
                     drop(input);
                     TtyWaiter.await;
@@ -119,22 +119,29 @@ impl VfsAdapterTrait for TtyAdapter {
         let mut block = 0;
         let mut read_size = 0;
         loop {
-            if ready_input.is_empty() {
+            if ready_input.0.is_empty() {
                 break;
             }
-            let size_to_read = 4096.min(ready_input.len() as u64);
+            let size_to_read = 4096.min(ready_input.0.len() as u64);
             let Some(phys_ptr) = buffer.get(block as usize) else {
                 break;
             };
             let virt_ptr: VirtAddr = (*phys_ptr).into();
             let ptr = virt_ptr.0 as *mut u8;
             let slice = unsafe { core::slice::from_raw_parts_mut(ptr, size_to_read as usize) };
-            slice.copy_from_slice(&ready_input.as_bytes()[..size_to_read as usize]);
-            ready_input.drain(..size_to_read as usize);
+            slice.copy_from_slice(&ready_input.0.as_bytes()[..size_to_read as usize]);
+            ready_input.0.drain(..size_to_read as usize);
             block += 1;
             read_size += size_to_read;
         }
-        Ok(read_size)
+
+        let read_res = if ready_input.1 {
+            FileReadResult::PermanentEof
+        } else {
+            FileReadResult::Normal
+        };
+
+        Ok((read_size, read_res))
     }
 
     async fn read_dir(&self, _inode: crate::vfs::InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {

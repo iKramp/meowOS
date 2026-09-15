@@ -76,7 +76,7 @@ pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &s
     let buf = VirtRange::from(&phys_buf);
 
     let phys_buf_vec = phys_buf.get_range().get_addresses().collect::<Vec<_>>();
-    let read_res = vfs::read_file(&file_handle, &phys_buf_vec, stat.size, false).await?;
+    let read_res = vfs::read_file(&file_handle, &phys_buf_vec, stat.size, false).await?.0;
     if read_res != stat.size {
         return kerror!(InternalFSError);
     }

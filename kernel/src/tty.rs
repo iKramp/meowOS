@@ -71,8 +71,9 @@ impl TtyState {
         self.done_streams.iter().map(|(s, _)| s.len()).sum::<usize>()
     }
 
-    pub fn get_input(&mut self, max_size: u64) -> Option<String> {
-        if let Some((stream, _)) = self.done_streams.pop() {
+    pub fn get_input(&mut self, max_size: u64) -> Option<(String, bool)> {
+        //bool is EOF
+        if let Some((stream, eof)) = self.done_streams.pop() {
             if stream.len() as u64 > max_size {
                 let mut split_point = max_size as usize;
                 while !stream.is_char_boundary(split_point) {
@@ -80,9 +81,9 @@ impl TtyState {
                 }
                 let remaining = stream[split_point..].to_string();
                 self.done_streams.insert(0, (remaining, false));
-                Some(stream[..split_point].to_string())
+                Some((stream[..split_point].to_string(), false))
             } else {
-                Some(stream)
+                Some((stream, eof))
             }
         } else {
             None
@@ -106,6 +107,7 @@ impl TtyState {
                 }
                 Key::D => {
                     self.send_line(true);
+                    return HandleInputResult::Nothing;
                 }
                 _ => {}
             }

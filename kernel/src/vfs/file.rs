@@ -1,19 +1,19 @@
-use core::{future::AsyncDrop, mem::ManuallyDrop, sync::atomic::AtomicU64};
+use core::{
+    future::AsyncDrop,
+    mem::ManuallyDrop,
+    sync::atomic::{AtomicBool, AtomicU64},
+};
 use std::{
     boxed::Box,
     collections::btree_map::BTreeMap,
     error::KernelError,
     ffi_future, kerror_unwrapped, lock_w_info,
-    queue::DataQueueHead,
-    r_lock_w_info,
     sync::{
         self,
         arc::Arc,
         async_rw_lock::{AsyncRWLockModeWrite, AsyncRWlock, AsyncRWlockGuard},
         no_int_spinlock::NoIntSpinlock,
-        rw_lock::RWSpinlock,
     },
-    w_lock_w_info,
 };
 
 use bitfield::bitfield;
@@ -41,6 +41,7 @@ pub struct FileHandle {
     pub inode: InodeIdentifier,
     pub parent_chain: InodeIdentifierChain,
     pub position: AtomicU64,
+    pub reached_eof: AtomicBool,
     pub file_flags: FileFlags,
     pub(in crate::vfs) open_file: Arc<OpenFile>,
 }
@@ -50,7 +51,8 @@ impl FileHandle {
         FileHandle {
             inode: other.inode,
             parent_chain: other.parent_chain.clone(),
-            position: AtomicU64::new(other.position.load(core::sync::atomic::Ordering::SeqCst)),
+            position: AtomicU64::new(other.position.load(core::sync::atomic::Ordering::Relaxed)),
+            reached_eof: AtomicBool::new(other.reached_eof.load(core::sync::atomic::Ordering::Relaxed)),
             file_flags: other.file_flags,
             open_file: other.open_file.clone(),
         }
