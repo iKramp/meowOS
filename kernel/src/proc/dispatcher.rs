@@ -47,8 +47,9 @@ pub(super) fn dispatch(new_proc: &ProcessData) -> ! {
     };
     let event_id = crate::acpi::schedule_event(scheduled_event);
 
-    let mut locals = CpuLocals::get_mut();
     disable_interrupts();
+
+    let mut locals = CpuLocals::get_mut();
     let cpu_state = new_proc.take_cpu_state();
     println!("Dispatching process with state: {:x?}", cpu_state);
 

@@ -190,9 +190,9 @@ impl VirtualMemoryRange {
         new_end_addr: VirtAddr,
         max_new_pages: usize,
     ) -> Result<(), KernelError> {
-        let new_end_aligned = self.max_size().align_down(new_end_addr);
+        let new_end_aligned = VirtAddr(new_end_addr.0 & !(4096 - 1));
         let reserved_range = self.reserved_range(current_mapped_addr);
-        if new_end_aligned < reserved_range.start || new_end_aligned > reserved_range.end {
+        if new_end_addr < reserved_range.start || new_end_addr >= reserved_range.end {
             return kerror!(InvalidArgument);
         }
         let curr_range = self.current_range(current_mapped_addr)?;

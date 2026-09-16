@@ -2,10 +2,10 @@ use std::lock_w_info;
 use std::sync::no_int_spinlock::NoIntSpinlock;
 
 use crate::memory::addresses::*;
+use crate::memory::log2_rounded_up;
 use crate::memory::physical_allocator::PhysicalAllocatorStats;
-use crate::memory::{log2_rounded_up, printlnc};
 
-use crate::{limine, println};
+use crate::limine;
 
 static BUDDY_ALLOCATOR: NoIntSpinlock<BuddyAllocator> = NoIntSpinlock::new(BuddyAllocator {
     n_pages: 0,
@@ -37,7 +37,7 @@ pub(super) fn init(memory_regions: &mut [&mut limine::MemoryMapEntry]) {
         //set all bits to 1 to set everything as used
         unsafe {
             set_at_addr(tree_allocator + PhysAddr(i), 0xFF_u8);
-            allocated_pages += 4;
+            allocated_pages += 8;
         }
     }
 
@@ -63,17 +63,6 @@ pub(super) fn init(memory_regions: &mut [&mut limine::MemoryMapEntry]) {
     }
     allocator.update_all();
     *lock_w_info!(BUDDY_ALLOCATOR) = allocator;
-}
-
-pub(super) fn is_frame_allocated(addr: PhysAddr) -> bool {
-    lock_w_info!(BUDDY_ALLOCATOR).is_frame_allocated(addr)
-}
-
-pub fn print_state() {
-    let allocator = lock_w_info!(BUDDY_ALLOCATOR);
-    printlnc!((255, 200, 100), "Buddy Allocator state:");
-    println!("all_frames: {}", allocator.n_pages);
-    println!("allocated_frames: {}", allocator.allocated_pages);
 }
 
 ///# Safety
@@ -103,7 +92,7 @@ pub(super) fn allocate_frame() -> OwnedPhysAddr {
 }
 
 pub(super) fn allocate_contiguous(n_pages: u32) -> OwnedPhysRange {
-    let addr = lock_w_info!(BUDDY_ALLOCATOR).allocate_contiguius_high(n_pages.into());
+    let addr = lock_w_info!(BUDDY_ALLOCATOR).allocate_contiguius(n_pages.into());
     OwnedPhysRange(PhysRange {
         start: addr,
         n_pages: n_pages.into(),
@@ -115,16 +104,6 @@ pub(super) fn reserve_low() -> OwnedPhysAddr {
 }
 
 impl BuddyAllocator {
-    fn is_frame_allocated(&self, addr: PhysAddr) -> bool {
-        #[cfg(debug_assertions)]
-        assert!(
-            addr.0 & 0xFFF == 0,
-            "error in is_frame_allocated at addr {}: address is not page aligned",
-            addr.0,
-        );
-        self.get_at_index((addr.0 >> 12) + (self.binary_tree_size / 2))
-    }
-
     fn deallocate_frame(&mut self, addr: PhysAddr) {
         self.mark_addr(addr, false);
         self.allocated_pages -= 1;
@@ -198,33 +177,15 @@ impl BuddyAllocator {
         }
     }
 
-    fn allocate_contiguius_high(&mut self, n_pages: u64) -> PhysAddr {
+    fn allocate_contiguius(&mut self, n_pages: u64) -> PhysAddr {
         let index = self.find_contigious_empty_high(n_pages);
         for i in index..index + n_pages {
             self.mark_index(i, true);
         }
+        self.allocated_pages += n_pages;
         let address = (index - self.binary_tree_size / 2) * 4096;
         debug_assert!(address <= self.n_pages * 4096, "address is out of bounds");
         PhysAddr(address)
-    }
-
-    fn allocate_contiguius_low(&mut self, n_pages: u64) -> PhysAddr {
-        let index = self.find_contigious_empty_low(n_pages);
-        for i in index..index + n_pages {
-            self.mark_index(i, true);
-        }
-        let address = (index - self.binary_tree_size / 2) * 4096;
-        debug_assert!(address <= self.n_pages * 4096, "address is out of bounds");
-        PhysAddr(address)
-    }
-
-    fn find_contigious_empty_low(&self, n_pages: u64) -> u64 {
-        if n_pages == 0 {
-            return self.binary_tree_size / 2;
-        }
-        let order = log2_rounded_up(n_pages);
-        self.find_contigious_empty_recursively_low(1, order)
-            .expect("OOM in physical memory allocator")
     }
 
     fn find_contigious_empty_high(&self, n_pages: u64) -> u64 {
@@ -234,32 +195,6 @@ impl BuddyAllocator {
         let order = log2_rounded_up(n_pages);
         self.find_contigious_empty_recursively_high(1, order)
             .expect("OOM in physical memory allocator")
-    }
-
-    /// This function finds a contigious block of empty pages of the given order
-    /// The returned address is always aligned by the order of pages
-    /// This function is slow! only use when necessary
-    fn find_contigious_empty_recursively_low(&self, curr_index: u64, order: u64) -> Option<u64> {
-        if curr_index >= self.binary_tree_size / (1 << (order + 1)) {
-            //check all pages in this region
-            let start_index = curr_index * (1 << order);
-            let end_index = start_index + (1 << order);
-            for i in start_index..end_index {
-                if self.get_at_index(i) {
-                    return None;
-                }
-            }
-            return Some(start_index);
-        }
-        if !self.get_at_index(curr_index * 2) {
-            let res = self.find_contigious_empty_recursively_low(curr_index * 2, order);
-            if res.is_some() {
-                return res;
-            }
-            self.find_contigious_empty_recursively_low(curr_index * 2 + 1, order)
-        } else {
-            self.find_contigious_empty_recursively_low(curr_index * 2 + 1, order)
-        }
     }
 
     fn find_contigious_empty_recursively_high(&self, curr_index: u64, order: u64) -> Option<u64> {
