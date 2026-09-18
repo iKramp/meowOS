@@ -168,7 +168,7 @@ extern "C" fn handler(saved_regs_ptr: u64) -> ! {
     let saved_regs = unsafe { &mut *(saved_regs_ptr as *mut SyscallCpuState) };
 
     let mut locals = CpuLocals::get_mut();
-    unsafe { core::ptr::addr_of_mut!(locals.int_depth).write_volatile(1) };
+    locals.int_depth = 1;
     locals.page_fault_handle_mode = PageFaultHandleMode::KernelPanic;
     let curr_proc = locals
         .current_process
@@ -196,6 +196,7 @@ extern "C" fn handler(saved_regs_ptr: u64) -> ! {
         no_ret_context_switch();
     };
     let syscall_handler = syscall_namespace.get_syscall_handler(syscall_number as u32);
+    drop(syscall_namespace);
 
     if let Some(syscall_handler) = syscall_handler {
         syscall_handler(saved_regs, &curr_proc);

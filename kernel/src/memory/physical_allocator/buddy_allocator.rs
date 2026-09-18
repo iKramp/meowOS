@@ -32,35 +32,37 @@ pub(super) fn init(memory_regions: &mut [&mut limine::MemoryMapEntry]) {
     let entry_to_shrink = find_mem_region_to_shrink(memory_regions, space_needed_bytes);
 
     let tree_allocator = PhysAddr(memory_regions[entry_to_shrink].base);
-    let mut allocated_pages = 0;
     for i in 0..space_needed_bytes {
         //set all bits to 1 to set everything as used
         unsafe {
             set_at_addr(tree_allocator + PhysAddr(i), 0xFF_u8);
-            allocated_pages += 8;
         }
     }
+    let allocator_pages = space_needed_bytes.div_ceil(0x1000);
 
     //at least one page, space_needed is a multiple of that if bigger
-    let size_to_shrink = u64::max(0x1000, space_needed_bytes);
-    memory_regions[entry_to_shrink].base += size_to_shrink;
-    memory_regions[entry_to_shrink].length -= size_to_shrink;
+    memory_regions[entry_to_shrink].base += allocator_pages * 0x1000;
+    memory_regions[entry_to_shrink].length -= allocator_pages * 0x1000;
     let mut allocator = BuddyAllocator {
         n_pages,
         binary_tree_size: binary_tree_size_elements * 2,
-        allocated_pages,
+        allocated_pages: 0,
         tree_allocator: tree_allocator.into(),
     };
+
+    let mut n_allocatable_pages = 0;
     for entry in memory_regions {
         if !entry.is_usable() {
             continue;
         }
         for addr in (entry.base..(entry.base + entry.length)).step_by(0x1000) {
+            n_allocatable_pages += 1;
             let index = (addr >> 12) + (allocator.binary_tree_size / 2);
             allocator.set_at_index(index, false);
-            allocator.allocated_pages -= 1;
         }
     }
+    allocator.allocated_pages = 0;
+    allocator.n_pages = n_allocatable_pages;
     allocator.update_all();
     *lock_w_info!(BUDDY_ALLOCATOR) = allocator;
 }
@@ -117,7 +119,6 @@ impl BuddyAllocator {
         let index = self.find_empty_frame_high();
         self.mark_index(index, true);
         let address = (index - self.binary_tree_size / 2) * 4096;
-        debug_assert!(address <= self.n_pages * 4096, "address is out of bounds");
         PhysAddr(address)
     }
 
@@ -129,7 +130,6 @@ impl BuddyAllocator {
         let index = self.find_empty_frame_low();
         self.mark_index(index, true);
         let address = (index - self.binary_tree_size / 2) * 4096;
-        debug_assert!(address <= self.n_pages * 4096, "address is out of bounds");
         PhysAddr(address)
     }
 
