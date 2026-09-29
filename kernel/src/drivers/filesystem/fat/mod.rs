@@ -1,6 +1,12 @@
 use bitfield::bitfield;
 use core::{mem::MaybeUninit, slice};
-use std::{kerror, println, string::String, sync::arc::Arc, vec::Vec};
+use std::{
+    alloc::{borrow::ToOwned, string::ToString},
+    format, kerror, kerror_unwrapped, println,
+    string::String,
+    sync::arc::Arc,
+    vec::Vec,
+};
 
 use uuid::Uuid;
 
@@ -87,6 +93,19 @@ struct FatDirEntry {
     file_size: u32,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone)]
+struct FatLongDirEntry {
+    order: u8,
+    name1: [u8; 10],
+    attr: DirAttrs,
+    type_: u8,
+    checksum: u8,
+    name2: [u8; 12],
+    first_cluster_low: u16,
+    name3: [u8; 4],
+}
+
 impl FatDirEntry {
     fn is_used(&self) -> bool {
         self.dir_name[0] != 0x00 && self.dir_name[0] != 0xE5
@@ -98,6 +117,41 @@ impl FatDirEntry {
 
     fn has_long_name(&self) -> bool {
         self.dir_attr.read_only() && self.dir_attr.hidden() && self.dir_attr.system() && self.dir_attr.volume_id()
+    }
+
+    fn to_long_entry(&self) -> &FatLongDirEntry {
+        debug_assert!(self.has_long_name(), "to_long_entry called on non-long entry");
+        unsafe { &*(self as *const FatDirEntry as *const FatLongDirEntry) }
+    }
+}
+
+impl FatLongDirEntry {
+    fn get_name(&self) -> String {
+        let name1 = char::decode_utf16(
+            self.name1
+                .chunks(2)
+                .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+                .filter(|&c| c != 0xFFFF && c != 0x0000),
+        )
+        .map(|r| r.unwrap_or('\u{FFFD}'))
+        .collect::<String>();
+        let name2 = char::decode_utf16(
+            self.name2
+                .chunks(2)
+                .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+                .filter(|&c| c != 0xFFFF && c != 0x0000),
+        )
+        .map(|r| r.unwrap_or('\u{FFFD}'))
+        .collect::<String>();
+        let name3 = char::decode_utf16(
+            self.name3
+                .chunks(2)
+                .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+                .filter(|&c| c != 0xFFFF && c != 0x0000),
+        )
+        .map(|r| r.unwrap_or('\u{FFFD}'))
+        .collect::<String>();
+        format!("{}{}{}", name1, name2, name3)
     }
 }
 
@@ -256,6 +310,8 @@ impl FatDriver {
     async fn read_fat_entry(&self, entry_index: u32) -> u32 {
         let (sector, offset) = self.get_fat_entry_sec_offset(entry_index);
         let data = self.read_sector(sector).await;
+        //my allocator should handle this fine
+        debug_assert!(data.as_ptr() as usize % 4 == 0, "data pointer is not aligned to 4 bytes");
         let data_ptr = data.as_ptr() as *const u32;
         unsafe { data_ptr.byte_add(offset as usize).read() }
     }
@@ -264,7 +320,26 @@ impl FatDriver {
         entry_val >= 0x0FFFFFF8
     }
 
-    async fn read_file_sector(&self, sector: u32, file_cluster_start: u32) -> Option<Box<[u8; 512]>> {
+    async fn find_sector_cluster(&self, sector: u32, file_cluster_start: u32) -> Option<(u32, u32)> {
+        //(cluster, sector_in_cluster)
+        let nth_cluster = sector / self.header.BPB_SectorsPerCluster as u32;
+
+        //not the value of the cluster, but the index of the cluster in the chain
+        let mut curr_cluster = file_cluster_start;
+        for _ in 0..nth_cluster {
+            curr_cluster = self.read_fat_entry(curr_cluster).await;
+            if curr_cluster == 0 || Self::entry_is_final(curr_cluster) {
+                return None;
+            }
+            curr_cluster &= 0x0FFFFFFF; //mask to 28 bits, as per FAT32 spec
+        }
+
+        let sector_in_cluster = sector % self.header.BPB_SectorsPerCluster as u32;
+        Some((curr_cluster, sector_in_cluster))
+    }
+
+    async fn read_file_sector(&self, sector: u32, file_cluster_start: u32) -> Option<(Box<[u8; 512]>, u32)> {
+        //(data, cluster)
         let nth_cluster = sector / self.header.BPB_SectorsPerCluster as u32;
 
         //not the value of the cluster, but the index of the cluster in the chain
@@ -279,14 +354,16 @@ impl FatDriver {
 
         let sector_in_cluster = sector % self.header.BPB_SectorsPerCluster as u32;
         let cluster_start_sector = self.get_sector_from_cluster(curr_cluster);
-        Some(self.read_sector(cluster_start_sector + sector_in_cluster).await)
+        Some((self.read_sector(cluster_start_sector + sector_in_cluster).await, curr_cluster))
     }
 
-    async fn read_dir_internal(&self, inode_index: InodeIndex) -> Result<Box<[FatDirEntry]>, KernelError> {
+    async fn read_dir_internal(&self, inode_index: InodeIndex) -> Result<Box<[(FatDirEntry, Option<String>)]>, KernelError> {
         let mut sector_offset = 0;
         let mut buf = Vec::new();
+        let mut curr_long_name: Option<String> = None;
         loop {
-            let Some(data) = self.read_file_sector(sector_offset, inode_index as u32).await else {
+            //don't wanna deal with optimization
+            let Some((data, _cluster)) = self.read_file_sector(sector_offset, inode_index as u32).await else {
                 return Ok(buf.into_boxed_slice());
             };
             sector_offset += 1;
@@ -296,13 +373,26 @@ impl FatDriver {
             let entry_slice = unsafe { slice::from_raw_parts(src_ptr, len) };
             for entry in entry_slice.iter() {
                 if entry.has_long_name() {
-                    continue;
+                    let long_entry = entry.to_long_entry();
+                    let entry_name = long_entry.get_name();
+
+                    match &mut curr_long_name {
+                        Some(name) => {
+                            name.insert_str(0, &entry_name);
+                        }
+                        None => {
+                            curr_long_name = Some(entry_name.to_string());
+                        }
+                    }
                 }
-                if entry.is_used() {
-                    buf.push(entry.clone());
-                }
-                if !entry.has_entries_later() {
-                    return Ok(buf.into_boxed_slice());
+                if !entry.has_long_name() {
+                    if entry.is_used() {
+                        buf.push((entry.clone(), curr_long_name.take()));
+                    }
+                    curr_long_name = None; //reset just in case
+                    if !entry.has_entries_later() {
+                        return Ok(buf.into_boxed_slice());
+                    }
                 }
             }
         }
@@ -337,47 +427,73 @@ impl FileSystem for FatDriver {
         let size_sectors = size_bytes.div_ceil(512);
         let size_sectors = size_sectors.min(buffer.len() as u64 * 8);
 
-        println!(
-            "reading {} bytes ({} sectors) from inode {} at offset {}",
-            size_bytes, size_sectors, inode, offset_bytes
-        );
-
         let start_sector = offset_bytes / 512;
+        let sectors_per_cluster = self.header.BPB_SectorsPerCluster as u64;
 
-        for i in start_sector..(start_sector + size_sectors) {
-            let buffer_sector = i - start_sector;
+        // Find the cluster containing the first requested sector.
+        let (mut cluster_to_read, mut sector_in_cluster) = self
+            .find_sector_cluster(start_sector as u32, inode as u32)
+            .await
+            .ok_or(kerror_unwrapped!(InternalFSError))?;
 
-            let Some(data) = self.read_file_sector(i as u32, inode as u32).await else {
+        for buffer_sector in 0..size_sectors {
+            let Some(data) = self
+                .read_sector(self.get_sector_from_cluster(cluster_to_read) + sector_in_cluster)
+                .await
+                .into()
+            else {
                 return Ok(((buffer_sector * 512).min(size_bytes), FileReadResult::Invalid));
             };
+
             let buffer_phys = buffer[buffer_sector as usize / 8];
             let buffer_virt: VirtAddr = buffer_phys.into();
             let in_buffer_offset = (buffer_sector % 8) * 512;
             let ptr_dest = (buffer_virt + in_buffer_offset).0 as *mut u8;
-            let ptr_src = data.as_ptr();
+
             unsafe {
-                ptr_dest.copy_from(ptr_src, 512);
+                ptr_dest.copy_from(data.as_ptr(), 512);
+            }
+
+            sector_in_cluster += 1;
+
+            if sector_in_cluster == sectors_per_cluster as u32 {
+                sector_in_cluster = 0;
+
+                let next_cluster = self.read_fat_entry(cluster_to_read).await;
+
+                if next_cluster == 0 || Self::entry_is_final(next_cluster) {
+                    return Ok((((buffer_sector + 1) * 512).min(size_bytes), FileReadResult::Invalid));
+                }
+
+                cluster_to_read = next_cluster & 0x0FFFFFFF;
             }
         }
 
-        return Ok(((size_sectors * 512).min(size_bytes), FileReadResult::Invalid));
+        Ok(((size_sectors * 512).min(size_bytes), FileReadResult::Invalid))
     }
+
     async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {
         let entries = self.read_dir_internal(inode).await?;
         let vfs_entries: Vec<DirEntry> = entries
-            .iter()
-            .map(|entry| {
+            .into_iter()
+            .map(|(entry, long_name)| {
                 let entry_cluster = entry.first_cluster_low as u32 | ((entry.first_cluster_high as u32) << 16);
 
                 let base = unsafe { str::from_utf8_unchecked(&entry.dir_name[..8]).trim() };
                 let extension = unsafe { str::from_utf8_unchecked(&entry.dir_name[8..]).trim() };
-                let mut final_string = String::new();
-                final_string.push_str(base);
-                if !extension.is_empty() {
-                    final_string.push('.');
-                    final_string.push_str(extension);
-                }
-                final_string.make_ascii_lowercase();
+                let final_string = match long_name {
+                    Some(name) => name,
+                    None => {
+                        let mut final_string = String::new();
+                        final_string.push_str(base);
+                        if !extension.is_empty() {
+                            final_string.push('.');
+                            final_string.push_str(extension);
+                        }
+                        final_string.make_ascii_lowercase();
+                        final_string
+                    }
+                };
                 println!("returning entry {}", &final_string);
                 DirEntry {
                     inode: entry_cluster as u64,
@@ -423,7 +539,8 @@ impl FileSystem for FatDriver {
         println!("trying to find inode {}", inode);
         let Some(entry_to_find) = parent_entries
             .iter()
-            .find(|e| (e.first_cluster_low as u32 | ((e.first_cluster_high as u32) << 16)) == inode as u32)
+            .find(|(e, _long_name)| (e.first_cluster_low as u32 | ((e.first_cluster_high as u32) << 16)) == inode as u32)
+            .map(|(e, _long_name)| e)
         else {
             return kerror!(NoEntry);
         };

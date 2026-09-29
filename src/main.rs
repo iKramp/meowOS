@@ -1,4 +1,5 @@
 use std::{fs::File, path::Path, process::Stdio};
+mod make_fat_disk;
 
 #[allow(dead_code)]
 enum RunMode {
@@ -24,6 +25,8 @@ fn main() {
     let cores = 1;
     let net = false;
     let run_mode = RunMode::Tcg;
+
+    make_fat_disk::make_fat_disk();
 
     let mut cmd = std::process::Command::new("qemu-system-x86_64");
     //general config

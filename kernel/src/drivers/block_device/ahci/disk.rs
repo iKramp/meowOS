@@ -499,7 +499,7 @@ impl VirtualPort {
         cmd_header.SetCTBA(cmd_table_frame.0.0 as u128);
 
         unsafe {
-            let cmd_header_ptr = (self.command_list.0.0 as *mut CmdHeader).add(index as usize * 4);
+            let cmd_header_ptr = (self.command_list.0.0 as *mut CmdHeader).byte_add(index as usize * 4 * 8);
             cmd_header_ptr.write_volatile(cmd_header);
 
             let cmd_table_virt = VirtAddr::from(cmd_table_frame.0);
@@ -754,7 +754,6 @@ bitfield! {
     PRDTL, SetPRDTL: 31, 16;
     PRDBC, SetPRDBC: 63, 32;
     CTBA, SetCTBA: 127, 64;
-
 }
 
 struct PrdtDescriptor {

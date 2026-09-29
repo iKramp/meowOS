@@ -107,6 +107,14 @@ fn user_page_fault(
         return InterruptReturnType::Normal;
     }
 
+    //print details about the page fault
+    printlnc!(level:warn, (255, 255, 0), "User page fault at {:X}. error code: {:#X?}\nproc state: {:#X?}, rip: {:X?}",
+        page_fault_addr,
+        error_code,
+        proc_data,
+        proc_data.interrupt_frame.rip,
+    );
+
     kill_process(process.pid(), 0xDEAD);
     InterruptReturnType::ForceReschedule
 }
