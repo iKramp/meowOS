@@ -318,22 +318,3 @@ unsafe impl core::alloc::GlobalAlloc for HeapWrapper {
         lock_w_info!(self.heap).deallocate(VirtAddr(ptr as u64), layout.size() as u64);
     }
 }
-
-///WARNING this function only works for numbers <= 1024
-fn next_pow_2(mut num: u64) -> u64 {
-    let mut first_bit = 0;
-    let mut mask = 1_u64 << 9;
-    for i in 54..64 {
-        if num & mask != 0 {
-            first_bit = i;
-            break;
-        }
-        mask >>= 1;
-    }
-    let mask = u64::MAX >> (first_bit + 1);
-    if num & mask != 0 {
-        //needs rounding up
-        num = 1 << (63 - first_bit + 1);
-    }
-    num
-}
