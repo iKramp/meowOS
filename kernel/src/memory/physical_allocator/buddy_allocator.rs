@@ -200,14 +200,11 @@ impl BuddyAllocator {
     fn find_contigious_empty_recursively_high(&self, curr_index: u64, order: u64) -> Option<u64> {
         if curr_index >= self.binary_tree_size / (1 << (order + 1)) {
             //check all pages in this region
-            let start_index = curr_index * (1 << order);
-            let end_index = start_index + (1 << order);
-            for i in start_index..end_index {
-                if self.get_at_index(i) {
-                    return None;
-                }
+            if self.check_all_empty(curr_index) {
+                return Some(self.get_last_level_index(curr_index));
+            } else {
+                return None;
             }
-            return Some(start_index);
         }
         if !self.get_at_index(curr_index * 2 + 1) {
             let res = self.find_contigious_empty_recursively_high(curr_index * 2 + 1, order);
@@ -218,6 +215,20 @@ impl BuddyAllocator {
         } else {
             self.find_contigious_empty_recursively_high(curr_index * 2, order)
         }
+    }
+
+    fn check_all_empty(&self, node_index: u64) -> bool {
+        if node_index >= self.binary_tree_size / 2 {
+            return !self.get_at_index(node_index);
+        }
+        !self.get_at_index(node_index) && self.check_all_empty(node_index * 2) && self.check_all_empty(node_index * 2 + 1)
+    }
+
+    fn get_last_level_index(&self, mut node_index: u64) -> u64 {
+        while node_index < self.binary_tree_size / 2 {
+            node_index *= 2;
+        }
+        node_index
     }
 
     fn mark_addr(&self, addr: PhysAddr, allocated: bool) {
