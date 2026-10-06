@@ -16,7 +16,7 @@ use std::{
     sync::rw_lock::RWSpinlock, vec::Vec, w_lock_w_info,
 };
 
-use crate::interrupts::{InterruptProcessorState, handlers::apic_eoi};
+use crate::interrupts::{InterruptProcessorState, end_of_interrupt};
 
 mod bar;
 mod capabilities;

@@ -22,12 +22,6 @@ use crate::{
 
 pub static mut CPU_LOCALS: MaybeUninit<Box<[VirtAddr]>> = MaybeUninit::uninit();
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PageFaultHandleMode {
-    KernelPanic,
-    User,
-}
-
 #[repr(C)]
 pub struct CpuLocals {
     //keep this here
@@ -53,7 +47,6 @@ pub struct CpuLocals {
     pub proc_initialized: bool,
     pub atomic_context: bool,
     pub lock_info: LockInfo,
-    pub page_fault_handle_mode: PageFaultHandleMode,
     lock_addr: VirtAddr,
 
     pub scheduled_event_id_counter: u64,

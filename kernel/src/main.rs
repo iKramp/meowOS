@@ -19,6 +19,7 @@ use core::ffi;
 use std::{println, printlnc};
 
 mod acpi;
+mod arch;
 mod clocks;
 mod cmd_args;
 mod cpuid;

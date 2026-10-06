@@ -3,7 +3,6 @@ use crate::memory::addresses::*;
 use crate::{
     acpi::{LAPIC_REGISTERS, cpu_locals::CpuLocals},
     drivers::ps2,
-    interrupts::gdt::GlobalDescriptorTable,
     proc::context_switch,
     utils::byte_to_port,
 };

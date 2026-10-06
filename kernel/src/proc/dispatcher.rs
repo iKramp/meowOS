@@ -2,15 +2,12 @@ use core::time::Duration;
 use std::{boxed::Box, println};
 
 use crate::{
-    acpi::{
-        ScheduledEvent,
-        cpu_locals::{CpuLocals, PageFaultHandleMode},
-    },
-    interrupts::{InterruptProcessorState, disable_interrupts},
+    acpi::{ScheduledEvent, cpu_locals::CpuLocals},
+    interrupts::{disable_interrupts, return_interrupted},
     memory,
 };
 
-use super::{ProcessData, process_data::CpuStateType, syscall::SyscallCpuState};
+use super::{ProcessData, process_data::CpuStateType, syscall::return_syscalled};
 
 const MAX_PROC_TIME_SLICE: Duration = Duration::from_millis(100);
 
@@ -54,7 +51,6 @@ pub(super) fn dispatch(new_proc: &ProcessData) -> ! {
     println!("Dispatching process with state: {:x?}", cpu_state);
 
     locals.int_depth -= 1;
-    locals.page_fault_handle_mode = PageFaultHandleMode::User;
     locals.preemtion_id = Some(event_id);
     drop(locals);
 
@@ -67,66 +63,4 @@ pub(super) fn dispatch(new_proc: &ProcessData) -> ! {
         CpuStateType::Syscall(state) => return_syscalled(&state),
         CpuStateType::None => panic!("Process with no CPU state dispatched (currently running)"),
     }
-}
-
-fn return_interrupted(interrupt_frame: &InterruptProcessorState) -> ! {
-    //INFO: any kind of change here should be matched with the one in interrupts/macros.rs
-
-    //make rsp at least return frame size smaller than the start of a page
-    let interrupt_frame_addr: u64 = interrupt_frame as *const InterruptProcessorState as u64;
-    unsafe {
-        core::arch::asm!(
-            "mov rsp, {0}",
-            "mov r15, [rsp + 8 * 0]",
-            "mov r14, [rsp + 8 * 1]",
-            "mov r13, [rsp + 8 * 2]",
-            "mov r12, [rsp + 8 * 3]",
-            "mov r11, [rsp + 8 * 4]",
-            "mov r10, [rsp + 8 * 5]",
-            "mov r9,  [rsp + 8 * 6]",
-            "mov r8,  [rsp + 8 * 7]",
-            "mov rbp, [rsp + 8 * 8]",
-            "mov rdi, [rsp + 8 * 9]",
-            "mov rsi, [rsp + 8 * 10]",
-            "mov rdx, [rsp + 8 * 11]",
-            "mov rcx, [rsp + 8 * 12]",
-            "mov rbx, [rsp + 8 * 13]",
-            "mov rax, [rsp + 8 * 14]",
-            //rsp + 8 * 15 is error code
-            "add rsp, 8 * 16",
-
-            "swapgs", //restore gs for user code
-
-            "iretq",
-
-            in(reg) interrupt_frame_addr
-        );
-    }
-    unreachable!();
-}
-
-#[unsafe(naked)]
-extern "C" fn return_syscalled(cpu_state: &SyscallCpuState) -> ! {
-    //INFO: any kind of change here should be matched with the one in syscall.rs
-    core::arch::naked_asm!(
-        //cpu_state in rdi
-        "mov rcx, [rdi + 8 * 0]",
-        "mov rbp, [rdi + 8 * 1]",
-        "mov rsp, [rdi + 8 * 2]",
-        "mov r11, [rdi + 8 * 3]",
-        "mov rax, [rdi + 8 * 4]",
-        "mov rbx, [rdi + 8 * 5]",
-        "mov rdx, [rdi + 8 * 6]", //user rsp
-        "mov rsi,  [rdi + 8 * 8]",
-        "mov r8,  [rdi + 8 * 9]",
-        "mov r9, [rdi + 8 * 10]",
-        "mov r10, [rdi + 8 * 11]",
-        "mov r12, [rdi + 8 * 12]",
-        "mov r13, [rdi + 8 * 13]",
-        "mov r14, [rdi + 8 * 14]",
-        "mov r15, [rdi + 8 * 15]",
-        "mov rdi, [rdi + 8 * 7]",
-        "swapgs", //restore gs for user code
-        "sysretq",
-    )
 }

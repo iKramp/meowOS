@@ -1,6 +1,7 @@
 #[cfg(debug_assertions)]
 use crate::{
-    acpi::cpu_locals::{CpuLocals, PageFaultHandleMode},
+    acpi::cpu_locals::CpuLocals,
+    interrupts::general_interrupt_handler,
     proc::{StackCpuStateData, interrupt_context_switch, release_current_proc, save_cpu_state},
 };
 
@@ -15,7 +16,7 @@ macro_rules! handler {
 
         //Force type checking
         let _: extern "C" fn(
-            &mut $crate::interrupts::InterruptProcessorState,
+            &mut $crate::arch::x86_64::interrupts::InterruptProcessorState,
         ) -> $crate::interrupts::InterruptReturnType = $name;
 
         #[unsafe(naked)]
@@ -192,67 +193,6 @@ macro_rules! handler {
     };
 }
 
-pub extern "C" fn general_interrupt_handler(
-    proc_data: &mut InterruptProcessorState,                                          //rdi
-    atomic_int: u64,                                                                  //rsi
-    main_handler: extern "C" fn(&mut InterruptProcessorState) -> InterruptReturnType, //rdx
-) {
-    let mut locals = CpuLocals::get_mut();
-    let prev_atomic = locals.atomic_context;
-    locals.int_depth += 1;
-    locals.atomic_context |= atomic_int != 0;
-    let atomic_context = locals.atomic_context;
-    let prev_mode = locals.page_fault_handle_mode;
-    locals.page_fault_handle_mode = PageFaultHandleMode::KernelPanic;
-    drop(locals);
-
-    if !atomic_context {
-        enable_interrupts();
-    }
-
-    let return_type = main_handler(proc_data);
-
-    disable_interrupts();
-
-    //proc is depth 0, root int is depth 1
-
-    let mut locals = CpuLocals::get_mut();
-    let root_int = !(locals.int_depth > 1 || locals.atomic_context);
-
-    //for now we always reschedule if we're root int so ForceReschedule is not needed. Use if
-    //sometimes we want to return to proc instead of rescheduling
-
-    let reschedule = root_int; //use return_type == InterruptReturnType::ForceReschedule;
-    if reschedule {
-        if let Some(curr_proc) = locals.current_process.clone() {
-            //save current process state
-            save_cpu_state(&StackCpuStateData::Interrupt(proc_data), &curr_proc);
-            //can't hold locals through this call
-            drop(locals);
-            release_current_proc(&curr_proc);
-        } else {
-            drop(locals);
-        }
-
-        interrupt_context_switch();
-
-        if return_type == InterruptReturnType::ForceReschedule {
-            panic!("Process was killed during interrupt handling, but no reschedule was performed");
-        }
-
-        locals = CpuLocals::get_mut();
-    }
-
-    locals.int_depth -= 1;
-    locals.atomic_context = prev_atomic;
-    locals.page_fault_handle_mode = prev_mode;
-    drop(locals);
-
-    unsafe { CpuLocals::get_lock_info().assert_no_locks() };
-
-    core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
-}
-
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub struct InterruptProcessorState {
@@ -283,13 +223,6 @@ pub struct InterruptFrame {
     pub rflags: u64,
     pub rsp: u64,
     pub ss: u64,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InterruptReturnType {
-    Normal,
-    ForceReschedule, //if proc was killed
 }
 
 impl InterruptProcessorState {
