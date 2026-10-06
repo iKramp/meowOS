@@ -7,7 +7,8 @@ use std::{
 };
 
 use crate::{
-    memory::{self, PageTableEntry, VirtualMemoryRange, VirtualMemoryRangeCapacity, addresses::*, physical_allocator},
+    arch::{self, x86_64::memory::page_table_entry::PageTableEntry},
+    memory::{self, VirtualMemoryRange, VirtualMemoryRangeCapacity, addresses::*, physical_allocator},
     proc::namespaces::ProcNamespace,
 };
 
@@ -141,7 +142,7 @@ impl MemoryNamespace {
 
         *entry = PageTableEntry::new(range.node_addr(), true);
 
-        entry.set_no_execute(false);
+        entry.set_executable(true);
         entry.set_writeable(true);
         //restrictions apply at lower levels
 
@@ -195,12 +196,12 @@ impl MemoryNamespace {
 
         *table_entry = PageTableEntry(0);
 
-        let current_root = memory::current_root();
+        let current_root = arch::memory::current_root();
         if current_root == self.page_tree_root {
             // a single flush is enough, because it flushes all levels leading to this addr
             // This flushes the "root" too, which is now set to not present. For any address in
             // this range, the next access will load the root and find the entry not present
-            memory::flush_tlb(Some(range.map_address));
+            arch::memory::flush_tlb(Some(range.map_address));
         }
     }
 
@@ -276,7 +277,7 @@ impl MemoryNamespace {
             if entry.writeable() != range.permissions().write() {
                 panic!("page fault in userspace with mapped page, writeable mismatch");
             }
-            if !entry.no_execute() != range.permissions().execute() {
+            if entry.executable() != range.permissions().execute() {
                 panic!("page fault in userspace with mapped page, executable mismatch");
             }
 

@@ -13,7 +13,8 @@ use std::{
 };
 
 use crate::{
-    memory::{self, addresses::*, physical_allocator},
+    arch,
+    memory::{addresses::*, physical_allocator},
     proc::{context::builder::create_process_from_context, namespaces::*},
     vfs::{self, ResolvedPathBorrowed, file::OpenFlags},
 };
@@ -110,13 +111,13 @@ pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &s
 }
 
 pub fn switch_to_generic_mem_tree() {
-    memory::set_cr3(unsafe { GENERIC_PAGE_TREE });
+    arch::memory::set_page_tree_root(unsafe { GENERIC_PAGE_TREE });
 }
 
 //set this AFTER the process with pid 0
 pub fn set_proc_initialized() {
     unsafe {
-        GENERIC_PAGE_TREE = memory::current_root();
+        GENERIC_PAGE_TREE = arch::memory::current_root();
         PROC_INITIALIZED = true;
     }
 }

@@ -1,4 +1,4 @@
-use crate::memory::{addresses::get_at_addr, current_root};
+use crate::{arch, memory::addresses::get_at_addr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct VirtAddr(pub u64);
@@ -60,7 +60,7 @@ pub fn translate_virt_phys_addr(addr: VirtAddr, root_page_addr: Option<PhysAddr>
         return Some(addr - unsafe { HHDM_ADDR });
     }
 
-    let mut page_addr = root_page_addr.unwrap_or_else(current_root);
+    let mut page_addr = root_page_addr.unwrap_or_else(arch::memory::current_root);
     #[allow(clippy::unusual_byte_groupings)] //they are grouped by section masks
     let mut final_mask: u64 = 0b111111111_111111111_111111111_111111111_111111111111;
     let mask = 0b111_111_111_000;

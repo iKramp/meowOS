@@ -1,4 +1,5 @@
 use crate::{
+    arch::{self, memory::PAGING_LEVELS},
     interrupts::InterruptReturnType,
     memory::addresses::*,
     proc::{kill_process, namespaces::memory_namespace::MemoryNamespace},
@@ -63,8 +64,8 @@ fn fatal_page_fault(proc_data: &InterruptProcessorState, page_fault_addr: u64) -
         proc_data.interrupt_frame.rip,
     );
 
-    for level in (1..=4).rev() {
-        let entry = memory::get_page_table_entry_at_level(memory::current_root(), VirtAddr(page_fault_addr), level, false);
+    for level in (1..=PAGING_LEVELS).rev() {
+        let entry = memory::get_page_table_entry_at_level(arch::memory::current_root(), VirtAddr(page_fault_addr), level, false);
         if let Some(entry) = entry {
             printlnc!(level:error, (255, 0, 0), "Level {} entry: {:#X?}", level, entry);
         } else {

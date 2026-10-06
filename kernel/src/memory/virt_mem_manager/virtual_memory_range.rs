@@ -2,7 +2,10 @@ use bitfield::bitfield;
 use core::{ops::Range, sync::atomic::AtomicU32};
 use std::{error::KernelError, kerror, lock_w_info, sync::no_int_spinlock::NoIntSpinlock};
 
-use crate::memory::{self, addresses::*, physical_allocator, virt_mem_manager::page_table::PageTable};
+use crate::{
+    arch::x86_64::memory::page_table::PageTable,
+    memory::{self, addresses::*, physical_allocator},
+};
 
 #[derive(Debug, Clone, Copy)]
 pub enum VirtualMemoryRangeCapacity {

@@ -1,9 +1,10 @@
 use std::println;
 
 use crate::acpi::platform_info::PlatformInfo;
+use crate::arch::memory::flush_tlb;
 use crate::memory::addresses::*;
 
-use crate::memory::{self, LiminePat};
+use crate::memory::{self};
 
 pub fn init_ioapic(platform_info: &PlatformInfo) {
     unsafe {
@@ -11,7 +12,8 @@ pub fn init_ioapic(platform_info: &PlatformInfo) {
             let (virt_range, entry) =
                 memory::kernel_manual_map(OwnedPhysAddr(PhysAddr(io_apic_info.address.into())).into(), None);
             let virt_addr = virt_range.into_owned_virt_addr();
-            entry.set_pat(LiminePat::UC, virt_addr.0);
+            entry.set_caching_strategy(memory::MemoryCachingStrategy::Uncacheable);
+            flush_tlb(Some(virt_addr.0));
 
             let test = translate_virt_phys_addr(virt_addr.0, None);
             println!("test: {:#x?}", test);

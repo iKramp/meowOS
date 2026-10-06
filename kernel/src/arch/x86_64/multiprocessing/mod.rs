@@ -9,6 +9,7 @@ use crate::{
         smp::{send_cpu_locals, send_u64, wait_for_cpus},
     },
     arch::{
+        self,
         cpu_locals::ArchCpuLocals,
         interrupts::{
             self, LAPIC_REGISTERS,
@@ -17,7 +18,6 @@ use crate::{
         multiprocessing::ap_startup::ap_started_wait_loop,
     },
     memory::{
-        self,
         addresses::{PhysAddr, VirtAddr, translate_virt_phys_addr},
         stack::{KERNEL_STACK_SIZE_PAGES, prepare_kernel_stack},
     },
@@ -75,7 +75,7 @@ pub fn set_trampoline_values(trampoline_destination: *mut u8, trampoline_phys: P
         let gdt_ptr = interrupts::STATIC_GDT_PTR;
         let gdt_ptr = TablePointer {
             limit: gdt_ptr.limit,
-            base: translate_virt_phys_addr(VirtAddr(gdt_ptr.base), Some(memory::current_root()))
+            base: translate_virt_phys_addr(VirtAddr(gdt_ptr.base), Some(arch::memory::current_root()))
                 .expect("page of a static should be mapped")
                 .0,
         };

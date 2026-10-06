@@ -1,4 +1,7 @@
-use crate::memory::{addresses::*, kernel_map, physical_allocator};
+use crate::{
+    arch::memory::flush_tlb,
+    memory::{addresses::*, kernel_map, physical_allocator},
+};
 use core::mem::MaybeUninit;
 use std::println;
 
@@ -7,7 +10,7 @@ use reg_map::RegMap;
 
 use crate::{
     acpi,
-    memory::{self, LiminePat},
+    memory::{self},
 };
 
 use super::Timer;
@@ -38,7 +41,8 @@ impl HpetWrapper {
         let mut owned_virt_addr = virt_range.into_owned_virt_addr();
         let virt_addr = owned_virt_addr.0;
 
-        entry.set_pat(LiminePat::UC, virt_addr);
+        entry.set_caching_strategy(memory::MemoryCachingStrategy::Uncacheable);
+        flush_tlb(Some(virt_addr));
 
         core::mem::swap(&mut self.allocated_page, &mut owned_virt_addr);
         core::mem::forget(owned_virt_addr); //uninitialized
@@ -59,25 +63,6 @@ impl HpetWrapper {
         self_regs.general_configuration().write(gen_conf);
         true
     }
-
-    // let self_regs = unsafe { self.registers.assume_init_ref() };
-    // let timer_conf = self_regs.timer_0();
-    // timer_conf.cmp_value().write(self.cmp_value);
-    // let mut conf_reg = timer_conf.conf_and_cap().read();
-    // if !conf_reg.periodic_capable() {
-    //     return false;
-    // }
-    // conf_reg.set_int_type(false); //edge triggered
-    // conf_reg.set_int_enable(true); //enable interrupts
-    // conf_reg.set_type(true); //periodic
-    // const IO_APIC_ROUTE: u8 = TIMER_INTERRUPT_VECTOR as u8 - 32;
-    // conf_reg.set_int_route(IO_APIC_ROUTE as u64); //route to IO APIC
-    // timer_conf.conf_and_cap().write(conf_reg);
-    //
-    // let mut gen_conf = self_regs.general_configuration().read();
-    // gen_conf.set_enabled(true);
-    // self_regs.general_configuration().write(gen_conf);
-    // true
 
     fn get_main_counter(&self) -> u64 {
         let self_regs = unsafe { self.registers.assume_init_ref() };

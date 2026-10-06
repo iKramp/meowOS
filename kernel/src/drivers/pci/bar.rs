@@ -1,4 +1,7 @@
-use crate::memory::addresses::*;
+use crate::{
+    arch::memory::flush_tlb,
+    memory::{MemoryCachingStrategy, addresses::*},
+};
 use std::{sync::once_lock::OnceLock, vec::Vec};
 
 use crate::memory;
@@ -151,11 +154,13 @@ impl MemoryBar {
         let (virt_range, _entry) = unsafe { memory::kernel_manual_map(phys_range, None) };
         for i in 0..pages {
             let page_entry = memory::get_page_table_entry(virt_range.0.start + i * 0x1000, None).expect("just allocated");
-            if prefetchable {
-                page_entry.set_pat(memory::LiminePat::WT, virt_range.0.start + i * 0x1000);
+            let caching = if prefetchable {
+                MemoryCachingStrategy::WriteThrough
             } else {
-                page_entry.set_pat(memory::LiminePat::UC, virt_range.0.start + i * 0x1000);
-            }
+                MemoryCachingStrategy::Uncacheable
+            };
+            page_entry.set_caching_strategy(caching);
+            flush_tlb(Some(virt_range.0.start + i * 0x1000));
         }
         virt_range
     }

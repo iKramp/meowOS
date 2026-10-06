@@ -16,7 +16,7 @@ use std::{
 
 use crate::{
     acpi::cpu_locals::CpuLocals,
-    memory,
+    arch,
     proc::{self, Pid, ProcessData},
 };
 
@@ -279,7 +279,7 @@ fn process_single_task(task: AsyncTaskWrapper<'static>) {
 fn switch_mem_tree<'a>(old_proc: &mut Option<&'a Arc<ProcessData>>, new_proc: Option<&'a Arc<ProcessData>>) {
     if let Some(new) = new_proc {
         let addr = new.get().page_tree();
-        memory::set_cr3(addr);
+        arch::memory::set_page_tree_root(addr);
     } else {
         proc::switch_to_generic_mem_tree();
     }

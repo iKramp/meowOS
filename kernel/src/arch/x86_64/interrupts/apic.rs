@@ -5,6 +5,7 @@ use crate::arch::interrupts::handlers::{
     apic_error, apic_keyboard_interrupt, fpu_interrupt, other_apic_interrupt, primary_ata_hard_disk, ps2_mouse_interrupt,
 };
 use crate::arch::interrupts::idt::{Entry, IDT};
+use crate::arch::memory::flush_tlb;
 use crate::memory;
 use crate::memory::addresses::*;
 use core::mem::MaybeUninit;
@@ -12,7 +13,7 @@ use core::mem::MaybeUninit;
 use reg_map::RegMap;
 use unroll::unroll_for_loops;
 
-use crate::{handler, memory::LiminePat, println};
+use crate::{handler, println};
 
 use super::lapic_timer::{activate_timer, setup_timer_ap};
 
@@ -109,7 +110,8 @@ fn map_lapic_registers(lapic_address: PhysAddr) {
         let owned_phys_addr = OwnedPhysAddr(lapic_address);
         let (virt_range, entry) = memory::kernel_manual_map(owned_phys_addr.into(), None);
         let virt_addr = virt_range.into_owned_virt_addr();
-        entry.set_pat(LiminePat::UC, virt_addr.0);
+        entry.set_caching_strategy(memory::MemoryCachingStrategy::Uncacheable);
+        flush_tlb(Some(virt_addr.0));
 
         let lapic_ref = &mut *(virt_addr.0.0 as *mut LapicRegisters);
         LAPIC_REGISTERS = MaybeUninit::new(LapicRegistersPtr::from_mut(lapic_ref));

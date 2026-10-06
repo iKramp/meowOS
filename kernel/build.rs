@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 const X86_TRAMPOLINE_ASM: &str = "src/arch/x86_64/multiprocessing/trampoline.asm";
+const X86_PROBE_ASM: &str = "src/arch/x86_64/memory/probe.asm";
 
 fn main() {
     let target = std::env::var("TARGET").expect("TARGET variable not set");
@@ -10,7 +11,7 @@ fn main() {
 
     if target.contains("x86_64") {
         println!("cargo:rerun-if-changed={}", X86_TRAMPOLINE_ASM);
-        println!("cargo:rerun-if-changed=src/memory/probe.asm");
+        println!("cargo:rerun-if-changed={}", X86_PROBE_ASM);
     } else {
         panic!("Unsupported target architecture: {}", target);
     }
@@ -36,7 +37,7 @@ fn main() {
     }
 
     if !(Command::new("nasm")
-        .args(["-f", "elf64", "src/memory/probe.asm", "-o", &(out_dir.clone() + "/probe.o")])
+        .args(["-f", "elf64", X86_PROBE_ASM, "-o", &(out_dir.clone() + "/probe.o")])
         .status()
         .expect("Failed to run nasm on probe.asm")
         .success()

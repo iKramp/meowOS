@@ -3,9 +3,9 @@ use std::{boxed::Box, println};
 
 use crate::{
     acpi::cpu_locals::CpuLocals,
+    arch,
     clocks::{ScheduledEvent, schedule_event},
     interrupts::{disable_interrupts, return_interrupted},
-    memory,
 };
 
 use super::{ProcessData, process_data::CpuStateType, syscall::return_syscalled};
@@ -36,7 +36,7 @@ pub(super) fn dispatch(new_proc: &ProcessData) -> ! {
 
     //change page tree
     let new_page_tree = new_proc.page_tree();
-    memory::set_cr3(new_page_tree);
+    arch::memory::set_page_tree_root(new_page_tree);
 
     //schedule preemption
     let scheduled_event = ScheduledEvent {

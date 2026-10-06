@@ -1,10 +1,13 @@
 use core::fmt::Display;
 use std::{println, string::String};
 
-use crate::memory::{self, LiminePat, addresses::*, virt_mem_manager::PageTable};
+use crate::{
+    arch::x86_64::memory::current_root,
+    memory::{MemoryCachingStrategy, addresses::*, virt_mem_manager::PageTable},
+};
 
 pub(in crate::memory) fn print_mem_mapping() {
-    let top_level_table_phys = memory::current_root();
+    let top_level_table_phys = current_root();
     let top_level_table = unsafe { get_at_addr(top_level_table_phys) };
     if let Some(range) = print_range(top_level_table, None, 4, VirtAddr(0)) {
         println!("{range}");
@@ -23,7 +26,7 @@ fn print_range(
     );
     println!("table addr: {:016x?}", table as *const PageTable as u64);
 
-    for entry in &table.entries {
+    for entry in table.entries() {
         if !entry.present() {
             if let Some(range) = &current_range {
                 println!("{range}");
@@ -35,9 +38,9 @@ fn print_range(
         if level == 1 || entry.huge_page() {
             #[allow(clippy::collapsible_if)] //is clearer
             if let Some(curr_range) = current_range.clone() {
-                if curr_range.pat != entry.pat()
+                if curr_range.pat != entry.caching_strategy()
                     || curr_range.write != entry.writeable()
-                    || curr_range.execute == entry.no_execute()
+                    || curr_range.execute == entry.executable()
                     || (curr_range.phys.0 + curr_range.len != entry.address().0
                         && curr_range.phys.0 - 0x1000 != entry.address().0)
                 {
@@ -58,9 +61,9 @@ fn print_range(
                     virt: self_virt_addr,
                     len: 1 << (3 + level * 9),
                     phys: entry.address(),
-                    pat: entry.pat(),
+                    pat: entry.caching_strategy(),
                     write: entry.writeable(),
-                    execute: !entry.no_execute(),
+                    execute: entry.executable(),
                     user: entry.user_accessible(),
                 };
                 current_range = Some(new_range);
@@ -80,7 +83,7 @@ struct MapRange {
     pub virt: VirtAddr,
     pub phys: PhysAddr,
     pub len: u64,
-    pub pat: LiminePat,
+    pub pat: MemoryCachingStrategy,
     pub write: bool,
     pub execute: bool,
     pub user: bool,

@@ -1,10 +1,10 @@
+use crate::arch;
 use crate::interrupts::InterruptProcessorState;
 use crate::memory::VirtualMemoryRange;
 use crate::memory::VirtualMemoryRangeGrowDirection;
 use crate::memory::VirtualMemoryRangeManagementMode;
 use crate::memory::VirtualMemoryRangePermissions;
 use crate::memory::addresses::VirtAddr;
-use crate::memory::current_root;
 use crate::proc::MemoryRangeType;
 use crate::proc::PROCESS_ID_COUNTER;
 use crate::proc::ProcNamespace;
@@ -130,7 +130,7 @@ pub fn build_initialized_memory_namespace(
         perms.set_write(region.flags().is_writeable());
         perms.set_execute(region.flags().is_executable());
 
-        memory::set_prot(current_root(), start..end, perms, 4, VirtAddr(0));
+        memory::set_prot(arch::memory::current_root(), start..end, perms, 4, VirtAddr(0));
     }
 
     Ok(mem_namespace)
@@ -139,18 +139,18 @@ pub fn build_initialized_memory_namespace(
 pub fn build_mem_namespace_for_new_proc(context: &ContextInfo) -> Result<MemoryNamespace, KernelError> {
     let mem_namespace = build_empty_memory_namespace();
 
-    let current_root = memory::current_root();
-    memory::set_cr3(mem_namespace.page_tree_root());
+    let current_root = arch::memory::current_root();
+    arch::memory::set_page_tree_root(mem_namespace.page_tree_root());
 
     let mut mem_namespace = build_initialized_memory_namespace(context, mem_namespace)?;
     let stack_size_pages = DEFAULT_PROC_STACK_SIZE.div_ceil(0x1000) as u8; // convert to pages
 
     //add stack
     if let Err(e) = add_stack(&mut mem_namespace, stack_size_pages) {
-        memory::set_cr3(current_root);
+        arch::memory::set_page_tree_root(current_root);
         return Err(e);
     }
-    memory::set_cr3(current_root);
+    arch::memory::set_page_tree_root(current_root);
     Ok(mem_namespace)
 }
 
@@ -188,7 +188,7 @@ pub fn build_empty_memory_namespace() -> MemoryNamespace {
     let namespace = MemoryNamespace::create_empty(crate::proc::get_namespace_id()).expect("failed to create memory namespace");
 
     let new_page_tree_root = namespace.page_tree_root();
-    let existing_page_tree_root = memory::current_root();
+    let existing_page_tree_root = arch::memory::current_root();
     memory::copy_higher_half(existing_page_tree_root, new_page_tree_root);
 
     namespace

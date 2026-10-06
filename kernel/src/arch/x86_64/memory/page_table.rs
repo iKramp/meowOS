@@ -1,15 +1,11 @@
 use core::{mem::MaybeUninit, ops::Range};
 use std::{println, vec::Vec};
 
-use crate::memory::{
-    VirtualMemoryRangePermissions,
-    addresses::*,
-    physical_allocator,
-    virt_mem_manager::{flush_tlb, page_table_entry::PageTableEntry},
-};
+use super::{flush_tlb, page_table_entry::PageTableEntry};
+use crate::memory::{VirtualMemoryRangePermissions, addresses::*, physical_allocator};
 
 #[repr(C)]
-pub(super) struct PageTable {
+pub struct PageTable {
     pub(super) entries: [PageTableEntry; 512],
 }
 
@@ -21,6 +17,12 @@ impl PageTable {
     pub fn clear(&mut self) {
         let default_entry = PageTableEntry::blank();
         self.entries = [default_entry; 512];
+    }
+
+    pub fn new_empty() -> PageTable {
+        PageTable {
+            entries: [PageTableEntry::blank(); 512],
+        }
     }
 
     ///Deallocates the physical memory taken up by the page tree
@@ -60,6 +62,14 @@ impl PageTable {
         }
 
         drop(OwnedPhysAddr(self_phys));
+    }
+
+    pub fn entries(&self) -> impl Iterator<Item = &PageTableEntry> {
+        self.entries.iter()
+    }
+
+    pub fn entries_mut(&mut self) -> impl Iterator<Item = &mut PageTableEntry> {
+        self.entries.iter_mut()
     }
 
     /// Intended to be used for MMIO, or physical ram in very rare cases.
