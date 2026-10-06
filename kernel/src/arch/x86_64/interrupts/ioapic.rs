@@ -1,8 +1,8 @@
 use std::println;
 
+use crate::acpi::platform_info::PlatformInfo;
 use crate::memory::addresses::*;
 
-use super::platform_info::PlatformInfo;
 use crate::memory::{self, LiminePat};
 
 pub fn init_ioapic(platform_info: &PlatformInfo) {

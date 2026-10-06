@@ -1,26 +1,22 @@
 mod aml;
-mod apic;
 mod fadt;
 mod hpet;
-mod ioapic;
-mod lapic_timer;
-mod madt;
+pub mod madt;
 mod mcfg;
-mod platform_info;
+pub mod platform_info;
 mod rsdp;
 mod rsdt;
 mod sdt;
-mod smp;
+pub mod smp;
 
 use std::collections::btree_map::BTreeMap;
 
-pub use apic::LAPIC_REGISTERS;
 use fadt::Fadt;
 pub use hpet::HpetTable;
-pub use lapic_timer::{ScheduledEvent, cancel_scheduled_event, schedule_event};
 use madt::Madt;
 pub use mcfg::{BaseAddressAllocation, McfgTable};
 use platform_info::PlatformInfo;
+pub use platform_info::Processor;
 pub use smp::ap_startup::ap_startup;
 pub use smp::cpu_locals;
 
@@ -74,6 +70,7 @@ pub fn read_tables() {
 
 pub fn init_acpi() {
     let fadt = get_table::<Fadt>("FACP").expect("fadt should be present");
+    //on platforms with acpi. require their interrupt controllers to be compatible
     let madt = get_table::<Madt>("APIC").expect("madt should be present");
 
     let entries = madt.get_madt_entries();
@@ -86,8 +83,11 @@ pub fn init_acpi() {
     let platform_info = get_platform_info();
     cpu_locals::init(platform_info);
 
-    apic::enable_apic(platform_info, platform_info.boot_processor.processor_id);
-    ioapic::init_ioapic(platform_info);
+    #[cfg(target_arch = "x86_64")]
+    {
+        crate::arch::interrupts::enable_apic(platform_info, platform_info.boot_processor.processor_id);
+        crate::arch::interrupts::init_ioapic(platform_info);
+    }
 
     smp::wake_cpus(platform_info);
     printlnc!(level:info, (0, 255, 0), "ACPI initialized and APs started");
@@ -117,7 +117,8 @@ pub fn init_acpi_ap(processor_id: u8) {
         let Some(platform_info) = &PLATFORM_INFO else {
             panic!("should be impossible, acpi tables are not loaded but APs were initialized");
         };
-        apic::enable_apic(platform_info, processor_id);
+        #[cfg(target_arch = "x86_64")]
+        crate::arch::interrupts::enable_apic(platform_info, processor_id);
     }
 
     cpu_init_common();

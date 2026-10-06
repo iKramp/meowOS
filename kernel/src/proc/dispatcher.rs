@@ -2,7 +2,8 @@ use core::time::Duration;
 use std::{boxed::Box, println};
 
 use crate::{
-    acpi::{ScheduledEvent, cpu_locals::CpuLocals},
+    acpi::cpu_locals::CpuLocals,
+    clocks::{ScheduledEvent, schedule_event},
     interrupts::{disable_interrupts, return_interrupted},
     memory,
 };
@@ -42,7 +43,7 @@ pub(super) fn dispatch(new_proc: &ProcessData) -> ! {
         time: std::time::Instant::now() + MAX_PROC_TIME_SLICE,
         callback: Box::new(preemtion_callback),
     };
-    let event_id = crate::acpi::schedule_event(scheduled_event);
+    let event_id = schedule_event(scheduled_event);
 
     disable_interrupts();
 

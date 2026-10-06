@@ -1,10 +1,14 @@
-#[cfg(target_arch = "x86_64")]
-use crate::arch::x86_64::interrupts as arch_interrupts;
+use crate::acpi::cpu_locals::CpuLocals;
+use crate::arch::interrupts as arch_interrupts;
+use crate::proc::StackCpuStateData;
+use crate::proc::interrupt_context_switch;
+use crate::proc::release_current_proc;
+use crate::proc::save_cpu_state;
 
 pub use arch_interrupts::InterruptProcessorState;
 pub use arch_interrupts::return_interrupted;
 
-type InterruptHandler = extern "C" fn(&mut InterruptProcessorState) -> InterruptReturnType;
+pub type InterruptHandler = extern "C" fn(&mut InterruptProcessorState) -> InterruptReturnType;
 
 #[inline(always)]
 pub fn enable_interrupts() {
@@ -25,7 +29,7 @@ pub fn end_of_interrupt() {
     arch_interrupts::end_of_interrupt();
 }
 
-pub fn register_interrupt_handler(handler: InterruptHandler, interrupt_index: u64) {
+pub fn register_interrupt_handler(handler: extern "C" fn() -> !, interrupt_index: u64) {
     arch_interrupts::register_interrupt_handler(handler, interrupt_index);
 }
 

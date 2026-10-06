@@ -1,7 +1,7 @@
 use core::mem::MaybeUninit;
 use std::{
     boxed::Box,
-    local_lock_read_w_info, local_lock_write_w_info, println,
+    local_lock_read_w_info, local_lock_write_w_info,
     sync::{
         arc::Arc,
         local_lock::{LocalLock, LocalLockReadGuard, LocalLockWriteGuard},
@@ -10,15 +10,13 @@ use std::{
     vec::Vec,
 };
 
-use crate::memory::addresses::*;
-
 use crate::{
-    acpi::{lapic_timer::AcceptedScheduledEvent, platform_info::PlatformInfo},
-    interrupts::{self, idt::TablePointer},
-    memory::stack::{KERNEL_STACK_SIZE_PAGES, prepare_kernel_stack},
-    proc::ProcessData,
-    task_runner::AsyncTaskData,
+    arch::cpu_locals::{ArchCpuLocals, init_dummy_cpu_local},
+    clocks::AcceptedScheduledEvent,
+    memory::addresses::*,
 };
+
+use crate::{acpi::platform_info::PlatformInfo, proc::ProcessData, task_runner::AsyncTaskData};
 
 pub static mut CPU_LOCALS: MaybeUninit<Box<[VirtAddr]>> = MaybeUninit::uninit();
 
@@ -31,8 +29,6 @@ pub struct CpuLocals {
     //keep this here for syscall reasons
     pub userspace_stack_base: u64,
     pub stack_size_pages: u64,
-    /// Points to TablePointer with base and limit of GDT
-    pub gdt_ptr: TablePointer,
 
     pub current_process: Option<Arc<ProcessData>>,
     //id of scheduled event for preemtion, used to cancel preemption
@@ -51,6 +47,7 @@ pub struct CpuLocals {
 
     pub scheduled_event_id_counter: u64,
     pub scheduled_events: Vec<AcceptedScheduledEvent>,
+    pub arch_specific: ArchCpuLocals,
 }
 
 pub fn init(platform_info: &PlatformInfo) {
@@ -84,11 +81,7 @@ pub fn init_dummy_cpu_locals() {
     vec.resize(1, VirtAddr(0));
     unsafe { CPU_LOCALS = MaybeUninit::new(vec.into_boxed_slice()) }
 
-    let bsp_stack_ptr = prepare_kernel_stack(KERNEL_STACK_SIZE_PAGES);
-    println!(level:info, "BSP stack ptr: {:016X}, size: {:X}", bsp_stack_ptr.0, KERNEL_STACK_SIZE_PAGES as u64 * 4096);
-    let bsp_gdt = interrupts::create_new_gdt(bsp_stack_ptr);
-    interrupts::load_gdt(bsp_gdt);
-    let bsp_local = CpuLocals::new(bsp_stack_ptr, KERNEL_STACK_SIZE_PAGES as u64, 0, 0, bsp_gdt);
+    let bsp_local = init_dummy_cpu_local();
     let bsp_local_ptr = add_cpu_locals(bsp_local);
     crate::msr::set_msr(0xC0000101, bsp_local_ptr.0);
 
@@ -118,13 +111,18 @@ pub fn add_cpu_locals(locals: CpuLocals) -> VirtAddr {
 }
 
 impl CpuLocals {
-    pub fn new(kernel_stack_base: VirtAddr, stack_size_pages: u64, apic_id: u8, processor_id: u8, gdt_ptr: TablePointer) -> Self {
+    pub fn new(
+        kernel_stack_base: VirtAddr,
+        stack_size_pages: u64,
+        apic_id: u8,
+        processor_id: u8,
+        arch_specific: ArchCpuLocals,
+    ) -> Self {
         Self {
             self_addr: VirtAddr(0), //will be set later
             kernel_stack_base,
             userspace_stack_base: 0,
             stack_size_pages,
-            gdt_ptr,
 
             current_process: None,
             preemtion_id: None,
@@ -138,10 +136,10 @@ impl CpuLocals {
             proc_initialized: false,
             atomic_context: false,
             lock_info: LockInfo::new(),
-            page_fault_handle_mode: PageFaultHandleMode::KernelPanic,
             lock_addr: VirtAddr(0),
             scheduled_event_id_counter: 0,
             scheduled_events: Vec::new(),
+            arch_specific,
         }
     }
 

@@ -1,23 +1,16 @@
-#[cfg(debug_assertions)]
-use crate::{
-    acpi::cpu_locals::CpuLocals,
-    interrupts::general_interrupt_handler,
-    proc::{StackCpuStateData, interrupt_context_switch, release_current_proc, save_cpu_state},
-};
-
-use super::{disable_interrupts, enable_interrupts};
-
 #[macro_export]
 macro_rules! handler {
     (
         $name:ident $(, $flag:ident )* $(,)?
     ) => {{
         use $crate::interrupts::general_interrupt_handler;
+        use $crate::arch::interrupts::InterruptProcessorState;
+        use $crate::interrupts::InterruptReturnType;
 
         //Force type checking
         let _: extern "C" fn(
-            &mut $crate::arch::x86_64::interrupts::InterruptProcessorState,
-        ) -> $crate::interrupts::InterruptReturnType = $name;
+            &mut InterruptProcessorState,
+        ) -> InterruptReturnType = $name;
 
         #[unsafe(naked)]
         extern "C" fn wrapper() -> ! {

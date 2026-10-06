@@ -1,4 +1,16 @@
-fn init_pic() {
+use crate::utils::byte_to_port;
+
+const PIC1: u16 = 0x20;
+const PIC2: u16 = 0xA0; /* IO base address for slave PIC */
+const PIC1_COMMAND: u16 = PIC1;
+const PIC1_DATA: u16 = PIC1 + 1;
+const PIC2_COMMAND: u16 = PIC2;
+const PIC2_DATA: u16 = PIC2 + 1;
+
+pub static mut APIC_TIMER_INIT: bool = false;
+pub const PIC_TIMER_ORIGINAL_FREQ: u32 = 1_193_182;
+
+pub(super) fn init_pic() {
     byte_to_port(PIC1_COMMAND, 0x11);
     byte_to_port(PIC2_COMMAND, 0x11);
 
@@ -25,7 +37,7 @@ fn disable_pic_keep_timer() {
     byte_to_port(PIC2_DATA - 1, 0x20);
 }
 
-fn disable_pic_completely() {
+pub(in crate::arch::x86_64) fn disable_pic_completely() {
     byte_to_port(PIC1_DATA, 0xFF); //mask interrupts
     byte_to_port(PIC2_DATA, 0xFF);
 
@@ -50,7 +62,7 @@ fn disable_timer() {
 }
 
 ///Max 50 miliseconds
-pub fn set_pit_timeout(timeout_nanoseconds: u32) {
+pub(in crate::arch::x86_64) fn set_pit_timeout(timeout_nanoseconds: u32) {
     let divisor = PIC_TIMER_ORIGINAL_FREQ as u64 * timeout_nanoseconds as u64 / 1_000_000_000;
     let divisor_low = (divisor & 0xFF) as u8;
     let divisor_high = ((divisor >> 8) & 0xFF) as u8;

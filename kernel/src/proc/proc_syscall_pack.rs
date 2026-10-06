@@ -1,7 +1,7 @@
 use std::{boxed::Box, error::KernelError, lock_w_info, string::ToString, sync::arc::Arc};
 
 use crate::{
-    acpi::{ScheduledEvent, schedule_event},
+    clocks::{ScheduledEvent, schedule_event},
     interrupts::InterruptProcessorState,
     memory::safe_memcpy_from_user,
     proc::{

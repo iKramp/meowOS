@@ -1,22 +1,30 @@
+mod apic;
 mod gdt;
-mod pic;
+mod ioapic;
+mod lapic_timer;
+mod macros;
+mod page_fault;
+pub(in crate::arch::x86_64) mod pic;
+
 use core::sync::atomic::Ordering;
 use std::{println, printlnc};
 #[macro_use]
-pub mod handlers;
-pub mod idt;
-mod macros;
-mod page_fault;
+pub(in crate::arch::x86_64) mod handlers;
+pub(in crate::arch::x86_64) mod idt;
+pub(in crate::arch::x86_64) use apic::LAPIC_REGISTERS;
+pub use apic::enable_apic;
+pub(super) use gdt::{STATIC_GDT_PTR, create_new_gdt, load_gdt};
+pub use ioapic::init_ioapic;
 pub use macros::InterruptProcessorState;
+pub(in crate::arch::x86_64) use pic::disable_pic_completely;
 
-use crate::arch::x86_64::interrupts::handlers::apic_eoi;
-
-const PIC1: u16 = 0x20;
-const PIC2: u16 = 0xA0; /* IO base address for slave PIC */
-const PIC1_COMMAND: u16 = PIC1;
-const PIC1_DATA: u16 = PIC1 + 1;
-const PIC2_COMMAND: u16 = PIC2;
-const PIC2_DATA: u16 = PIC2 + 1;
+use crate::arch::{
+    interrupts::{
+        idt::{Entry, IDT},
+        pic::init_pic,
+    },
+    x86_64::interrupts::handlers::apic_eoi,
+};
 
 #[inline(always)]
 pub fn enable_interrupts() {
@@ -46,7 +54,9 @@ pub fn end_of_interrupt() {
     apic_eoi();
 }
 
-pub fn register_interrupt_handler(handler: InterruptHandler, interrupt_index: u64) {}
+pub fn register_interrupt_handler(handler: extern "C" fn() -> !, interrupt_index: u64) {
+    unsafe { IDT.set(Entry::new(handler), interrupt_index as usize) };
+}
 
 pub fn assert_interrupts_state(expected_enabled: bool) {
     let rflags: u64;
@@ -76,10 +86,6 @@ pub fn init_interrupts() {
     idt::init_idt();
     printlnc!(level:info, (0, 255, 0), "interrupts initialized");
 }
-
-pub static mut APIC_TIMER_INIT: bool = false;
-pub const TIMER_DESIRED_FREQUENCY: u32 = 1; //don't need much lmao
-pub const PIC_TIMER_ORIGINAL_FREQ: u32 = 1_193_182;
 
 pub fn return_interrupted(interrupt_frame: &InterruptProcessorState) -> ! {
     //make rsp at least return frame size smaller than the start of a page

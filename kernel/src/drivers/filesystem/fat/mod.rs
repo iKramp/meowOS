@@ -1,12 +1,6 @@
 use bitfield::bitfield;
 use core::{mem::MaybeUninit, slice};
-use std::{
-    alloc::{borrow::ToOwned, string::ToString},
-    format, kerror, kerror_unwrapped, println,
-    string::String,
-    sync::arc::Arc,
-    vec::Vec,
-};
+use std::{alloc::string::ToString, format, kerror, kerror_unwrapped, println, string::String, sync::arc::Arc, vec::Vec};
 
 use uuid::Uuid;
 

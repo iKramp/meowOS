@@ -1,4 +1,6 @@
-use crate::arch::x86_64::syscall as arch_syscall;
+use crate::arch::syscall as arch_syscall;
+use crate::arch::syscall::syscall_entry;
+use crate::clocks::cancel_scheduled_event;
 pub use arch_syscall::SyscallCpuState;
 pub use arch_syscall::return_syscalled;
 use std::{boxed::Box, println, string::String};
@@ -9,7 +11,7 @@ use super::{
     scheduler::{release_current_proc, save_cpu_state},
 };
 use crate::{
-    acpi::{self, cpu_locals::CpuLocals},
+    acpi::cpu_locals::CpuLocals,
     interrupts::enable_interrupts,
     memory, msr,
     proc::{self, SyscallNamespace, syscall::legacy_syscall_pack::init_legacy_syscalls},
@@ -33,7 +35,7 @@ pub(super) fn init() {
     let syscall_cs_ss: u16 = 0x8;
     let sysret_cs_ss: u16 = 0x10 | 0x3;
     let syscall_eip: u64 = 0; //unused
-    let syscall_rip: u64 = handler_wrapper as *const fn() as u64;
+    let syscall_rip: u64 = syscall_entry as *const fn() as u64;
     let compat_rip: u64 = 0; //unused
     let syscall_flag_mask: u32 = 0x700;
 
@@ -118,7 +120,7 @@ pub extern "C" fn main_syscall_handler(saved_regs_ptr: u64) -> ! {
     drop(locals);
 
     if let Some(preemption_id) = preemption_id {
-        acpi::cancel_scheduled_event(preemption_id);
+        cancel_scheduled_event(preemption_id);
     }
 
     enable_interrupts();

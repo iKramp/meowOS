@@ -1,11 +1,8 @@
+use crate::arch::interrupts::apic::LAPIC_REGISTERS;
+use crate::arch::interrupts::gdt::GlobalDescriptorTable;
 use crate::interrupts::InterruptReturnType;
 use crate::memory::addresses::*;
-use crate::{
-    acpi::{LAPIC_REGISTERS, cpu_locals::CpuLocals},
-    drivers::ps2,
-    proc::context_switch,
-    utils::byte_to_port,
-};
+use crate::{acpi::cpu_locals::CpuLocals, drivers::ps2, proc::context_switch, utils::byte_to_port};
 #[allow(unused_imports)] //they are used in macros
 use core::arch::asm;
 use std::{println, printlnc};
@@ -44,7 +41,7 @@ pub extern "C" fn general_protection_fault(proc_data: &mut InterruptProcessorSta
     printlnc!(level:error,(0, 0, 255), "EXCEPTION: GPF. proc_data: {:#X?}", proc_data);
     //print GDT
     let cpu_locals = CpuLocals::get();
-    let gdt_ptr = cpu_locals.gdt_ptr;
+    let gdt_ptr = cpu_locals.arch_specific.gdt_ptr;
     let gdt = unsafe { get_at_addr::<GlobalDescriptorTable, _>(VirtAddr(gdt_ptr.base)) };
     println!(level:error,"gdt: {:#x?}", gdt);
     unsafe {

@@ -1,4 +1,5 @@
 use crate::{
+    arch::interrupts::register_interrupt_handler,
     drivers::pci::{
         capabilities::{Capability, msi, msix},
         common_info::CommonInfo,
@@ -246,7 +247,7 @@ fn common_pci_interrupt_handler(irq_index: u8) {
             }
         }
     }
-    apic_eoi();
+    end_of_interrupt();
 }
 
 #[unroll_for_loops]
@@ -257,7 +258,7 @@ fn init_interrupts() {
                 common_pci_interrupt_handler((i - 128) as u8);
                 InterruptReturnType::Normal
             }
-            unsafe { interrupts::idt::IDT.set(interrupts::idt::Entry::new(handler!(pci_interrupt_handler)), i) };
+            register_interrupt_handler(handler!(pci_interrupt_handler), i as u64);
         }
     }
 }

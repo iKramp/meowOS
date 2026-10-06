@@ -1,23 +1,26 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+const X86_TRAMPOLINE_ASM: &str = "src/arch/x86_64/multiprocessing/trampoline.asm";
+
 fn main() {
+    let target = std::env::var("TARGET").expect("TARGET variable not set");
+
     println!("cargo:rerun-if-changed=linker_script.ld");
-    println!("cargo:rerun-if-changed=src/acpi/smp/trampoline.asm");
-    println!("cargo:rerun-if-changed=src/memory/probe.asm");
+
+    if target.contains("x86_64") {
+        println!("cargo:rerun-if-changed={}", X86_TRAMPOLINE_ASM);
+        println!("cargo:rerun-if-changed=src/memory/probe.asm");
+    } else {
+        panic!("Unsupported target architecture: {}", target);
+    }
 
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR variable not set");
     let link_script_file =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR variable not set")).join("linker_script.ld");
 
     if !(Command::new("nasm")
-        .args([
-            "-f",
-            "elf64",
-            "src/acpi/smp/trampoline.asm",
-            "-o",
-            &(out_dir.clone() + "/trampoline.o"),
-        ])
+        .args(["-f", "elf64", X86_TRAMPOLINE_ASM, "-o", &(out_dir.clone() + "/trampoline.o")])
         .status()
         .expect("Failed to run nasm on trampoline.asm")
         .success()
@@ -50,7 +53,6 @@ fn main() {
 
     // Set the flag to generate the linker map file
     println!("cargo:rustc-link-arg=-T{}", link_script_file.display());
-    //println!("cargo:rustc-link-arg=Map=/home/nejc/dev/meowOS/kernel.map");
 
     // Re-run the build script if the build configuration changes
     println!("cargo:rustc-link-search={}", out_dir);

@@ -1,6 +1,7 @@
 use crate::arch::x86_64::interrupts::macros::InterruptProcessorState;
-use crate::arch::x86_64::interrupts::page_fault;
+use crate::arch::x86_64::interrupts::page_fault::page_fault;
 use crate::handler;
+use crate::interrupts::InterruptReturnType;
 
 use super::gdt::{DEBUG_IST, DOUBLE_FAULT_IST, MACHINE_CHECK_IST, NMI_IST};
 use super::handlers::*;

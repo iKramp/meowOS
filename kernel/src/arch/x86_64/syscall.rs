@@ -1,4 +1,5 @@
 use crate::proc::syscall::main_syscall_handler;
+use std::fmt::Debug;
 
 //sys V abi:
 //ret val: rax, rdx
@@ -16,7 +17,7 @@ use crate::proc::syscall::main_syscall_handler;
 //syscalls are limited to 5 64bit parameters. If more data is needed, set up a structure and pass a
 //pointer to it
 #[unsafe(naked)]
-extern "C" fn syscall_entry() -> ! {
+pub extern "C" fn syscall_entry() -> ! {
     //INFO: any kind of change here should be matched with the one in dispatcher.rs
     core::arch::naked_asm!(
         //push preserved regs, get kernel stack from gsbase

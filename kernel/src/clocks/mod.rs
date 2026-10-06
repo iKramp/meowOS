@@ -2,38 +2,43 @@ use core::mem::MaybeUninit;
 use std::{boxed::Box, println, time::Instant};
 
 use crate::{
-    clocks::{hpet::HpetWrapper, tsc::TscWrapper},
+    clocks::hpet::HpetWrapper,
     handler,
     interrupts::{self, InterruptProcessorState, InterruptReturnType},
 };
 
 mod hpet;
 mod rtc;
-mod tsc;
 
 static mut SELECTED_TIMER: MaybeUninit<Box<dyn Timer>> = MaybeUninit::uninit();
+static mut EVENT_RUNNER: MaybeUninit<EventRunner> = MaybeUninit::uninit();
 const TIMER_INTERRUPT_VECTOR: usize = 251;
+pub const TIMER_DESIRED_FREQUENCY: u32 = 1; //don't need much lmao
 
-trait Timer {
+pub trait Timer {
     fn init(&mut self) -> bool;
     fn get_time(&self) -> Instant;
     fn calibrate(&mut self, current: Instant);
     fn service_interrupt(&self) {}
 }
 
+struct EventRunner {
+    schedule: fn(ScheduledEvent) -> u64,
+    cancel: fn(u64) -> bool,
+}
+
 pub fn init() {
-    let timers: [Box<dyn Timer>; 2] = [Box::new(TscWrapper::new()), Box::new(HpetWrapper::new())];
+    let timers: [Box<dyn Timer>; _] = [
+        #[cfg(target_arch = "x86_64")]
+        Box::new(crate::arch::x86_64::tsc::TscWrapper::new()),
+        Box::new(HpetWrapper::new()),
+    ];
     for mut timer in timers {
         if try_use_timer(&mut timer) {
             unsafe {
                 SELECTED_TIMER = MaybeUninit::new(timer);
             }
-            unsafe {
-                interrupts::idt::IDT.set(
-                    interrupts::idt::Entry::new(handler!(service_interrupt)),
-                    TIMER_INTERRUPT_VECTOR,
-                );
-            }
+            interrupts::register_interrupt_handler(handler!(service_interrupt), TIMER_INTERRUPT_VECTOR as u64);
             unsafe {
                 std::time::GET_TIME = || SELECTED_TIMER.assume_init_ref().get_time();
             }
@@ -43,6 +48,12 @@ pub fn init() {
     }
 
     panic!("No suitable timer found");
+}
+
+pub fn set_event_runner(schedule: fn(ScheduledEvent) -> u64, cancel: fn(u64) -> bool) {
+    unsafe {
+        EVENT_RUNNER = MaybeUninit::new(EventRunner { schedule, cancel });
+    }
 }
 
 fn try_use_timer(timer: &mut Box<dyn Timer>) -> bool {
@@ -58,4 +69,24 @@ fn try_use_timer(timer: &mut Box<dyn Timer>) -> bool {
 extern "C" fn service_interrupt(_state: &mut InterruptProcessorState) -> InterruptReturnType {
     unsafe { SELECTED_TIMER.assume_init_ref().service_interrupt() };
     InterruptReturnType::Normal
+}
+
+pub struct AcceptedScheduledEvent {
+    pub event: ScheduledEvent,
+    pub id: u64,
+}
+
+pub struct ScheduledEvent {
+    pub time: Instant,
+    pub callback: Box<dyn FnOnce()>,
+}
+
+pub fn schedule_event(event: ScheduledEvent) -> u64 {
+    let runner = unsafe { EVENT_RUNNER.assume_init_ref() };
+    (runner.schedule)(event)
+}
+
+pub fn cancel_scheduled_event(id: u64) -> bool {
+    let runner = unsafe { EVENT_RUNNER.assume_init_ref() };
+    (runner.cancel)(id)
 }

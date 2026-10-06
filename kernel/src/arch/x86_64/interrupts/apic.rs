@@ -1,28 +1,25 @@
 #![allow(clippy::unusual_byte_groupings, static_mut_refs)]
 
+use crate::arch::interrupts::disable_pic_completely;
+use crate::arch::interrupts::handlers::{
+    apic_error, apic_keyboard_interrupt, fpu_interrupt, other_apic_interrupt, primary_ata_hard_disk, ps2_mouse_interrupt,
+};
+use crate::arch::interrupts::idt::{Entry, IDT};
+use crate::memory;
 use crate::memory::addresses::*;
-use crate::{interrupts::disable_pic_completely, memory};
 use core::mem::MaybeUninit;
 
 use reg_map::RegMap;
 use unroll::unroll_for_loops;
 
-use crate::{
-    handler,
-    interrupts::{
-        handlers::*,
-        idt::{Entry, IDT},
-    },
-    memory::LiminePat,
-    println,
-};
+use crate::{handler, memory::LiminePat, println};
 
 use super::lapic_timer::{activate_timer, setup_timer_ap};
 
 pub static mut LAPIC_REGISTERS: MaybeUninit<LapicRegistersPtr> = MaybeUninit::uninit();
 
 #[unroll_for_loops]
-pub fn enable_apic(platform_info: &super::platform_info::PlatformInfo, processor_id: u8) {
+pub fn enable_apic(platform_info: &crate::acpi::platform_info::PlatformInfo, processor_id: u8) {
     let bsp = processor_id == platform_info.boot_processor.processor_id;
     if bsp {
         map_lapic_registers(platform_info.apic.lapic_address);

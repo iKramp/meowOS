@@ -1,29 +1,21 @@
 use core::time::Duration;
-use std::{boxed::Box, println, time::Instant};
+use std::{println, time::Instant};
 
 use crate::{
-    acpi::apic::LapicRegistersPtr,
+    arch::interrupts::{
+        apic::{LAPIC_REGISTERS, LapicRegistersPtr},
+        handlers::apic_eoi,
+    },
+    clocks::{AcceptedScheduledEvent, ScheduledEvent, TIMER_DESIRED_FREQUENCY},
     handler,
     interrupts::{
-        InterruptProcessorState, InterruptReturnType, TIMER_DESIRED_FREQUENCY, disable_interrupts, enable_interrupts,
-        handlers::apic_eoi,
-        idt::{Entry, IDT},
+        InterruptProcessorState, InterruptReturnType, disable_interrupts, enable_interrupts, register_interrupt_handler,
     },
 };
 
 static mut TIMER_CONF: u32 = 0;
 static mut FREQUENCY: u64 = 0;
 const LAPIC_TIMER_INT_VEC: u8 = 252;
-
-pub struct AcceptedScheduledEvent {
-    event: ScheduledEvent,
-    id: u64,
-}
-
-pub struct ScheduledEvent {
-    pub time: Instant,
-    pub callback: Box<dyn FnOnce()>,
-}
 
 pub(super) fn setup_timer_ap(lapic_registers: &LapicRegistersPtr) {
     unsafe {
@@ -60,7 +52,7 @@ pub(super) fn activate_timer(lapic_registers: &LapicRegistersPtr) {
 
     println!("Ticks: {}", ticks);
 
-    unsafe { IDT.set(Entry::new(handler!(apic_interrupt_handler)), LAPIC_TIMER_INT_VEC as usize) };
+    register_interrupt_handler(handler!(apic_interrupt_handler), LAPIC_TIMER_INT_VEC as u64);
 
     let initial_count = ticks_counted * 100 / TIMER_DESIRED_FREQUENCY;
     println!("Initial count: {} or {:x}", initial_count, initial_count);
@@ -75,6 +67,8 @@ pub(super) fn activate_timer(lapic_registers: &LapicRegistersPtr) {
         FREQUENCY = frequency;
         std::thread::SLEEP = sleep_duration;
     }
+
+    crate::clocks::set_event_runner(schedule_event, cancel_scheduled_event);
 }
 
 fn sleep_duration(duration: Duration) {
@@ -175,7 +169,7 @@ pub fn set_timeout(duration: Duration) {
         25 => (0b1010, ticks / 128),    //divide by 128
         _ => (0b1010, u32::MAX as u64), //more than 10 minutes timeout, treat as max
     };
-    let lapic_registers = unsafe { super::LAPIC_REGISTERS.assume_init_mut() };
+    let lapic_registers = unsafe { LAPIC_REGISTERS.assume_init_mut() };
     lapic_registers.divide_configuration().bytes().write(division);
     lapic_registers.initial_count().bytes().write(ticks as u32);
 }

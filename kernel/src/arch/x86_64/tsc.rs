@@ -1,11 +1,13 @@
 use core::arch::asm;
 use std::{println, printlnc};
 
-use crate::cpuid;
+use crate::{
+    arch::interrupts::pic::{set_pit_timeout, trigger_pit_eoi},
+    clocks::Timer,
+    cpuid,
+};
 
-use super::Timer;
-
-pub(super) struct TscWrapper {
+pub struct TscWrapper {
     start: std::time::Instant,
     ticks_on_start: u64,
     ticks_per_second: u64,
@@ -62,10 +64,10 @@ impl Timer for TscWrapper {
         unsafe {
             println!("TSC: starting timer");
             tsc_start = TscWrapper::get_ticks();
-            crate::interrupts::set_pit_timeout(5_000_000); //5 milliseconds
+            set_pit_timeout(5_000_000); //5 milliseconds
             core::arch::asm!("hlt", options(nomem, nostack)); //wait for timer interrupt
             let tsc_end = TscWrapper::get_ticks();
-            crate::interrupts::trigger_pit_eoi();
+            trigger_pit_eoi();
             let ticks_counted = tsc_end - tsc_start;
             println!("TSC ticks counted: {}", ticks_counted);
             self.ticks_per_second = ticks_counted * 1000 / 5; // 5 milliseconds
