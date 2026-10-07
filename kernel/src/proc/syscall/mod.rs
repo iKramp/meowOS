@@ -49,7 +49,7 @@ pub fn verify_memory_range(mem_start: u64, mem_end: u64) -> bool {
 
 pub fn verify_memory_ptr(mut ptr: u64) -> bool {
     ptr &= !PAGE_OFFSET_MASK; //page align, ptr can't overlap pages because of alignment
-    if ptr > KERNEL_START_ADDR {
+    if ptr >= KERNEL_START_ADDR {
         println!(level:warn, "Invalid memory pointer: {:#X}", ptr);
         return false;
     }
