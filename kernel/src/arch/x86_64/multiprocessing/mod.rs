@@ -1,4 +1,5 @@
 mod ap_startup;
+pub mod cpu_init;
 
 use std::println;
 

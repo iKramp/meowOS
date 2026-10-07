@@ -2,7 +2,7 @@ use core::ptr::addr_of;
 use std::{Print, lock_w_info, print::LogLevel, sync::no_int_spinlock::NoIntSpinlock};
 
 use crate::{
-    cpuid,
+    arch::x86_64::cpu_identification,
     utils::byte_to_port,
     vga::vga_text::{VGA_TEXT, VgaText},
 };
@@ -10,11 +10,9 @@ use crate::{
 static PRINT: NoIntSpinlock<Printer> = NoIntSpinlock::new(Printer::new(&VGA_TEXT));
 
 pub fn init_printer() {
-    if let Some(cpuid_leaf_1) = cpuid::get_cpuid_leaf(1) {
-        let virtualized = cpuid_leaf_1.ecx & (1 << 31) != 0;
-        let mut printer = lock_w_info!(PRINT);
-        printer.in_qemu = virtualized;
-    }
+    let virtualized = cpu_identification::is_virtualized();
+    let mut printer = lock_w_info!(PRINT);
+    printer.in_qemu = virtualized;
 
     unsafe { std::set_print(addr_of!(PRINT)) };
 }

@@ -1,4 +1,4 @@
-use crate::cpuid;
+use crate::arch::x86_64::cpu_identification;
 
 #[repr(C, align(32))]
 struct SSEArray([f32; 4]);
@@ -29,8 +29,8 @@ pub fn cpu_init_common() {
 }
 
 fn init_x87_fpu() {
-    let cpuid = cpuid::get_cpuid_leaf(1).expect("CPUID leaf 1 should be available");
-    if (cpuid.edx & (1 << 0)) == 0 {
+    let has_fpu = cpu_identification::has_hardware_fpu();
+    if !has_fpu {
         panic!("FPU not present on this CPU");
     }
 
@@ -55,21 +55,14 @@ fn init_x87_fpu() {
 }
 
 fn init_sse() {
-    let cpuid = cpuid::get_cpuid_leaf(1).expect("CPUID leaf 1 should be available");
-    let sse_supported = (cpuid.edx & (1 << 25)) != 0;
-    let sse2_supported = (cpuid.edx & (1 << 26)) != 0;
-    let sse3_supported = (cpuid.ecx & (1 << 0)) != 0;
-    let ssse3_supported = (cpuid.ecx & (1 << 9)) != 0;
-    let fxsavestore_supported = (cpuid.edx & (1 << 24)) != 0;
-    let xsave_supported = (cpuid.ecx & (1 << 26)) != 0;
-    let clflush_supported = (cpuid.edx & (1 << 19)) != 0;
-    if !sse_supported
-        || !sse2_supported
-        || !sse3_supported
-        || !ssse3_supported
-        || !fxsavestore_supported
-        || !xsave_supported
-        || !clflush_supported
+    let sse_support = cpu_identification::get_sse_support();
+    if !sse_support.sse
+        || !sse_support.sse2
+        || !sse_support.sse3
+        || !sse_support.ssse3
+        || !sse_support.fxsavestore
+        || !sse_support.xsave
+        || !sse_support.clflush
     {
         panic!("SSE not fully supported on this CPU");
     }

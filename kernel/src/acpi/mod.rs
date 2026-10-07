@@ -21,7 +21,7 @@ pub use smp::ap_startup::ap_startup;
 pub use smp::cpu_locals;
 
 use crate::{
-    acpi::smp::cpu_init_common,
+    arch::multiprocessing::cpu_init::cpu_init_common,
     limine::LIMINE_BOOTLOADER_REQUESTS,
     memory::{self, addresses::*},
     println, printlnc,

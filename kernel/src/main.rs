@@ -22,7 +22,6 @@ mod acpi;
 mod arch;
 mod clocks;
 mod cmd_args;
-mod cpuid;
 mod drivers;
 mod file_operations;
 mod interrupts;

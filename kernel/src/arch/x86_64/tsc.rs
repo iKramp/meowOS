@@ -2,9 +2,11 @@ use core::arch::asm;
 use std::{println, printlnc};
 
 use crate::{
-    arch::interrupts::pic::{set_pit_timeout, trigger_pit_eoi},
+    arch::{
+        interrupts::pic::{set_pit_timeout, trigger_pit_eoi},
+        x86_64::cpu_identification::cpuid,
+    },
     clocks::Timer,
-    cpuid,
 };
 
 pub struct TscWrapper {
