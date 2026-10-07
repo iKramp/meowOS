@@ -1,21 +1,34 @@
-use crate::proc::syscall::main_syscall_handler;
+use crate::{msr, proc::syscall::main_syscall_handler};
 use std::fmt::Debug;
 
-//sys V abi:
-//ret val: rax, rdx
-//parameters: rdi, rsi, rdx, rcx, r8, r9
-//scratch regs: rax, rdi, rsi, rdx, rcx, r8, r9, r10, r11
-//preserved: rbx, rsp, rbp, r12 - r15
+const MSR_STAR: u32 = 0xC000_0081;
+const MSR_LSTAR: u32 = 0xC000_0082;
+const MSR_CSTAR: u32 = 0xC000_0083;
+const MSR_SFMASK: u32 = 0xC000_0084;
+const MSR_EFER: u32 = 0xC000_0080;
 
-//linux syscall abi:
-//ret val: rax, rdx
-//parameters: rdi, rsi, rdx, r10, r8, r9
-//syscall number: rax
-//x86-reserved: rcx, r11
-//preserved: rbx, rbp, r12 - r15
+pub fn cpu_syscall_init() {
+    let syscall_cs_ss: u16 = 0x8;
+    let sysret_cs_ss: u16 = 0x10 | 0x3;
+    let syscall_eip: u64 = 0; //unused
+    let syscall_rip: u64 = syscall_entry as *const fn() as u64;
+    let compat_rip: u64 = 0; //unused
+    let syscall_flag_mask: u32 = 0x700;
 
-//syscalls are limited to 5 64bit parameters. If more data is needed, set up a structure and pass a
-//pointer to it
+    let mut star_reg = (sysret_cs_ss as u64) << 48;
+    star_reg |= (syscall_cs_ss as u64) << 32;
+    star_reg |= syscall_eip;
+
+    msr::set_msr(MSR_STAR, star_reg);
+    msr::set_msr(MSR_LSTAR, syscall_rip);
+    msr::set_msr(MSR_CSTAR, compat_rip);
+    msr::set_msr(MSR_SFMASK, syscall_flag_mask as u64);
+
+    let mut efer = msr::get_msr(MSR_EFER);
+    efer |= 1;
+    msr::set_msr(MSR_EFER, efer);
+}
+
 #[unsafe(naked)]
 pub extern "C" fn syscall_entry() -> ! {
     //INFO: any kind of change here should be matched with the one in dispatcher.rs
@@ -106,18 +119,6 @@ pub struct SyscallCpuState {
 }
 
 impl SyscallCpuState {
-    pub fn get_legacy_syscall_arg(&self, index: usize) -> u64 {
-        match index {
-            1 => self.rdi,
-            2 => self.rsi,
-            3 => self.rdx,
-            4 => self.r10,
-            5 => self.r8,
-            6 => self.r9,
-            _ => panic!("Invalid legacy syscall argument index: {}", index),
-        }
-    }
-
     pub fn get_arg(&self, index: usize) -> u64 {
         match index {
             0 => self.rdx,

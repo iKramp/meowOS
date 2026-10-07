@@ -64,9 +64,6 @@ impl SyscallNamespace {
     pub fn default(id: u64) -> Self {
         let ns = Self::create_empty(id).expect("can't fail to create empty syscall namespace");
 
-        let (legacy_pack, pack_id) = syscall::get_syscall_pack("legacy").expect("legacy syscall pack not found");
-        ns.map_syscall_pack(0, legacy_pack, pack_id).expect("args should be valid");
-
         let (syscall_pack, pack_id) = syscall::get_syscall_pack("syscall_management").expect("syscall pack not found");
         ns.map_syscall_pack(0xFFFFFFE0, syscall_pack, pack_id)
             .expect("args should be valid");

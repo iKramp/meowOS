@@ -1,5 +1,7 @@
+use crate::arch::memory::PAGE_OFFSET_MASK;
+use crate::arch::memory::VIRTUAL_ADDRESS_BITS;
 use crate::arch::syscall as arch_syscall;
-use crate::arch::syscall::syscall_entry;
+use crate::arch::syscall::cpu_syscall_init;
 use crate::clocks::cancel_scheduled_event;
 pub use arch_syscall::SyscallCpuState;
 pub use arch_syscall::return_syscalled;
@@ -13,56 +15,27 @@ use super::{
 use crate::{
     acpi::cpu_locals::CpuLocals,
     interrupts::enable_interrupts,
-    memory, msr,
-    proc::{self, SyscallNamespace, syscall::legacy_syscall_pack::init_legacy_syscalls},
+    memory,
+    proc::{self, SyscallNamespace},
 };
 
-mod handlers;
-mod legacy_syscall_pack;
 mod syscall_management_pack;
 mod syscall_registry;
 pub use syscall_registry::*;
 
-const MSR_STAR: u32 = 0xC000_0081;
-const MSR_LSTAR: u32 = 0xC000_0082;
-const MSR_CSTAR: u32 = 0xC000_0083;
-const MSR_SFMASK: u32 = 0xC000_0084;
-const MSR_EFER: u32 = 0xC000_0080;
+const KERNEL_START_ADDR: u64 = 1 << (VIRTUAL_ADDRESS_BITS - 1);
 
 ///Prepare all necessary things for executing syscalls. This includes setting interrupt handlers,
 ///MSRs and more
 pub(super) fn init() {
-    let syscall_cs_ss: u16 = 0x8;
-    let sysret_cs_ss: u16 = 0x10 | 0x3;
-    let syscall_eip: u64 = 0; //unused
-    let syscall_rip: u64 = syscall_entry as *const fn() as u64;
-    let compat_rip: u64 = 0; //unused
-    let syscall_flag_mask: u32 = 0x700;
-
-    let mut star_reg = (sysret_cs_ss as u64) << 48;
-    star_reg |= (syscall_cs_ss as u64) << 32;
-    star_reg |= syscall_eip;
-
-    msr::set_msr(MSR_STAR, star_reg);
-    msr::set_msr(MSR_LSTAR, syscall_rip);
-    msr::set_msr(MSR_CSTAR, compat_rip);
-    msr::set_msr(MSR_SFMASK, syscall_flag_mask as u64);
-
-    init_legacy_syscalls();
     syscall_management_pack::init_syscall_management_syscalls();
 
-    enable_syscall();
-}
-
-fn enable_syscall() {
-    let mut efer = msr::get_msr(MSR_EFER);
-    efer |= 1;
-    msr::set_msr(MSR_EFER, efer);
+    cpu_syscall_init();
 }
 
 ///performs an exclusive range check if the pointers are valid in userspace
 pub fn verify_memory_range(mem_start: u64, mem_end: u64) -> bool {
-    if mem_start > mem_end || mem_end > 0x0000_8000_0000_0000 {
+    if mem_start > mem_end || mem_end > KERNEL_START_ADDR {
         println!(level:warn, "Invalid memory range: {:#X} - {:#X}", mem_start, mem_end);
         return false;
     }
@@ -75,8 +48,8 @@ pub fn verify_memory_range(mem_start: u64, mem_end: u64) -> bool {
 }
 
 pub fn verify_memory_ptr(mut ptr: u64) -> bool {
-    ptr &= !0xFFF; //page align, ptr can't overlap pages because of alignment
-    if ptr > 0x0000_8000_0000_0000 {
+    ptr &= !PAGE_OFFSET_MASK; //page align, ptr can't overlap pages because of alignment
+    if ptr > KERNEL_START_ADDR {
         println!(level:warn, "Invalid memory pointer: {:#X}", ptr);
         return false;
     }

@@ -3,13 +3,19 @@ use crate::memory::addresses::{PhysAddr, VirtAddr};
 pub mod page_table;
 pub mod page_table_entry;
 
-pub const PAGE_SIZE_BITS: u64 = 12;
-pub const PAGE_SIZE_BYTES: u64 = 1 << PAGE_SIZE_BITS;
+pub const PAGE_SIZE_BITS: u8 = 12;
+pub const PAGE_SIZE_BYTES: u32 = 1 << PAGE_SIZE_BITS as u32;
 
-pub const PAGE_TABLE_ENTRIES: u64 = 512;
-pub const PAGE_TABLE_SIZE_BYTES: u64 = PAGE_SIZE_BYTES;
+pub const PAGE_LEVEL_BITS: u8 = 9;
+pub const PAGE_TABLE_ENTRIES: u32 = 1 << PAGE_LEVEL_BITS as u32;
+pub const PAGE_TABLE_SIZE_BYTES: u32 = PAGE_SIZE_BYTES;
 
 pub const PAGING_LEVELS: u8 = 4;
+
+pub const VIRTUAL_ADDRESS_BITS: u8 = PAGE_SIZE_BITS + (PAGING_LEVELS * PAGE_LEVEL_BITS);
+pub const PHYSICAL_ADDRESS_BITS: u8 = 52;
+
+pub const PAGE_OFFSET_MASK: u64 = (1 << PAGE_SIZE_BITS) - 1;
 
 pub fn set_page_tree_root(root: PhysAddr) {
     unsafe {
