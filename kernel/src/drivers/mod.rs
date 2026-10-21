@@ -4,6 +4,7 @@ pub mod gpt;
 pub mod net_device;
 pub mod pci;
 pub mod ps2;
+mod virtio;
 
 pub fn init_drivers() {
     block_device::init_drivers();

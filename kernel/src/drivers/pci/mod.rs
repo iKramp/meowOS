@@ -3,7 +3,7 @@ use crate::{
     drivers::pci::{
         capabilities::{Capability, msi, msix},
         common_info::CommonInfo,
-        driver_store::{PciDriverFactory, get_pci_driver_factory},
+        driver_store::{PciDriverFactory, get_pci_driver_factory, print_all_pci_drivers},
     },
     handler,
     interrupts::{self, InterruptReturnType},
@@ -125,10 +125,12 @@ fn enumerate_devices() {
     let legacy_devices = legacy::get_devices();
     let express_devices = express::get_devices();
 
+    print_all_pci_drivers();
+
     for device in legacy_devices {
         println!(
-            "configuring pci device (class): {:#x?} ({:#X?})",
-            device,
+            "configuring pci device (identification, class): ({:#x?}, {:#X?})",
+            device.common.identification,
             device.common.class.clone()
         );
         let Some(PciDriverFactory::Legacy(driver_fn)) =
@@ -148,14 +150,14 @@ fn enumerate_devices() {
 
     for device in express_devices {
         println!(
-            "configuring pcie device (class): {:#x?} ({:#X?})",
-            device,
+            "configuring pcie device (identification, class): ({:#x?}, {:#X?})",
+            device.common.identification,
             device.common.class.clone()
         );
         let Some(PciDriverFactory::Express(driver_fn)) =
             get_pci_driver_factory(device.common.class.clone(), &device.common.identification)
         else {
-            println!(level:info, "No PCI driver loaded for device {:#X?}", device.common.identification_strings);
+            println!(level:info, "No PCIe driver loaded for device {:#X?}", device.common.identification_strings);
             continue;
         };
         let driver = driver_fn();

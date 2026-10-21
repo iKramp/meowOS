@@ -7,7 +7,7 @@ mod fis;
 
 pub(super) fn init_driver() {
     crate::drivers::pci::register_legacy_pci_driver(
-        PciClass::MassStorageController(MassStorageController::SerialATAController),
+        Some(PciClass::MassStorageController(MassStorageController::SerialATAController)),
         None,
         None,
         None,

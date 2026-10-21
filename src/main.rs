@@ -17,6 +17,13 @@ impl RunMode {
     }
 }
 
+#[allow(dead_code)]
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum DiskType {
+    Ahci,
+    Virtio,
+}
+
 fn main() {
     //chose whether to debug with GDB
     let debug = true;
@@ -25,6 +32,7 @@ fn main() {
     let cores = 1;
     let net = false;
     let run_mode = RunMode::Tcg;
+    let disk_type = DiskType::Virtio;
 
     make_fat_disk::make_fat_disk();
 
@@ -118,11 +126,12 @@ fn main() {
         cmd.arg("-device").arg("ide-cd,drive=boot_cd,bus=ide.1");
     }
 
-    //ahci disks
-    cmd.arg("-device").arg("ahci,id=ahci");
+    //disks
+    configure_disk_controller(&mut cmd, disk_type);
+
     let mut disk_ids = Vec::new();
 
-    let disks = [("test_disk", "assets/ahci_disk.img"), ("fat_disk", "assets/fat_disk.img")];
+    let disks = [("rfs_disk", "assets/rfs_disk.img"), ("fat_disk", "assets/fat_disk.img")];
 
     for (id, image) in disks {
         if run_mode.is_rr() {
@@ -144,17 +153,17 @@ fn main() {
         disk_ids.push(id);
     }
 
-    assert!(disk_ids.len() < 6, "update code");
+    assert!(disk_ids.len() < 6 || disk_type != DiskType::Ahci, "update code");
     for (i, name) in disk_ids.iter().enumerate() {
+        let disk_name;
         if run_mode.is_rr() {
             let rr_disk = format!("driver=blkreplay,if=none,image={},id={}-blkreplay", name, name);
-            let device = format!("ide-hd,drive={}-blkreplay,bus=ahci.{}", name, i);
+            disk_name = format!("{}-blkreplay", name);
             cmd.arg("-drive").arg(rr_disk);
-            cmd.arg("-device").arg(device);
         } else {
-            let device = format!("ide-hd,drive={},bus=ahci.{}", name, i);
-            cmd.arg("-device").arg(device);
+            disk_name = name.to_string();
         }
+        attach_disk(&mut cmd, disk_type, &disk_name, i);
     }
 
     if net {
@@ -232,4 +241,27 @@ fn create_overlay(name: &str, backing: &str) {
         .expect("failed to create overlay");
 
     assert!(status.success(), "failed creating overlay {}", name);
+}
+
+fn configure_disk_controller(cmd: &mut std::process::Command, disk_type: DiskType) {
+    match disk_type {
+        DiskType::Ahci => {
+            cmd.arg("-device").arg("ahci,id=ahci");
+        }
+        DiskType::Virtio => {
+            // virtio-blk-pci devices attach directly to the PCI bus.
+        }
+    }
+}
+
+fn attach_disk(cmd: &mut std::process::Command, disk_type: DiskType, drive_id: &str, index: usize) {
+    match disk_type {
+        DiskType::Ahci => {
+            cmd.arg("-device")
+                .arg(format!("ide-hd,drive={},bus=ahci.{}", drive_id, index));
+        }
+        DiskType::Virtio => {
+            cmd.arg("-device").arg(format!("virtio-blk-pci,drive={}", drive_id));
+        }
+    }
 }
