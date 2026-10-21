@@ -39,7 +39,7 @@ mod transmit;
 
 pub(super) fn init_driver() {
     crate::drivers::pci::register_express_pci_driver(
-        PciClass::NetworkController(NetworkController::EthernetController),
+        Some(PciClass::NetworkController(NetworkController::EthernetController)),
         Some(0x8086), //Intel
         Some(0x10D3), //82574L
         None,

@@ -1,9 +1,28 @@
 use core::ops::Add;
 use std::{error::KernelError, format, kerror, kerror_unwrapped, println};
 
+use crate::drivers::pci::PciClass;
+
 static DEVICE_CODES: &str = include_str!("../../../../assets/pci.ids");
 
-#[derive(Debug, Clone, Eq, PartialOrd, Ord)]
+pub(in crate::drivers) struct PciDeeviceTypeIdentification {
+    pub class: Option<PciClass>,
+    pub id: PciDeviceNumericId,
+}
+
+impl PartialEq for PciDeeviceTypeIdentification {
+    fn eq(&self, other: &Self) -> bool {
+        let class_eq = match (self.class.clone(), other.class.clone()) {
+            (Some(a), Some(b)) => a == b,
+            _ => true,
+        };
+        let (equal, matches) = self.id.equal(&other.id);
+        let at_least_one_match = matches > 0 || (self.class.is_some() && other.class.is_some());
+        class_eq && equal && at_least_one_match
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(in crate::drivers) struct PciDeviceNumericId {
     pub vendor_id: Option<u16>,
     pub device_id: Option<u16>,
@@ -11,25 +30,45 @@ pub(in crate::drivers) struct PciDeviceNumericId {
     pub subdevice_id: Option<u16>,
 }
 
-impl PartialEq for PciDeviceNumericId {
-    fn eq(&self, other: &Self) -> bool {
+impl PciDeviceNumericId {
+    fn equal(&self, other: &Self) -> (bool, u8) {
+        let mut matches = 0;
         let vnd_eq = match (self.vendor_id, other.vendor_id) {
-            (Some(a), Some(b)) => a == b,
+            (Some(a), Some(b)) => {
+                matches += 1;
+                a == b
+            }
             _ => true,
         };
         let dev_eq = match (self.device_id, other.device_id) {
-            (Some(a), Some(b)) => a == b,
+            (Some(a), Some(b)) => {
+                matches += 1;
+                a == b
+            }
             _ => true,
         };
         let subvnd_eq = match (self.subvendor_id, other.subvendor_id) {
-            (Some(a), Some(b)) => a == b,
+            (Some(a), Some(b)) => {
+                matches += 1;
+                a == b
+            }
             _ => true,
         };
         let subdev_eq = match (self.subdevice_id, other.subdevice_id) {
-            (Some(a), Some(b)) => a == b,
+            (Some(a), Some(b)) => {
+                matches += 1;
+                a == b
+            }
             _ => true,
         };
-        vnd_eq && dev_eq && subvnd_eq && subdev_eq
+        let equal = vnd_eq && dev_eq && subvnd_eq && subdev_eq;
+        (equal, matches)
+    }
+}
+
+impl PciDeviceNumericId {
+    pub fn is_empty(&self) -> bool {
+        self.vendor_id.is_none() && self.device_id.is_none() && self.subvendor_id.is_none() && self.subdevice_id.is_none()
     }
 }
 
