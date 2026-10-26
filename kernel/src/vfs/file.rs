@@ -7,7 +7,7 @@ use std::{
     boxed::Box,
     collections::btree_map::BTreeMap,
     error::KernelError,
-    ffi_future, kerror_unwrapped, lock_w_info,
+    ffi_future, kerror_unwrapped, lock_w_info, println,
     sync::{
         self,
         arc::Arc,
@@ -44,10 +44,27 @@ pub struct FileHandle {
     pub reached_eof: AtomicBool,
     pub file_flags: FileFlags,
     pub(in crate::vfs) open_file: Arc<OpenFile>,
+    pub(in crate::vfs) fs_extra_data: Box<[u8]>,
 }
 
 impl FileHandle {
     pub fn clone_from(other: &Self) -> Self {
+        let vfs = lock_w_info!(VFS);
+        let device = vfs
+            .devices
+            .get(&other.inode.device_id)
+            .expect("Device not found for inode in FileHandle::clone_from");
+        let partition = vfs
+            .mounted_filesystems
+            .get(&device.partition)
+            .expect("Partition not found for device in FileHandle::clone_from")
+            .clone();
+        drop(vfs);
+        let extra_data = partition.open(other.inode.index).unwrap_or_else(|e| {
+            println!("Error opening file for clone: {:?}", e);
+            Box::new([]) // Return an empty box on error
+        });
+
         FileHandle {
             inode: other.inode,
             parent_chain: other.parent_chain.clone(),
@@ -55,10 +72,12 @@ impl FileHandle {
             reached_eof: AtomicBool::new(other.reached_eof.load(core::sync::atomic::Ordering::Relaxed)),
             file_flags: other.file_flags,
             open_file: other.open_file.clone(),
+            fs_extra_data: extra_data,
         }
     }
 }
 
+//TODO: check if this Arc is needed
 #[derive(Debug)]
 pub(in crate::vfs) struct OpenFile {
     pub inode: ManuallyDrop<Arc<AsyncRWlock<Inode>>>,
@@ -195,5 +214,30 @@ impl Drop for OpenFile {
 impl AsyncDrop for OpenFile {
     async fn drop(self: core::pin::Pin<&mut Self>) {
         unsafe { ManuallyDrop::drop(&mut self.get_mut().inode) };
+    }
+}
+
+impl Drop for FileHandle {
+    fn drop(&mut self) {
+        println!("Dropping FileHandle for inode: {:?}", self.inode);
+        let dummy_data = Box::new([]);
+        let mut dummy_data: Box<[u8]> = (*dummy_data).into();
+        core::mem::swap(&mut self.fs_extra_data, &mut dummy_data);
+
+        let vfs = lock_w_info!(VFS);
+        let Some(device) = vfs.devices.get(&self.inode.device_id) else {
+            println!("Device not found for inode in FileHandle::drop");
+            return;
+        };
+        let Some(partition) = vfs.mounted_filesystems.get(&device.partition).cloned() else {
+            println!("Partition not found for device in FileHandle::drop");
+            return;
+        };
+        drop(vfs);
+        let inode_index = self.inode.index;
+        let res = partition.close(inode_index, dummy_data);
+        if let Err(e) = res {
+            println!("Error closing file: {:?}", e);
+        }
     }
 }

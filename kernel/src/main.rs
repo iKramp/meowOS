@@ -59,7 +59,6 @@ extern "C" fn _start() -> ! {
     printer::init_printer();
     vga::clear_screen();
 
-    panic!("add time syscall");
     println!(level:info, "starting RustOs...");
     println!(level:info, "stack pointer: {:?}", stack_pointer);
 

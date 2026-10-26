@@ -194,7 +194,8 @@ async fn make_new_root_checks(fs: &Arc<dyn FileSystem + Send>) -> Result<(), Ker
 
     //root checks
     let root_dirs = fs.read_dir(ROOT_INODE_INDEX).await?;
-    let required_dirs = ["tty", "proc", "net", "null"];
+
+    let required_dirs = ["tty", "proc", "net", "null", "input", "fb"];
     for required_dir in required_dirs.iter() {
         if !root_dirs.iter().any(|entry| entry.name.as_ref() == *required_dir) {
             println!("Root filesystem is missing required directory {required_dir}, creating it");
@@ -203,6 +204,7 @@ async fn make_new_root_checks(fs: &Arc<dyn FileSystem + Send>) -> Result<(), Ker
                 .await?;
         }
     }
+
     Ok(())
 }
 
@@ -225,11 +227,17 @@ async fn mount_vfs_adapters(fs: &Arc<dyn FileSystem + Send>) {
     let tty_adapter_partition_id = tty_adapter.partition_id();
     let null_adapter = crate::vfs::adapters::NullAdapter::get();
     let null_adapter_partition_id = null_adapter.partition_id();
+    let input_adapter = crate::drivers::input::input_adapter::InputVfsAdapter::get();
+    let input_adapter_partition_id = input_adapter.partition_id();
+    let fb_adapter = crate::vfs::adapters::FbAdapter::get();
+    let fb_adapter_partition_id = fb_adapter.partition_id();
 
     let adapters = [
         ("tty", tty_adapter, tty_adapter_partition_id),
         ("proc", proc_adapter, proc_adapter_partition_id),
         ("null", null_adapter, null_adapter_partition_id),
+        ("input", input_adapter, input_adapter_partition_id),
+        ("fb", fb_adapter, fb_adapter_partition_id),
     ];
 
     let mut vfs = lock_w_info!(VFS);
@@ -247,7 +255,7 @@ async fn mount_vfs_adapters(fs: &Arc<dyn FileSystem + Send>) {
             .expect("should have created dirs for root fs");
         let inode_id = InodeIdentifier {
             device_id: adapter.device_id(),
-            index: entry.inode,
+            index: ROOT_INODE_INDEX,
         };
         mount_inode(
             InodeIdentifier {
@@ -313,8 +321,22 @@ pub async fn open_file(
     let chain_len = inode_chain.len();
     let parent_in_chain_index = if chain_len == 1 { 0 } else { chain_len - 2 };
     let open_file = get_open_file(inode_index, inode_chain[parent_in_chain_index]).await?;
-    let is_dir = open_file.inode.lock_read().await.type_mode.is_dir();
+
+    let inode_read_ref = unsafe { open_file.inode.get_read_reference() };
+    let is_dir = inode_read_ref.type_mode.is_dir();
+
     let file_flags = FileFlags::new_with_flags(open_flags.read(), open_flags.write(), open_flags.append(), is_dir);
+
+    let mut vfs = lock_w_info!(VFS);
+    let device_details = vfs.devices.get(&inode_read_ref.device).ok_or(kerror_unwrapped!(NoEntry))?;
+    let partition_id = device_details.partition;
+    let fs = vfs
+        .mounted_filesystems
+        .get_mut(&partition_id)
+        .ok_or(kerror_unwrapped!(NoEntry))?;
+    let extra_data = fs.open(inode_index.index)?;
+    drop(vfs);
+
     //TODO: check permissions
     Ok(FileHandle {
         inode: inode_index,
@@ -323,6 +345,7 @@ pub async fn open_file(
         reached_eof: AtomicBool::new(false),
         file_flags,
         open_file,
+        fs_extra_data: extra_data,
     })
 }
 
@@ -514,7 +537,9 @@ pub async fn write_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64
     let fs = fs.clone();
     drop(vfs);
 
-    let res = fs.write(inode_index, desired_offset, size, buffer).await?;
+    let res = fs
+        .write(inode_index, &file_handle.fs_extra_data, desired_offset, size, buffer)
+        .await?;
 
     println!("Wrote {} bytes", res.1);
 
@@ -585,7 +610,9 @@ pub async fn read_file(
     let fs = fs.clone();
     drop(vfs);
 
-    let (bytes_read, mut read_result) = fs.read(inode_index, offset, size, buffer, blocking).await?;
+    let (bytes_read, mut read_result) = fs
+        .read(inode_index, &file_handle.fs_extra_data, offset, size, buffer, blocking)
+        .await?;
 
     if !internal_sync {
         read_result = if bytes_read == size {

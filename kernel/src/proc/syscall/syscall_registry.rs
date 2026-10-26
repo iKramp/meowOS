@@ -12,7 +12,7 @@ pub type SyscallHandler = fn(&SyscallCpuState, &Arc<ProcessData>);
 
 #[derive(Debug)]
 pub struct SyscallPack {
-    handlers: Box<[SyscallHandler]>,
+    handlers: Box<[(SyscallHandler, &'static str)]>,
 }
 
 type SyscallPackEntry = (Box<str>, u64, Arc<SyscallPack>);
@@ -25,11 +25,11 @@ struct SyscallRegistry {
 }
 
 impl SyscallPack {
-    pub fn new(handlers: Box<[SyscallHandler]>) -> Self {
+    pub fn new(handlers: Box<[(SyscallHandler, &'static str)]>) -> Self {
         Self { handlers }
     }
 
-    pub fn get_handler(&self, index: usize) -> Option<SyscallHandler> {
+    pub fn get_handler(&self, index: usize) -> Option<(SyscallHandler, &'static str)> {
         self.handlers.get(index).copied()
     }
 

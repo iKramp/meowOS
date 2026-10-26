@@ -166,6 +166,7 @@ impl FileSystem for Rfs2 {
     async fn read(
         &self,
         inode: VfsInodeIndex,
+        _extra_data: &Box<[u8]>,
         offset_bytes: u64,
         size_bytes: u64,
         buffer: &[PhysAddr],
@@ -188,6 +189,14 @@ impl FileSystem for Rfs2 {
         let res = self.read_locked(file_root, offset_blocks, size_bytes, buffer).await;
         drop(locked);
         res.map(|read| (read, FileReadResult::Invalid))
+    }
+
+    fn open(&self, _inode: VfsInodeIndex) -> Result<Box<[u8]>, KernelError> {
+        return Ok(Box::new([]));
+    }
+
+    fn close(&self, _inode: VfsInodeIndex, _extra_data: Box<[u8]>) -> Result<(), KernelError> {
+        return Ok(());
     }
 
     async fn read_dir(&self, inode: VfsInodeIndex) -> Result<Box<[VfsDirEntry]>, KernelError> {
@@ -220,6 +229,7 @@ impl FileSystem for Rfs2 {
     async fn write(
         &self,
         inode: VfsInodeIndex,
+        _extra_data: &Box<[u8]>,
         offset_bytes: u64,
         size: u64,
         buffer: &[PhysAddr],
@@ -450,7 +460,7 @@ impl FileSystem for Rfs2 {
         Ok((new_parent_inode, new_child_inode))
     }
 
-    async fn truncate(&self, inode: VfsInodeIndex, size: u64) -> Result<(), KernelError> {
+    async fn truncate(&self, inode: VfsInodeIndex, _extra_data: &Box<[u8]>, size: u64) -> Result<(), KernelError> {
         let lock = self.get_file_lock(inode as InodeIndex);
         let locked = lock.lock();
 
@@ -462,7 +472,13 @@ impl FileSystem for Rfs2 {
         Ok(())
     }
 
-    async fn rename(&self, inode: VfsInodeIndex, parent_inode: VfsInodeIndex, name: &str) -> Result<(), KernelError> {
+    async fn rename(
+        &self,
+        inode: VfsInodeIndex,
+        parent_inode: VfsInodeIndex,
+        _parent_extra_data: &Box<[u8]>,
+        name: &str,
+    ) -> Result<(), KernelError> {
         if name.len() > 256 {
             return kerror!(InvalidArgument);
         }

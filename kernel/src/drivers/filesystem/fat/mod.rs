@@ -402,6 +402,14 @@ impl FileSystem for FatDriver {
         self.partition.partition.part_id
     }
 
+    fn open(&self, _inode: InodeIndex) -> Result<Box<[u8]>, KernelError> {
+        Ok(Box::new([]))
+    }
+
+    fn close(&self, _inode: InodeIndex, _extra_data: Box<[u8]>) -> Result<(), KernelError> {
+        Ok(())
+    }
+
     async fn unmount(&self) -> Result<(), KernelError> {
         Ok(())
     }
@@ -409,6 +417,7 @@ impl FileSystem for FatDriver {
     async fn read(
         &self,
         inode: InodeIndex,
+        _extra_data: &Box<[u8]>,
         offset_bytes: u64,
         size_bytes: u64,
         buffer: &[PhysAddr],
@@ -503,6 +512,7 @@ impl FileSystem for FatDriver {
     async fn write(
         &self,
         _inode: InodeIndex,
+        _extra_data: &Box<[u8]>,
         _offset: u64,
         _size: u64,
         _buffer: &[PhysAddr],
@@ -586,10 +596,16 @@ impl FileSystem for FatDriver {
     async fn link(&self, _inode: InodeIndex, _parent_dir: InodeIndex, _name: &str) -> Result<(Inode, Inode), KernelError> {
         return kerror!(UnsupportedOperation);
     }
-    async fn truncate(&self, _inode: InodeIndex, _size: u64) -> Result<(), KernelError> {
+    async fn truncate(&self, _inode: InodeIndex, _extra_data: &Box<[u8]>, _size: u64) -> Result<(), KernelError> {
         return kerror!(UnsupportedOperation);
     }
-    async fn rename(&self, _inode: InodeIndex, _parent_inode: InodeIndex, _name: &str) -> Result<(), KernelError> {
+    async fn rename(
+        &self,
+        _inode: InodeIndex,
+        _parent_inode: InodeIndex,
+        _parent_extra_data: &Box<[u8]>,
+        _name: &str,
+    ) -> Result<(), KernelError> {
         return kerror!(UnsupportedOperation);
     }
 }

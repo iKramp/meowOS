@@ -220,31 +220,7 @@ pub struct InterruptFrame {
 
 impl InterruptProcessorState {
     pub fn new(rip: u64, rsp: u64) -> Self {
-        Self {
-            r15: 0,
-            r14: 0,
-            r13: 0,
-            r12: 0,
-            r11: 0,
-            r10: 0,
-            r9: 0,
-            r8: 0,
-            rbp: 0,
-            rdi: 0,
-            rsi: 0,
-            rdx: 0,
-            rcx: 0,
-            rbx: 0,
-            rax: 0,
-            err_code: 0,
-            interrupt_frame: InterruptFrame {
-                rip,
-                cs: 0x23,
-                rflags: 0x202,
-                rsp,
-                ss: 0x1B,
-            },
-        }
+        Self::new_full(0, 0, 0, 0, 0, 0, 0, 0, 0, rsp, 0, 0, 0, 0, 0, 0, rip)
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -14,10 +14,17 @@ The structure of a generated evnet:
 ```
 #[repr(C)]
 struct InputEvent {
-    generated_at: Instant,
+    generated_at: FfiInstant,
     code: u32,
     value: u32,
 }
+
+#[repr(C)]
+struct FfiInstant {
+    seconds: u64,
+    nanos: u32,
+}
+
 ```
 
 ## Event delivery:

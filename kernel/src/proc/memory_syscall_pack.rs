@@ -4,12 +4,19 @@ use crate::{
     memory::{self, VirtualMemoryRangeManagementMode, addresses::VirtAddr},
     proc::{
         MemoryNamespace, MemoryRangeType, ProcessData,
-        syscall::{self, SyscallCpuState},
+        syscall::{self, SyscallCpuState, SyscallHandler},
     },
 };
 
 pub fn init_mem_syscalls() {
-    let handlers = [make_region, remove_region, list_regions, set_prot, mmap, munmap];
+    let handlers: [(SyscallHandler, &'static str); _] = [
+        (make_region, "make_reagion"),
+        (remove_region, "remove_region"),
+        (list_regions, "list_regions"),
+        (set_prot, "set_prot"),
+        (mmap, "mmap"),
+        (munmap, "munmap"),
+    ];
 
     let mem_syscalls = crate::proc::syscall::SyscallPack::new(Box::new(handlers));
     crate::proc::syscall::register_syscall_pack("memory".into(), Arc::new(mem_syscalls));

@@ -1,6 +1,7 @@
 use std::{lock_w_info, println, sync::no_int_spinlock::NoIntSpinlock, vec::Vec};
 
 use crate::{
+    drivers::input,
     keyboard::KeyboardState,
     utils::{byte_from_port, byte_to_port},
 };
@@ -166,7 +167,19 @@ pub fn handle_ps2_keyboard_interrupt() {
     let scancodes = crate::drivers::ps2::read_scancodes();
     let keeb_state = unsafe { &mut PS2_KEYBOARD_STATE };
     let keys = crate::keyboard::handle_keyboard_data(scancodes, keeb_state);
-    crate::tty::handle_input(keys.into_boxed_slice(), keeb_state);
+    if !input::INPUT_EVENT_MANAGER.buffers_exist() {
+        crate::tty::handle_input(keys.into_boxed_slice(), keeb_state);
+    } else {
+        let events = keys
+            .into_iter()
+            .map(|k| crate::drivers::input::InputEvent {
+                generated_at: std::time::Instant::now().into(),
+                code: u16::from(k.0) as u32,
+                value: k.1.into(),
+            })
+            .collect::<Vec<_>>();
+        input::INPUT_EVENT_MANAGER.add_events(Some(crate::drivers::input::DeviceType::Keyboard), None, &events);
+    }
 }
 
 //write lock must be held

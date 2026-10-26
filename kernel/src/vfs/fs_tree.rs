@@ -53,6 +53,7 @@ pub(super) async fn get_inode_chain(
     from: Option<InodeIdentifierChain>,
     namespace_mounts: Option<&BTreeMap<InodeIdentifier, InodeIdentifier>>,
 ) -> Result<(InodeIdentifier, InodeIdentifierChain), KernelError> {
+    println!("get_inode_chain: path: {:?}, from: {:X?}", path, from);
     let mut chain = match from {
         Some(chain) => chain.to_vec(),
         None => Vec::new(),
@@ -73,7 +74,11 @@ pub(super) async fn get_inode_chain(
             continue;
         }
 
+        println!("get_inode_chain: getting child for component: {:?}", component);
+
         let child = get_child(current, component, true, namespace_mounts).await?;
+
+        println!("get_inode_chain: got child inode: {:X?}", child);
         chain.push(child);
         current = child;
     }
@@ -166,8 +171,8 @@ async fn load_dir(current: InodeIdentifier) -> Result<NoIntSpinlockGuard<'static
     drop(vfs);
 
     let dir = fs.read_dir(current.index).await?;
-    println!("load_dir: loaded directory for inode {:?}, entries: {}", current, dir.len());
-    println!("load_dir: directory entries for inode {:?}: {:?}", current, dir);
+    println!("load_dir: loaded directory for inode {:X?}, entries: {}", current, dir.len());
+    println!("load_dir: directory entries for inode {:X?}: {:?}", current, dir);
 
     let mut children = Vec::new();
     if dir.is_empty() {
@@ -186,14 +191,14 @@ async fn load_dir(current: InodeIdentifier) -> Result<NoIntSpinlockGuard<'static
         drop(cache);
 
         println!(
-            "load_dir: added inode {:?} to cache for directory entry: {}",
+            "load_dir: added inode {:X?} to cache for directory entry: {}",
             inode_index, dir_entry.name
         );
         children.push((dir_entry.name.clone(), inode_index));
     }
 
     println!(
-        "load_dir: finished loading directory for inode {:?}, children count: {}",
+        "load_dir: finished loading directory for inode {:X?}, children count: {}",
         current,
         children.len()
     );
@@ -218,16 +223,26 @@ pub fn resolve_mount_point(
     let global_mounts = r_lock_w_info!(GLOBAL_MOUNTS);
     let mut prev_inode = None;
 
+    println!("resolve_mount_point: resolving mount point for inode {:X?}", inode);
+
     loop {
         let mut found_mount = false;
 
         if let Some(mount) = global_mounts.get(&inode) {
+            println!(
+                "resolve_mount_point: found global mount for inode {:X?}, overlaid inode: {:X?}",
+                inode, mount
+            );
             prev_inode = Some(inode);
             inode = *mount;
             found_mount = true;
         }
 
         if let Some(namespace_mounts) = namespace_mounts {
+            println!(
+                "resolve_mount_point: checking namespace mounts for inode {:X?}, namespace mounts: {:X?}",
+                inode, namespace_mounts
+            );
             if let Some(mount) = namespace_mounts.get(&inode) {
                 prev_inode = Some(inode);
                 inode = *mount;
@@ -239,5 +254,9 @@ pub fn resolve_mount_point(
             break;
         }
     }
+    println!(
+        "resolve_mount_point: finished resolving mount point for inode {:X?}, final inode: {:X?}, prev_inode: {:?}",
+        prev_inode, inode, prev_inode
+    );
     prev_inode.map(|prev| (prev, inode))
 }

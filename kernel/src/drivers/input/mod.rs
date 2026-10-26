@@ -3,24 +3,31 @@ use core::{
     task::{Poll, Waker},
 };
 use std::{
-    alloc::{boxed::Box, sync::Arc, vec::Vec},
+    alloc::{
+        boxed::Box,
+        string::{String, ToString},
+        sync::Arc,
+        vec::Vec,
+    },
     error::KernelError,
-    kerror, lock_w_info, r_lock_w_info,
+    format, lock_w_info, r_lock_w_info,
     sync::{no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
-    time::Instant,
+    time::FfiInstant,
     w_lock_w_info,
 };
 
-mod input_adapter;
+pub mod evnet_codes;
+pub mod input_adapter;
 
 const MAX_QUEUED_EVENTS: usize = 64;
+pub static INPUT_EVENT_MANAGER: InputEventManager = InputEventManager::new();
 
 pub(super) fn init_input() {
-    todo!()
+    //nothing yet...
 }
 
-#[derive(PartialEq, Eq)]
-enum DeviceType {
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub enum DeviceType {
     Keyboard,
     Mouse,
     Controller,
@@ -28,11 +35,18 @@ enum DeviceType {
     _6Dof,
     Other(u8),
 }
+const ALL_VARIANTS: [DeviceType; 5] = [
+    DeviceType::Keyboard,
+    DeviceType::Mouse,
+    DeviceType::Controller,
+    DeviceType::Touchpad,
+    DeviceType::_6Dof,
+];
 
 type DeviceId = u64;
 type EventBufferWithType = (Option<DeviceType>, Option<DeviceId>, EventBufferWrapper);
 
-struct InputEventManager {
+pub struct InputEventManager {
     queues: RWSpinlock<Vec<EventBufferWithType>>,
     queue_counter: AtomicU64,
 }
@@ -45,15 +59,70 @@ impl InputEventManager {
         }
     }
 
-    pub fn add_event(&self, device: DeviceType, device_id: DeviceId, event: InputEvent) {
+    pub fn buffers_exist(&self) -> bool {
+        let queues = r_lock_w_info!(self.queues);
+        !queues.is_empty()
+    }
+
+    pub fn add_events(&self, device: Option<DeviceType>, device_id: Option<DeviceId>, events: &[InputEvent]) {
         let queues = r_lock_w_info!(self.queues);
         for queue in queues.iter() {
-            let dt_matches = if let Some(dt) = &queue.0 { dt == &device } else { true };
-            let did_matches = if let Some(did) = &queue.1 { did == &device_id } else { true };
+            let dt_matches = if let Some(dt1) = &queue.0
+                && let Some(dt2) = &device
+            {
+                dt1 == dt2
+            } else {
+                true
+            };
+            let did_matches = if let Some(did1) = &queue.1
+                && let Some(did2) = &device_id
+            {
+                did1 == did2
+            } else {
+                true
+            };
             if dt_matches && did_matches {
-                let _ = queue.2.add_event(event); //whatever, gets dropped
+                let _ = queue.2.add_events(events); //extra events are dropped
             }
         }
+    }
+
+    pub fn consume_events(&self, buffer_id: u64, buffer: &mut [InputEvent]) -> usize {
+        let queues = r_lock_w_info!(self.queues);
+        for queue in queues.iter() {
+            if queue.2.id == buffer_id {
+                return queue.2.consume_events(buffer);
+            }
+        }
+        0
+    }
+
+    pub async fn consume_events_async(&self, buffer_id: u64, buffer: &mut [InputEvent]) -> usize {
+        if buffer.is_empty() {
+            return 0;
+        }
+        let mut reader = None;
+        let queues = r_lock_w_info!(self.queues);
+        for queue in queues.iter() {
+            if queue.2.id == buffer_id {
+                reader = Some(queue.2.consume_event_async());
+                break;
+            }
+        }
+        drop(queues);
+        let Some(reader) = reader else {
+            return 0;
+        };
+        let first_event = reader.await.ok();
+        let mut count = 0;
+        if let Some(event) = first_event {
+            buffer[count] = event;
+            count += 1;
+        } else {
+            return count;
+        }
+        count += self.consume_events(buffer_id, &mut buffer[count..]);
+        count
     }
 
     pub fn add_buffer(&self, device: Option<DeviceType>, device_id: Option<DeviceId>) -> u64 {
@@ -71,14 +140,24 @@ impl InputEventManager {
         let mut queues = w_lock_w_info!(self.queues);
         queues.retain(|e| e.2.id != buffer_id);
     }
+
+    pub fn get_buffer_type(&self, buffer_id: u64) -> Option<(Option<DeviceType>, Option<DeviceId>)> {
+        let queues = r_lock_w_info!(self.queues);
+        for queue in queues.iter() {
+            if queue.2.id == buffer_id {
+                return Some((queue.0, queue.1));
+            }
+        }
+        None
+    }
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct InputEvent {
-    generated_at: Instant,
-    code: u32,
-    value: u32,
+pub struct InputEvent {
+    pub generated_at: FfiInstant,
+    pub code: u32, //could be u16 but Instant is 8B aligned anyway
+    pub value: u32,
 }
 
 struct EventBufferWrapper {
@@ -94,14 +173,36 @@ struct EventBuffer {
 }
 
 impl EventBufferWrapper {
-    pub fn add_event(&self, event: InputEvent) -> Result<(), KernelError> {
+    pub fn add_events(&self, events: &[InputEvent]) -> Result<(), KernelError> {
         let mut inner = lock_w_info!(self.inner);
-        inner.add_event(event)
+        inner.add_events(events)
     }
 
-    pub fn consume_event(&self) -> Option<InputEvent> {
+    pub fn consume_events(&self, buffer: &mut [InputEvent]) -> usize {
         let mut inner = lock_w_info!(self.inner);
-        inner.consume_event()
+        inner.consume_events(buffer)
+    }
+
+    pub fn consume_event_async(&self) -> AsyncEventReader {
+        AsyncEventReader {
+            event_buffer: self.inner.clone(),
+        }
+    }
+
+    pub async fn consume_events_async(&self, buffer: &mut [InputEvent]) -> usize {
+        let reader = AsyncEventReader {
+            event_buffer: self.inner.clone(),
+        };
+        let mut count = 0;
+        let first_event = reader.await.ok();
+        if let Some(event) = first_event {
+            buffer[count] = event;
+            count += 1;
+        } else {
+            return count;
+        }
+        count += self.consume_events(&mut buffer[count..]);
+        count
     }
 }
 
@@ -116,13 +217,22 @@ impl EventBuffer {
     }
 
     //max queued events is actually 1 less
-    pub fn add_event(&mut self, event: InputEvent) -> Result<(), KernelError> {
-        if (self.first_empty_space + 1) % (MAX_QUEUED_EVENTS as u32) == self.first_valid_event {
-            return kerror!(InsufficientResources);
+    pub fn add_events(&mut self, events: &[InputEvent]) -> Result<(), KernelError> {
+        let available_space = {
+            let first_empty_space = self.first_empty_space as i64;
+            let mut first_valid_event = self.first_valid_event as i64;
+            if first_valid_event < first_empty_space {
+                first_valid_event += MAX_QUEUED_EVENTS as i64;
+            }
+            first_valid_event - first_empty_space - 1
+        };
+        let events_to_add = events.len().min(available_space as usize);
+
+        for i in 0..events_to_add {
+            let empty_space_index = (self.first_empty_space + i as u32) % MAX_QUEUED_EVENTS as u32;
+            self.queue[empty_space_index as usize] = events[i];
         }
-        let empty_space_index = self.first_empty_space as usize;
-        self.queue[empty_space_index] = event;
-        self.first_empty_space = (self.first_empty_space + 1) % MAX_QUEUED_EVENTS as u32;
+        self.first_empty_space = (self.first_empty_space + events_to_add as u32) % MAX_QUEUED_EVENTS as u32;
         if let Some(waker) = self.async_waker.take() {
             waker.wake();
         }
@@ -136,6 +246,19 @@ impl EventBuffer {
         let event_index = self.first_valid_event;
         self.first_valid_event = (self.first_valid_event + 1) % MAX_QUEUED_EVENTS as u32;
         Some(self.queue[event_index as usize])
+    }
+
+    pub fn consume_events(&mut self, buffer: &mut [InputEvent]) -> usize {
+        let mut count = 0;
+        while count < buffer.len() {
+            if let Some(event) = self.consume_event() {
+                buffer[count] = event;
+                count += 1;
+            } else {
+                break;
+            }
+        }
+        count
     }
 }
 
@@ -154,5 +277,50 @@ impl Future for AsyncEventReader {
         }
         inner.async_waker = Some(cx.waker().clone());
         Poll::Pending
+    }
+}
+
+impl From<&DeviceType> for u16 {
+    fn from(dt: &DeviceType) -> Self {
+        match dt {
+            DeviceType::Keyboard => 0,
+            DeviceType::Mouse => 1,
+            DeviceType::Controller => 2,
+            DeviceType::Touchpad => 3,
+            DeviceType::_6Dof => 4,
+            DeviceType::Other(v) => ((*v as u16) << 8) | 0xFF,
+        }
+    }
+}
+
+impl From<u16> for DeviceType {
+    fn from(value: u16) -> Self {
+        match value {
+            0 => DeviceType::Keyboard,
+            1 => DeviceType::Mouse,
+            2 => DeviceType::Controller,
+            3 => DeviceType::Touchpad,
+            4 => DeviceType::_6Dof,
+            v => DeviceType::Other((v >> 8) as u8),
+        }
+    }
+}
+
+impl From<&DeviceType> for (String, u16) {
+    fn from(dt: &DeviceType) -> Self {
+        match dt {
+            DeviceType::Keyboard => ("keyboard".to_string(), dt.into()),
+            DeviceType::Mouse => ("mouse".to_string(), dt.into()),
+            DeviceType::Controller => ("controller".to_string(), dt.into()),
+            DeviceType::Touchpad => ("touchpad".to_string(), dt.into()),
+            DeviceType::_6Dof => ("6dof".to_string(), dt.into()),
+            DeviceType::Other(v) => (format!("other_{}", v), dt.into()),
+        }
+    }
+}
+
+impl DeviceType {
+    pub fn all_variants() -> &'static [DeviceType] {
+        &ALL_VARIANTS
     }
 }

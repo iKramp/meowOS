@@ -114,3 +114,8 @@ pub fn print_available_fs_driver_types() {
     let vfs = lock_w_info!(VFS);
     vfs.print_available_fs_driver_types();
 }
+
+pub fn allocate_device() -> (DeviceId, DeviceDetails) {
+    let mut vfs = lock_w_info!(VFS);
+    VFS_ADAPTER_DEVICE.allocate_device(&mut vfs)
+}

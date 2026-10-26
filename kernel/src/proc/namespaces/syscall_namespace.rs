@@ -145,7 +145,12 @@ impl SyscallNamespace {
         if pack.mask & (1 << in_pack_index) == 0 {
             return None;
         }
-        pack.pack.get_handler(in_pack_index as usize)
+        let syscall = pack.pack.get_handler(in_pack_index as usize);
+        if let Some((handler, name)) = syscall {
+            println!("syscall_name: {name}");
+            return Some(handler);
+        }
+        None
     }
 
     fn get_pack(syscall_number: u32, mapped_syscalls: &[MappedSyscallPack]) -> Option<&MappedSyscallPack> {

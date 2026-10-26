@@ -110,3 +110,7 @@ pub fn draw_rectangle(x: usize, y: usize, width: usize, height: usize, color: (u
         }
     }
 }
+
+pub fn get_dimensions() -> (usize, usize) {
+    unsafe { (VGA_BINDING.width, VGA_BINDING.height) }
+}

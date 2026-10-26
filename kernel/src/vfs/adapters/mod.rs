@@ -5,11 +5,13 @@ use crate::{drivers::block_device::disk::DirEntry, memory::addresses::PhysAddr, 
 
 use super::{DeviceDetails, DeviceId, Inode, InodeIndex, Vfs, filesystem_trait::FileSystem};
 
+mod fb_adapter;
 mod net_adapter;
 mod null_adapter;
 mod proc_adapter;
 mod tty_adapter;
 
+pub use fb_adapter::FbAdapter;
 pub use null_adapter::NullAdapter;
 pub use proc_adapter::ProcAdapter;
 pub use tty_adapter::TtyAdapter;
@@ -47,16 +49,31 @@ impl VfsAdapterDevice {
 pub trait VfsAdapterTrait: Debug + Send + Sync {
     fn device_id(&self) -> DeviceId;
     fn partition_id(&self) -> Uuid;
+    //Might be unused by some filesystems, but this is called for every new FileHandle, not Inode
+    //Filesystems may return extra data to be used later, but it can't be data that may become
+    //inconsistent by writes/reads to other instances of FileHandle to the same Inode.
+    //Open may also be called for FileHandles that are cloned from existing FileHandles (extra data
+    //is not blindly copied). This happens when cloning namespaces
+    fn open(&self, inode: InodeIndex) -> Result<Box<[u8]>, KernelError>;
+    fn close(&self, inode: InodeIndex, extra_data: Box<[u8]>) -> Result<(), KernelError>;
     async fn read(
         &self,
         inode: InodeIndex,
+        extra_data: &Box<[u8]>,
         offset_bytes: u64,
         size_bytes: u64,
         buffer: &[PhysAddr],
         blocking: bool,
     ) -> Result<(u64, FileReadResult), KernelError>;
     async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, KernelError>;
-    async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), KernelError>;
+    async fn write(
+        &self,
+        inode: InodeIndex,
+        extra_data: &Box<[u8]>,
+        offset: u64,
+        size: u64,
+        buffer: &[PhysAddr],
+    ) -> Result<(Inode, u64), KernelError>;
     async fn stat(&self, inode: InodeIndex) -> Result<Inode, KernelError>;
 }
 
@@ -70,23 +87,39 @@ impl<T: VfsAdapterTrait> FileSystem for T {
         VfsAdapterTrait::partition_id(self)
     }
 
+    fn open(&self, inode: InodeIndex) -> Result<Box<[u8]>, KernelError> {
+        VfsAdapterTrait::open(self, inode)
+    }
+
+    fn close(&self, inode: InodeIndex, extra_data: Box<[u8]>) -> Result<(), KernelError> {
+        VfsAdapterTrait::close(self, inode, extra_data)
+    }
+
     async fn read(
         &self,
         inode: InodeIndex,
+        extra_data: &Box<[u8]>,
         offset_bytes: u64,
         size_bytes: u64,
         buffer: &[PhysAddr],
         blocking: bool,
     ) -> Result<(u64, FileReadResult), KernelError> {
-        VfsAdapterTrait::read(self, inode, offset_bytes, size_bytes, buffer, blocking).await
+        VfsAdapterTrait::read(self, inode, extra_data, offset_bytes, size_bytes, buffer, blocking).await
     }
 
     async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {
         VfsAdapterTrait::read_dir(self, inode).await
     }
 
-    async fn write(&self, inode: InodeIndex, offset: u64, size: u64, buffer: &[PhysAddr]) -> Result<(Inode, u64), KernelError> {
-        VfsAdapterTrait::write(self, inode, offset, size, buffer).await
+    async fn write(
+        &self,
+        inode: InodeIndex,
+        extra_data: &Box<[u8]>,
+        offset: u64,
+        size: u64,
+        buffer: &[PhysAddr],
+    ) -> Result<(Inode, u64), KernelError> {
+        VfsAdapterTrait::write(self, inode, extra_data, offset, size, buffer).await
     }
 
     async fn stat(&self, inode: InodeIndex, _parent: InodeIndex) -> Result<Inode, KernelError> {
@@ -124,11 +157,17 @@ impl<T: VfsAdapterTrait> FileSystem for T {
         kerror!(UnsupportedOperation)
     }
 
-    async fn truncate(&self, _inode: InodeIndex, _size: u64) -> Result<(), KernelError> {
+    async fn truncate(&self, _inode: InodeIndex, _extra_data: &Box<[u8]>, _size: u64) -> Result<(), KernelError> {
         kerror!(UnsupportedOperation)
     }
 
-    async fn rename(&self, _inode: InodeIndex, _parent_inode: InodeIndex, _name: &str) -> Result<(), KernelError> {
+    async fn rename(
+        &self,
+        _inode: InodeIndex,
+        _parent_inode: InodeIndex,
+        _parent_extra_data: &Box<[u8]>,
+        _name: &str,
+    ) -> Result<(), KernelError> {
         kerror!(UnsupportedOperation)
     }
 }

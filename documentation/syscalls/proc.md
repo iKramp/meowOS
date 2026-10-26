@@ -51,18 +51,18 @@ struct ExecArgs {
 }
 
 #[repr(C)]
-struct CDuration {
+struct FfiDuration {
     sec: u64,
     nsec: u64,
 }
 
 #[repr(C)]
 struct TimeInfo {
-    time_since_epoch: CDuration,
-    time_since_boot: CDuration,
-    program_start_time: CDuration,
-    program_userspace_cpu_time: CDuration,
-    program_kernelspace_cpu_time: CDuration,
+    time_since_epoch: FfiDuration,
+    time_since_boot: FfiDuration,
+    program_start_time: FfiDuration,
+    program_userspace_cpu_time: FfiDuration,
+    program_kernelspace_cpu_time: FfiDuration,
 }
     
 

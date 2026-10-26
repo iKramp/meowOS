@@ -87,9 +87,18 @@ impl FileSystem for Dtmpfs {
         Ok(())
     }
 
+    fn open(&self, _inode: InodeIndex) -> Result<Box<[u8]>, KernelError> {
+        Ok(Box::new([]))
+    }
+
+    fn close(&self, _inode: InodeIndex, _extra_data: Box<[u8]>) -> Result<(), KernelError> {
+        Ok(())
+    }
+
     async fn read(
         &self,
         _inode: InodeIndex,
+        _extra_data: &Box<[u8]>,
         _offset_bytes: u64,
         _size_bytes: u64,
         _buffer: &[PhysAddr],
@@ -116,6 +125,7 @@ impl FileSystem for Dtmpfs {
     async fn write(
         &self,
         _inode: InodeIndex,
+        _extra_data: &Box<[u8]>,
         _offset: u64,
         _size: u64,
         _buffer: &[PhysAddr],
@@ -190,11 +200,17 @@ impl FileSystem for Dtmpfs {
         kerror!(UnsupportedOperation)
     }
 
-    async fn truncate(&self, _inode: InodeIndex, _size: u64) -> Result<(), KernelError> {
+    async fn truncate(&self, _inode: InodeIndex, _extra_data: &Box<[u8]>, _size: u64) -> Result<(), KernelError> {
         kerror!(UnsupportedOperation)
     }
 
-    async fn rename(&self, inode: InodeIndex, parent_inode: InodeIndex, name: &str) -> Result<(), KernelError> {
+    async fn rename(
+        &self,
+        inode: InodeIndex,
+        parent_inode: InodeIndex,
+        _parent_extra_data: &Box<[u8]>,
+        name: &str,
+    ) -> Result<(), KernelError> {
         let mut inner = lock_w_info!(self.global_lock);
         let Some(parent_node) = inner.inodes.get_mut(&parent_inode) else {
             return Ok(());

@@ -8,6 +8,19 @@ pub struct Instant {
     since_epoch: Duration,
 }
 
+#[repr(C)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Default)]
+pub struct FfiDuration {
+    pub seconds: u64,
+    pub nanos: u32,
+}
+
+#[repr(C)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Default)]
+pub struct FfiInstant {
+    pub since_epoch: FfiDuration,
+}
+
 pub const UNIX_EPOCH: Instant = Instant {
     since_epoch: Duration::from_secs(0),
 };
@@ -67,5 +80,39 @@ impl Debug for Instant {
 impl core::fmt::Display for Instant {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "Instant({:?})", self.since_epoch)
+    }
+}
+
+impl From<Instant> for FfiInstant {
+    fn from(instant: Instant) -> Self {
+        FfiInstant {
+            since_epoch: FfiDuration {
+                seconds: instant.since_epoch.as_secs(),
+                nanos: instant.since_epoch.subsec_nanos(),
+            },
+        }
+    }
+}
+
+impl From<FfiInstant> for Instant {
+    fn from(ffi_instant: FfiInstant) -> Self {
+        Instant {
+            since_epoch: Duration::new(ffi_instant.since_epoch.seconds, ffi_instant.since_epoch.nanos),
+        }
+    }
+}
+
+impl From<Duration> for FfiDuration {
+    fn from(duration: Duration) -> Self {
+        FfiDuration {
+            seconds: duration.as_secs(),
+            nanos: duration.subsec_nanos(),
+        }
+    }
+}
+
+impl From<FfiDuration> for Duration {
+    fn from(ffi_duration: FfiDuration) -> Self {
+        Duration::new(ffi_duration.seconds, ffi_duration.nanos)
     }
 }

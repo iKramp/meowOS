@@ -8,14 +8,24 @@ use std::vec::Vec;
 use crate::memory::addresses::*;
 use crate::memory::{physical_allocator, safe_memcpy_from_user, safe_memcpy_to_user};
 use crate::proc::namespaces::FilesystemNamespace;
-use crate::proc::syscall::{SyscallCpuState, SyscallPack, register_syscall_pack, string_from_args};
+use crate::proc::syscall::{SyscallCpuState, SyscallHandler, SyscallPack, register_syscall_pack, string_from_args};
 use crate::proc::{self, ProcessData, syscall};
 use crate::task_runner::{self, PidOption};
 use crate::vfs::file::OpenFlags;
 use crate::vfs::{self, InodeIdentifierChain, InodePermissionFlags, InodeType, InodeTypeAndPerms};
 
 pub(super) fn init_fs_syscall_pack() {
-    let handlers = [fopen, fclose, fread, fwrite, fseek, fcreate, flink, funlink, fstat];
+    let handlers: [(SyscallHandler, &'static str); _] = [
+        (fopen, "fopen"),
+        (fclose, "fclose"),
+        (fread, "fread"),
+        (fwrite, "fwrite"),
+        (fseek, "fseek"),
+        (fcreate, "fcreate"),
+        (flink, "flink"),
+        (funlink, "funlink"),
+        (fstat, "fstat"),
+    ];
 
     let fs_syscalls = SyscallPack::new(Box::new(handlers));
     register_syscall_pack("fs".into(), Arc::new(fs_syscalls));
@@ -148,6 +158,8 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         return;
     }
 
+    let blocking = !read_mode_flags.nonblocking();
+
     let file_handle = {
         let proc_mut = proc.get_mutable();
         let namespaces = proc_mut.get_namespaces();
@@ -170,12 +182,13 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let buffer_alloc = physical_allocator::allocate_contiguous(pages as u32);
         let buffers = buffer_alloc.get_range().get_addresses().collect::<Vec<PhysAddr>>();
 
-        let read_result = crate::vfs::read_file(f_handle.get(), &buffers, size, !read_mode_flags.nonblocking()).await;
+        let read_result = crate::vfs::read_file(f_handle.get(), &buffers, size, blocking).await;
         let Some(proc) = proc_clone.upgrade() else {
             return; //proc was killed
         };
         let Ok((bytes_read, read_result)) = read_result else {
             proc.set_syscall_return(&[u64::MAX]);
+            crate::proc::wake_process(proc.pid());
             return;
         };
 
@@ -186,6 +199,7 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let valid_copy = safe_memcpy_to_user(dst, src, size as usize);
         if !valid_copy {
             proc.set_syscall_return(&[u64::MAX]);
+            crate::proc::wake_process(proc.pid());
             return;
         }
 
@@ -194,10 +208,9 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         crate::proc::wake_process(proc.pid())
     };
 
-    let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
-
-    task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
     proc.set_sleeping(true);
+    let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
+    task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
 }
 
 fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
@@ -212,7 +225,7 @@ fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         return;
     }
 
-    let valid = syscall::verify_memory_range(buf_ptr, buf_ptr + size);
+    let valid = syscall::verify_memory_range(buf_ptr, buf_ptr.saturating_add(size));
     if !valid {
         proc.set_syscall_return(&[u64::MAX]);
         return;
@@ -260,6 +273,7 @@ fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         if write_result.is_err() {
             println!("fwrite: write failed");
             proc.set_syscall_return(&[u64::MAX]);
+            crate::proc::wake_process(proc.pid());
             return;
         }
         let bytes_written = unsafe { write_result.unwrap_unchecked() };
@@ -270,10 +284,9 @@ fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         crate::proc::wake_process(proc.pid())
     };
 
-    let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
-
-    task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
     proc.set_sleeping(true);
+    let ffi_safe_task = std::ffi_future::future::into_ffi_future(task);
+    task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
 }
 
 fn fseek(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
@@ -318,6 +331,7 @@ fn fseek(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
 
         let new_pos = new_pos.max(0).min(f_size as i64) as u64;
         file_handle.position.store(new_pos, Ordering::Release);
+        file_handle.reached_eof.store(false, Ordering::Release);
 
         let Some(proc) = proc_clone.upgrade() else {
             return; //proc was killed

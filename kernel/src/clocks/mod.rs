@@ -14,6 +14,7 @@ static mut SELECTED_TIMER: MaybeUninit<Box<dyn Timer>> = MaybeUninit::uninit();
 static mut EVENT_RUNNER: MaybeUninit<EventRunner> = MaybeUninit::uninit();
 const TIMER_INTERRUPT_VECTOR: usize = 251;
 pub const TIMER_DESIRED_FREQUENCY: u32 = 1; //don't need much lmao
+pub static mut TIME_AT_BOOT: MaybeUninit<Instant> = MaybeUninit::uninit();
 
 pub trait Timer {
     fn init(&mut self) -> bool;
@@ -42,6 +43,8 @@ pub fn init() {
             unsafe {
                 std::time::GET_TIME = || SELECTED_TIMER.assume_init_ref().get_time();
             }
+
+            unsafe { TIME_AT_BOOT = MaybeUninit::new(std::time::Instant::now()) };
 
             return;
         }
@@ -89,4 +92,8 @@ pub fn schedule_event(event: ScheduledEvent) -> u64 {
 pub fn cancel_scheduled_event(id: u64) -> bool {
     let runner = unsafe { EVENT_RUNNER.assume_init_ref() };
     (runner.cancel)(id)
+}
+
+pub fn get_time_of_boot() -> Instant {
+    unsafe { *TIME_AT_BOOT.assume_init_ref() }
 }

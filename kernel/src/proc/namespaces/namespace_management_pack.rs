@@ -5,12 +5,17 @@ use crate::{
     proc::{
         NamespaceHolder, ProcessData, get_namespace_id,
         namespaces::NamespaceType,
-        syscall::{self, SyscallCpuState, SyscallPack},
+        syscall::{self, SyscallCpuState, SyscallHandler, SyscallPack},
     },
 };
 
 pub fn init_namespace_management_syscalls() {
-    let handlers = [mknamespace, rmnamespace, chnamespace, lsnamespace];
+    let handlers: [(SyscallHandler, &'static str); _] = [
+        (mknamespace, "mknamespace"),
+        (rmnamespace, "rmnamespace"),
+        (chnamespace, "chnamespace"),
+        (lsnamespace, "lsnamespace"),
+    ];
 
     let namespace_management_syscalls = SyscallPack::new(Box::new(handlers));
     syscall::register_syscall_pack("namespace_management".into(), Arc::new(namespace_management_syscalls));

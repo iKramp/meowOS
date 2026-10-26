@@ -1,5 +1,7 @@
 use std::vec::Vec;
 
+use crate::drivers::input::evnet_codes::*;
+
 bitfield::bitfield! {
     pub struct KeyboardState(u16);
     impl Debug;
@@ -126,6 +128,15 @@ pub enum KeyEvent {
     Released,
 }
 
+impl From<KeyEvent> for u32 {
+    fn from(value: KeyEvent) -> Self {
+        match value {
+            KeyEvent::Pressed => 1,
+            KeyEvent::Released => 0,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 #[rustfmt::skip]
 pub enum Key {
@@ -140,6 +151,7 @@ pub enum Key {
     Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8, Num9,
     NumDot, NumSlash, NumAsterisk, NumMinus, NumPlus, NumEnter,
     NumLock, ScrollLock, PrtScn,
+    CtrlBreak, Home, Up, PgUp, Left, Right, End, Down, PgDn, Insert, Delete,
     FakeLShift, FakeRshift
 }
 
@@ -260,6 +272,16 @@ impl Key {
                     0x36 => (Some((Key::FakeRshift, key_event)), 2),
                     0x37 => (Some((Key::PrtScn, key_event)), 2),
                     0x38 => (Some((Key::RAlt, key_event)), 2),
+                    0x47 => (Some((Key::Home, key_event)), 2),
+                    0x48 => (Some((Key::UpArrow, key_event)), 2),
+                    0x49 => (Some((Key::PgUp, key_event)), 2),
+                    0x4B => (Some((Key::LeftArrow, key_event)), 2),
+                    0x4D => (Some((Key::RightArrow, key_event)), 2),
+                    0x4F => (Some((Key::End, key_event)), 2),
+                    0x50 => (Some((Key::DownArrow, key_event)), 2),
+                    0x51 => (Some((Key::PgDn, key_event)), 2),
+                    0x52 => (Some((Key::Insert, key_event)), 2),
+                    0x53 => (Some((Key::Delete, key_event)), 2),
                     0x5B => (Some((Key::LSuper, key_event)), 2),
                     0x5C => (Some((Key::RSuper, key_event)), 2),
                     0x5D => (Some((Key::Menu, key_event)), 2),
@@ -270,6 +292,135 @@ impl Key {
                 (None, 3) //ignore this whole weird sequence
             }
             _ => (None, 1),
+        }
+    }
+}
+
+impl From<Key> for EventCode {
+    fn from(value: Key) -> Self {
+        match value {
+            Key::Esc => KEY_ESC,
+            Key::F1 => KEY_F1,
+            Key::F2 => KEY_F2,
+            Key::F3 => KEY_F3,
+            Key::F4 => KEY_F4,
+            Key::F5 => KEY_F5,
+            Key::F6 => KEY_F6,
+            Key::F7 => KEY_F7,
+            Key::F8 => KEY_F8,
+            Key::F9 => KEY_F9,
+            Key::F10 => KEY_F10,
+            Key::F11 => KEY_F11,
+            Key::F12 => KEY_F12,
+            Key::F13 => KEY_F13,
+            Key::F14 => KEY_F14,
+            Key::F15 => KEY_F15,
+            Key::F16 => KEY_F16,
+            Key::F17 => KEY_F17,
+            Key::F18 => KEY_F18,
+            Key::F19 => KEY_F19,
+            Key::F20 => KEY_F20,
+            Key::F21 => KEY_F21,
+            Key::F22 => KEY_F22,
+            Key::F23 => KEY_F23,
+            Key::F24 => KEY_F24,
+            Key::Backtick => KEY_GRAVE,
+            Key::K1 => KEY_1,
+            Key::K2 => KEY_2,
+            Key::K3 => KEY_3,
+            Key::K4 => KEY_4,
+            Key::K5 => KEY_5,
+            Key::K6 => KEY_6,
+            Key::K7 => KEY_7,
+            Key::K8 => KEY_8,
+            Key::K9 => KEY_9,
+            Key::K0 => KEY_0,
+            Key::Dash => KEY_MINUS,
+            Key::Equal => KEY_EQUAL,
+            Key::Backspace => KEY_BACKSPACE,
+            Key::Tab => KEY_TAB,
+            Key::Q => KEY_Q,
+            Key::W => KEY_W,
+            Key::E => KEY_E,
+            Key::R => KEY_R,
+            Key::T => KEY_T,
+            Key::Y => KEY_Y,
+            Key::U => KEY_U,
+            Key::I => KEY_I,
+            Key::O => KEY_O,
+            Key::P => KEY_P,
+            Key::LeftBracket => KEY_LEFTBRACE,
+            Key::RightBracket => KEY_RIGHTBRACE,
+            Key::Enter => KEY_ENTER,
+            Key::CapsLock => KEY_CAPSLOCK,
+            Key::A => KEY_A,
+            Key::S => KEY_S,
+            Key::D => KEY_D,
+            Key::F => KEY_F,
+            Key::G => KEY_G,
+            Key::H => KEY_H,
+            Key::J => KEY_J,
+            Key::K => KEY_K,
+            Key::L => KEY_L,
+            Key::Semicolon => KEY_SEMICOLON,
+            Key::Quote => KEY_APOSTROPHE,
+            Key::Backslash => KEY_BACKSLASH,
+            Key::LShift => KEY_LEFTSHIFT,
+            Key::Z => KEY_Z,
+            Key::X => KEY_X,
+            Key::C => KEY_C,
+            Key::V => KEY_V,
+            Key::B => KEY_B,
+            Key::N => KEY_N,
+            Key::M => KEY_M,
+            Key::Comma => KEY_COMMA,
+            Key::Dot => KEY_DOT,
+            Key::Slash => KEY_SLASH,
+            Key::RShift => KEY_RIGHTSHIFT,
+            Key::Lctrl => KEY_LEFTCTRL,
+            Key::LSuper => KEY_LEFTMETA,
+            Key::LAlt => KEY_LEFTALT,
+            Key::Space => KEY_SPACE,
+            Key::RAlt => KEY_RIGHTALT,
+            Key::RSuper => KEY_RIGHTMETA,
+            Key::Menu => KEY_MENU,
+            Key::Rctrl => KEY_RIGHTCTRL,
+            Key::LeftArrow => KEY_LEFT,
+            Key::UpArrow => KEY_UP,
+            Key::RightArrow => KEY_RIGHT,
+            Key::DownArrow => KEY_DOWN,
+            Key::Num0 => KEY_KP0,
+            Key::Num1 => KEY_KP1,
+            Key::Num2 => KEY_KP2,
+            Key::Num3 => KEY_KP3,
+            Key::Num4 => KEY_KP4,
+            Key::Num5 => KEY_KP5,
+            Key::Num6 => KEY_KP6,
+            Key::Num7 => KEY_KP7,
+            Key::Num8 => KEY_KP8,
+            Key::Num9 => KEY_KP9,
+            Key::NumDot => KEY_KPDOT,
+            Key::NumSlash => KEY_KPSLASH,
+            Key::NumAsterisk => KEY_KPASTERISK,
+            Key::NumMinus => KEY_KPMINUS,
+            Key::NumPlus => KEY_KPPLUS,
+            Key::NumEnter => KEY_KPENTER,
+            Key::NumLock => KEY_NUMLOCK,
+            Key::ScrollLock => KEY_SCROLLLOCK,
+            Key::PrtScn => KEY_SYSRQ,
+            Key::FakeLShift => KEY_RESERVED, //not passed on
+            Key::FakeRshift => KEY_RESERVED,
+            Key::CtrlBreak => KEY_PAUSE,
+            Key::Home => KEY_HOME,
+            Key::Up => KEY_UP,
+            Key::PgUp => KEY_PAGEUP,
+            Key::Left => KEY_LEFT,
+            Key::Right => KEY_RIGHT,
+            Key::End => KEY_END,
+            Key::Down => KEY_DOWN,
+            Key::PgDn => KEY_PAGEDOWN,
+            Key::Insert => KEY_INSERT,
+            Key::Delete => KEY_DELETE,
         }
     }
 }

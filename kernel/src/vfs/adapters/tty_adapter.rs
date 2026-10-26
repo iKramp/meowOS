@@ -95,9 +95,18 @@ impl VfsAdapterTrait for TtyAdapter {
         self.device_details.partition
     }
 
+    fn open(&self, _inode: crate::vfs::InodeIndex) -> Result<Box<[u8]>, KernelError> {
+        Ok(Box::new([]))
+    }
+
+    fn close(&self, _inode: crate::vfs::InodeIndex, _extra_data: Box<[u8]>) -> Result<(), KernelError> {
+        Ok(())
+    }
+
     async fn read(
         &self,
         _inode: crate::vfs::InodeIndex,
+        _extra_data: &Box<[u8]>,
         _offset_bytes: u64,
         size_bytes: u64,
         buffer: &[PhysAddr],
@@ -151,6 +160,7 @@ impl VfsAdapterTrait for TtyAdapter {
     async fn write(
         &self,
         inode: crate::vfs::InodeIndex,
+        _extra_data: &Box<[u8]>,
         _offset: u64,
         size: u64,
         buffer: &[PhysAddr],

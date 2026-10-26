@@ -4,12 +4,18 @@ use crate::{
     memory::safe_memcpy_to_user,
     proc::{
         ProcessData, SyscallNamespace,
-        syscall::{self, SyscallCpuState, SyscallPack, syscall_registry},
+        syscall::{self, SyscallCpuState, SyscallHandler, SyscallPack, syscall_registry},
     },
 };
 
 pub fn init_syscall_management_syscalls() {
-    let handlers = [lspacks, lsallpacks, map_pack, unmap_pack, restrict];
+    let handlers: [(SyscallHandler, &'static str); _] = [
+        (lspacks, "lspacks"),
+        (lsallpacks, "lsallpacks"),
+        (map_pack, "map_pack"),
+        (unmap_pack, "unmap_pack"),
+        (restrict, "restrict"),
+    ];
 
     let syscall_management_syscalls = SyscallPack::new(Box::new(handlers));
     syscall::register_syscall_pack("syscall_management".into(), Arc::new(syscall_management_syscalls));

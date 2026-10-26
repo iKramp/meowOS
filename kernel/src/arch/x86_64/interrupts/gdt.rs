@@ -163,7 +163,7 @@ impl GlobalDescriptorTable {
 }
 
 #[derive(Debug)]
-#[repr(C, packed)]
+#[repr(C)]
 struct SegmentDescriptor {
     limit_low: u16,
     base_low: u16,
