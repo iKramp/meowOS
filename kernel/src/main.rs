@@ -12,6 +12,7 @@
 #![allow(internal_features)]
 #![allow(clippy::fn_to_numeric_cast)]
 #![feature(string_into_chars)]
+#![feature(generic_const_exprs)]
 
 extern crate static_cond;
 

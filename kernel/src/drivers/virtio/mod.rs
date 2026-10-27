@@ -1,5 +1,7 @@
 //!Common structs and functions for all virtio devices
 
+mod virtqueue;
+
 use bitfield::bitfield;
 
 bitfield! {

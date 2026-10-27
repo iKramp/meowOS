@@ -32,12 +32,11 @@ static GLOBAL_MOUNTS: RWSpinlock<BTreeMap<InodeIdentifier, InodeIdentifier>> = R
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[rustc_layout_scalar_valid_range_end(0xFFFF_FFFF_FFFF_FFFE)]
 pub struct DeviceId(u64);
 
 impl DeviceId {
     pub const fn new(id: u64) -> Self {
-        unsafe { DeviceId(id) }
+        DeviceId(id)
     }
 }
 
