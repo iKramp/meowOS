@@ -2,6 +2,32 @@ use bitfield::bitfield;
 
 use super::{DeviceId, InodeIndex};
 
+//keep in sync
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct UserspaceInode {
+    //RO
+    pub index: InodeIndex,
+    //RO
+    pub device: DeviceId, //some map to major/minor (minor are partitions)
+    //type RO, permissions RW
+    pub type_mode: InodeTypeAndPerms,
+    //RW
+    pub link_cnt: u16,
+    //RW
+    pub uid: u16,
+    //RW
+    pub gid: u16,
+    //RW
+    pub size: u64,
+    //RW
+    pub access_time: u64,
+    //RW
+    pub modification_time: u64,
+    //RW
+    pub stat_change_time: u64,
+}
+
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub struct Inode {
@@ -59,6 +85,21 @@ impl Inode {
             modification_time: 0,
             stat_change_time: 0,
             internal_synchronization: false,
+        }
+    }
+
+    pub fn to_userspace_inode(&self) -> UserspaceInode {
+        UserspaceInode {
+            index: self.index,
+            device: self.device,
+            type_mode: self.type_mode.clone(),
+            link_cnt: self.link_cnt,
+            uid: self.uid,
+            gid: self.gid,
+            size: self.size,
+            access_time: self.access_time,
+            modification_time: self.modification_time,
+            stat_change_time: self.stat_change_time,
         }
     }
 }

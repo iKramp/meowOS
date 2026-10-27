@@ -16,8 +16,9 @@ use crate::{
 pub(in crate::proc) enum MemoryRangeType {
     Stack = 0,
     Code = 1,
-    Data = 2,
+    RWData = 2,
     Shared = 3,
+    StaticData = 4,
 }
 
 impl MemoryRangeType {
@@ -25,8 +26,9 @@ impl MemoryRangeType {
         match value {
             0 => Some(MemoryRangeType::Stack),
             1 => Some(MemoryRangeType::Code),
-            2 => Some(MemoryRangeType::Data),
+            2 => Some(MemoryRangeType::RWData),
             3 => Some(MemoryRangeType::Shared),
+            4 => Some(MemoryRangeType::StaticData),
             _ => None,
         }
     }

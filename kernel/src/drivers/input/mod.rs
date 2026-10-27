@@ -27,7 +27,7 @@ pub(super) fn init_input() {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
-pub enum DeviceType {
+pub enum InputDeviceType {
     Keyboard,
     Mouse,
     Controller,
@@ -35,16 +35,16 @@ pub enum DeviceType {
     _6Dof,
     Other(u8),
 }
-const ALL_VARIANTS: [DeviceType; 5] = [
-    DeviceType::Keyboard,
-    DeviceType::Mouse,
-    DeviceType::Controller,
-    DeviceType::Touchpad,
-    DeviceType::_6Dof,
+const ALL_VARIANTS: [InputDeviceType; 5] = [
+    InputDeviceType::Keyboard,
+    InputDeviceType::Mouse,
+    InputDeviceType::Controller,
+    InputDeviceType::Touchpad,
+    InputDeviceType::_6Dof,
 ];
 
 type DeviceId = u64;
-type EventBufferWithType = (Option<DeviceType>, Option<DeviceId>, EventBufferWrapper);
+type EventBufferWithType = (Option<InputDeviceType>, Option<DeviceId>, EventBufferWrapper);
 
 pub struct InputEventManager {
     queues: RWSpinlock<Vec<EventBufferWithType>>,
@@ -64,7 +64,7 @@ impl InputEventManager {
         !queues.is_empty()
     }
 
-    pub fn add_events(&self, device: Option<DeviceType>, device_id: Option<DeviceId>, events: &[InputEvent]) {
+    pub fn add_events(&self, device: Option<InputDeviceType>, device_id: Option<DeviceId>, events: &[InputEvent]) {
         let queues = r_lock_w_info!(self.queues);
         for queue in queues.iter() {
             let dt_matches = if let Some(dt1) = &queue.0
@@ -125,7 +125,7 @@ impl InputEventManager {
         count
     }
 
-    pub fn add_buffer(&self, device: Option<DeviceType>, device_id: Option<DeviceId>) -> u64 {
+    pub fn add_buffer(&self, device: Option<InputDeviceType>, device_id: Option<DeviceId>) -> u64 {
         let new_id = self.queue_counter.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         let new_queue = EventBufferWrapper {
             id: new_id,
@@ -141,7 +141,7 @@ impl InputEventManager {
         queues.retain(|e| e.2.id != buffer_id);
     }
 
-    pub fn get_buffer_type(&self, buffer_id: u64) -> Option<(Option<DeviceType>, Option<DeviceId>)> {
+    pub fn get_buffer_type(&self, buffer_id: u64) -> Option<(Option<InputDeviceType>, Option<DeviceId>)> {
         let queues = r_lock_w_info!(self.queues);
         for queue in queues.iter() {
             if queue.2.id == buffer_id {
@@ -156,8 +156,9 @@ impl InputEventManager {
 #[derive(Clone, Copy, Default)]
 pub struct InputEvent {
     pub generated_at: FfiInstant,
-    pub code: u32, //could be u16 but Instant is 8B aligned anyway
-    pub value: u32,
+    pub device_type: u16,
+    pub code: u16,
+    pub value: u16,
 }
 
 struct EventBufferWrapper {
@@ -280,47 +281,47 @@ impl Future for AsyncEventReader {
     }
 }
 
-impl From<&DeviceType> for u16 {
-    fn from(dt: &DeviceType) -> Self {
+impl From<&InputDeviceType> for u16 {
+    fn from(dt: &InputDeviceType) -> Self {
         match dt {
-            DeviceType::Keyboard => 0,
-            DeviceType::Mouse => 1,
-            DeviceType::Controller => 2,
-            DeviceType::Touchpad => 3,
-            DeviceType::_6Dof => 4,
-            DeviceType::Other(v) => ((*v as u16) << 8) | 0xFF,
+            InputDeviceType::Keyboard => 0,
+            InputDeviceType::Mouse => 1,
+            InputDeviceType::Controller => 2,
+            InputDeviceType::Touchpad => 3,
+            InputDeviceType::_6Dof => 4,
+            InputDeviceType::Other(v) => ((*v as u16) << 8) | 0xFF,
         }
     }
 }
 
-impl From<u16> for DeviceType {
+impl From<u16> for InputDeviceType {
     fn from(value: u16) -> Self {
         match value {
-            0 => DeviceType::Keyboard,
-            1 => DeviceType::Mouse,
-            2 => DeviceType::Controller,
-            3 => DeviceType::Touchpad,
-            4 => DeviceType::_6Dof,
-            v => DeviceType::Other((v >> 8) as u8),
+            0 => InputDeviceType::Keyboard,
+            1 => InputDeviceType::Mouse,
+            2 => InputDeviceType::Controller,
+            3 => InputDeviceType::Touchpad,
+            4 => InputDeviceType::_6Dof,
+            v => InputDeviceType::Other((v >> 8) as u8),
         }
     }
 }
 
-impl From<&DeviceType> for (String, u16) {
-    fn from(dt: &DeviceType) -> Self {
+impl From<&InputDeviceType> for (String, u16) {
+    fn from(dt: &InputDeviceType) -> Self {
         match dt {
-            DeviceType::Keyboard => ("keyboard".to_string(), dt.into()),
-            DeviceType::Mouse => ("mouse".to_string(), dt.into()),
-            DeviceType::Controller => ("controller".to_string(), dt.into()),
-            DeviceType::Touchpad => ("touchpad".to_string(), dt.into()),
-            DeviceType::_6Dof => ("6dof".to_string(), dt.into()),
-            DeviceType::Other(v) => (format!("other_{}", v), dt.into()),
+            InputDeviceType::Keyboard => ("keyboard".to_string(), dt.into()),
+            InputDeviceType::Mouse => ("mouse".to_string(), dt.into()),
+            InputDeviceType::Controller => ("controller".to_string(), dt.into()),
+            InputDeviceType::Touchpad => ("touchpad".to_string(), dt.into()),
+            InputDeviceType::_6Dof => ("6dof".to_string(), dt.into()),
+            InputDeviceType::Other(v) => (format!("other_{}", v), dt.into()),
         }
     }
 }
 
-impl DeviceType {
-    pub fn all_variants() -> &'static [DeviceType] {
+impl InputDeviceType {
+    pub fn all_variants() -> &'static [InputDeviceType] {
         &ALL_VARIANTS
     }
 }

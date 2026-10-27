@@ -223,6 +223,12 @@ impl InterruptProcessorState {
         Self::new_full(0, 0, 0, 0, 0, 0, 0, 0, 0, rsp, 0, 0, 0, 0, 0, 0, rip)
     }
 
+    pub fn set_arg_registers(&mut self, argc: u64, argv: u64, envp: u64) {
+        self.rdi = argc;
+        self.rsi = argv;
+        self.rdx = envp;
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new_full(
         r15: u64,

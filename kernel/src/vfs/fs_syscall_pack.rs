@@ -178,11 +178,17 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let proc_clone = proc.downgrade();
     let task = async move {
         let f_handle = file_handle; //get to local
-        let pages = size.div_ceil(4096);
+        let file_handle_pos = f_handle.position.load(Ordering::Acquire);
+        let pos_aligned = file_handle_pos & !0xFFF;
+        let extra_offset = file_handle_pos - pos_aligned;
+        f_handle.position.store(pos_aligned, Ordering::Release);
+        let aligned_size = size + extra_offset;
+
+        let pages = aligned_size.div_ceil(4096);
         let buffer_alloc = physical_allocator::allocate_contiguous(pages as u32);
         let buffers = buffer_alloc.get_range().get_addresses().collect::<Vec<PhysAddr>>();
 
-        let read_result = crate::vfs::read_file(f_handle.get(), &buffers, size, blocking).await;
+        let read_result = crate::vfs::read_file(f_handle.get(), &buffers, aligned_size, blocking).await;
         let Some(proc) = proc_clone.upgrade() else {
             return; //proc was killed
         };
@@ -191,11 +197,16 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
             crate::proc::wake_process(proc.pid());
             return;
         };
+        if bytes_read < extra_offset {
+            f_handle.position.store(file_handle_pos, Ordering::Release);
+            proc.set_syscall_return(&[0, 0]);
+            return;
+        }
 
         //copy to user buffer
         let dst = buf_ptr;
         let buffer_alloc_virt: VirtAddr = buffer_alloc.0.start.into();
-        let src = buffer_alloc_virt.0;
+        let src = buffer_alloc_virt.0 + extra_offset;
         let valid_copy = safe_memcpy_to_user(dst, src, size as usize);
         if !valid_copy {
             proc.set_syscall_return(&[u64::MAX]);
@@ -204,7 +215,7 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         }
 
         //return
-        proc.set_syscall_return(&[bytes_read, read_result as u64]);
+        proc.set_syscall_return(&[bytes_read - extra_offset, read_result as u64]);
         crate::proc::wake_process(proc.pid())
     };
 
@@ -532,13 +543,14 @@ fn fstat(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let proc_clone = proc.downgrade();
     let task = async move {
         let stat_result = vfs::stat_file(file_handle.get()).await;
+        let userspace_inode = stat_result.to_userspace_inode();
 
         let Some(proc) = proc_clone.upgrade() else {
             return; //proc was killed
         };
         let dst = buf_ptr;
-        let src = (&raw const stat_result) as u64;
-        let valid_copy = safe_memcpy_to_user(dst, src, core::mem::size_of::<vfs::Inode>() as usize);
+        let src = (&raw const userspace_inode) as u64;
+        let valid_copy = safe_memcpy_to_user(dst, src, core::mem::size_of::<vfs::UserspaceInode>() as usize);
         if !valid_copy {
             println!("fstat: failed to copy stat result to user buffer");
             proc.set_syscall_return(&[u64::MAX]);

@@ -3,7 +3,7 @@ use uuid::Uuid;
 use crate::{
     drivers::{
         block_device::disk::DirEntry,
-        input::{DeviceType, InputEvent},
+        input::{InputDeviceType, InputEvent},
     },
     memory::addresses::{PhysAddr, VirtAddr},
     vfs::{DeviceId as VfsDeviceId, FileReadResult, Inode, ROOT_INODE_INDEX, adapters::VfsAdapterTrait},
@@ -90,7 +90,7 @@ impl VfsAdapterTrait for InputVfsAdapter {
         } else {
             return kerror!(InvalidArgument);
         };
-        let device_type = device_type.map(|t| DeviceType::from(t as u16));
+        let device_type = device_type.map(|t| InputDeviceType::from(t as u16));
 
         let buffer_id = super::INPUT_EVENT_MANAGER.add_buffer(device_type, device_id);
 
@@ -312,7 +312,7 @@ fn read_dir_root() -> Result<Box<[DirEntry]>, KernelError> {
 
 fn read_dir_device_type() -> Result<Box<[DirEntry]>, KernelError> {
     let mut entries = Vec::new();
-    for device_type in DeviceType::all_variants() {
+    for device_type in InputDeviceType::all_variants() {
         let (name, index): (String, u16) = device_type.into();
         entries.push(DirEntry {
             inode: (index as u64) | DEVICE_TYPE_PREFIX,

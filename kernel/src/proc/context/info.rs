@@ -77,7 +77,7 @@ pub struct ContextInfo<'a> {
     mem_init: Box<[(VirtAddr, &'a [u8])]>,
     entry_point: VirtAddr,
     cmdline: Box<str>,
-    args: Box<[Box<str>]>,
+    pub args: Box<[Box<str>]>,
     path: Box<str>,
 }
 
@@ -176,10 +176,8 @@ impl<'a> ContextInfo<'a> {
             return Err(ContextInfoError::InvalidCmdLine);
         };
 
-        let args = chunks
-            .map(|string| string.into_boxed_str())
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
+        let mut args = chunks.map(|string| string.into_boxed_str()).collect::<Vec<_>>();
+        args.insert(0, program_path.clone().into_boxed_str());
 
         Ok(Self {
             is_32_bit,
@@ -187,7 +185,7 @@ impl<'a> ContextInfo<'a> {
             mem_init,
             entry_point,
             cmdline: cmdline.into(),
-            args,
+            args: args.into_boxed_slice(),
             path: program_path.into_boxed_str(),
         })
     }

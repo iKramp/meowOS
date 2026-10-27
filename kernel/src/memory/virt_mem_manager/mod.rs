@@ -1,5 +1,5 @@
 use core::ops::Range;
-use std::{error::KernelError, lock_w_info, println, sync::no_int_spinlock::NoIntSpinlock};
+use std::{error::KernelError, kerror, lock_w_info, println, sync::no_int_spinlock::NoIntSpinlock};
 
 use crate::{
     arch::x86_64::memory::{
@@ -171,6 +171,12 @@ pub fn userspace_map(
     table_level: u8,
     table_page_index: u32,
 ) -> Result<(), KernelError> {
+    if table_level == 0 {
+        if page_range.start != 0 || page_range.end != 1 {
+            return kerror!(InvalidArgument);
+        }
+        return Ok(());
+    }
     assert!((1..PAGING_LEVELS).contains(&table_level));
 
     let table = unsafe { get_at_addr::<PageTable, _>(table_phys) };
@@ -184,6 +190,12 @@ pub fn userspace_unmap(
     table_level: u8,
     table_page_index: u32,
 ) -> Result<(), KernelError> {
+    if table_level == 0 {
+        if pages.start != 0 || pages.end != 1 {
+            return kerror!(InvalidArgument);
+        }
+        return Ok(());
+    }
     assert!((1..PAGING_LEVELS).contains(&table_level));
 
     let table = unsafe { get_at_addr::<PageTable, _>(table_phys) };

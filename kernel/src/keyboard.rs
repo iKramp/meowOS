@@ -128,7 +128,7 @@ pub enum KeyEvent {
     Released,
 }
 
-impl From<KeyEvent> for u32 {
+impl From<KeyEvent> for u16 {
     fn from(value: KeyEvent) -> Self {
         match value {
             KeyEvent::Pressed => 1,

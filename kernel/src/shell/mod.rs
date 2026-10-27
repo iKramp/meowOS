@@ -197,7 +197,7 @@ impl ShellState {
                         return;
                     };
                     proc.add_exit_hook(Box::new(move |exit_code| {
-                        lock_w_info!(TTY).print(&format!("Process {:?} exited with code {}\n", pid, exit_code));
+                        lock_w_info!(TTY).print(&format!("Process {:x?} exited with code {:X}\n", pid, exit_code));
                         lock_w_info!(SHELL_STATE).command_finished();
                     }));
                     let mut self_state = lock_w_info!(SHELL_STATE);
