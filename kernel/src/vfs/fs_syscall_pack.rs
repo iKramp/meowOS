@@ -179,9 +179,21 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let task = async move {
         let f_handle = file_handle; //get to local
         let file_handle_pos = f_handle.position.load(Ordering::Acquire);
-        let pos_aligned = file_handle_pos & !0xFFF;
-        let extra_offset = file_handle_pos - pos_aligned;
-        f_handle.position.store(pos_aligned, Ordering::Release);
+        let requires_aligned_position = unsafe {
+            //safe because this field never changes
+            f_handle.open_file.inode.get_read_reference().requires_aligned_position
+        };
+
+        let extra_offset;
+
+        if !requires_aligned_position {
+            extra_offset = 0;
+        } else {
+            let pos_aligned = file_handle_pos & !0xFFF; //align to 4k
+            extra_offset = file_handle_pos - pos_aligned;
+            f_handle.position.store(pos_aligned, Ordering::Release);
+        }
+
         let aligned_size = size + extra_offset;
 
         let pages = aligned_size.div_ceil(4096);
@@ -197,6 +209,7 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
             crate::proc::wake_process(proc.pid());
             return;
         };
+        //can't trigger on ignore_position
         if bytes_read < extra_offset {
             f_handle.position.store(file_handle_pos, Ordering::Release);
             proc.set_syscall_return(&[0, 0]);
@@ -262,6 +275,28 @@ fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let proc_cloned = proc.clone();
     let task = async move {
         let f_handle = file_handle; //get to local
+        let file_handle_pos = f_handle.position.load(Ordering::Acquire);
+        let requires_aligned_position = unsafe {
+            //safe because this field never changes
+            f_handle.open_file.inode.get_read_reference().requires_aligned_position
+        };
+
+        let extra_offset;
+
+        if !requires_aligned_position {
+            extra_offset = 0;
+        } else {
+            let pos_aligned = file_handle_pos & !0xFFF; //align to 4k
+            extra_offset = file_handle_pos - pos_aligned;
+            f_handle.position.store(pos_aligned, Ordering::Release);
+        }
+
+        let _aligned_size = size + extra_offset;
+
+        if extra_offset != 0 {
+            panic!("not handled yet. Data first has to be read, then written. Solve with cache or something");
+        }
+
         let pages = size.div_ceil(4096);
         let buffer_alloc = physical_allocator::allocate_contiguous(pages as u32);
         let buffer_alloc_virt: VirtAddr = buffer_alloc.0.start.into();

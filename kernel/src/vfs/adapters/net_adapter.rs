@@ -224,6 +224,7 @@ impl VfsAdapterTrait for NetAdapter {
                 modification_time: 0,
                 stat_change_time: 0,
                 internal_synchronization: true,
+                requires_aligned_position: false,
             },
             NICEntryType::MacAddress | NICEntryType::Mtu => inode::Inode {
                 index: inode,
@@ -237,6 +238,7 @@ impl VfsAdapterTrait for NetAdapter {
                 modification_time: 0,
                 stat_change_time: 0,
                 internal_synchronization: true,
+                requires_aligned_position: false,
             },
             NICEntryType::Data => inode::Inode {
                 index: inode,
@@ -250,6 +252,7 @@ impl VfsAdapterTrait for NetAdapter {
                 modification_time: 0,
                 stat_change_time: 0,
                 internal_synchronization: true,
+                requires_aligned_position: false,
             },
         };
         Ok(stat)

@@ -58,6 +58,10 @@ pub struct Inode {
     ///VFS information and instead request as much data as the process requests
     ///Mainly intended for virtual filesystems
     pub internal_synchronization: bool,
+
+    ///IF true, the filesystem that owns this inode ignores file position (never true for disk
+    ///filesystems). Kernel will not perform file position alignment on userspace syscalls
+    pub requires_aligned_position: bool,
 }
 
 impl Inode {
@@ -85,6 +89,7 @@ impl Inode {
             modification_time: 0,
             stat_change_time: 0,
             internal_synchronization: false,
+            requires_aligned_position: false,
         }
     }
 

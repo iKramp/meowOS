@@ -94,6 +94,7 @@ impl InodeInfo {
             modification_time: self.modification_seconds_since_epoch,
             stat_change_time: self.stat_change_seconds_since_epoch,
             internal_synchronization: false, //possibly true but... meh
+            requires_aligned_position: true,
         }
     }
 

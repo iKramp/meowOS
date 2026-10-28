@@ -32,7 +32,8 @@ fn main() {
     let cores = 1;
     let net = false;
     let run_mode = RunMode::Tcg;
-    let disk_type = DiskType::Virtio;
+    let disk_type = DiskType::Ahci;
+    let memory_megabytes = 1024;
 
     make_fat_disk::make_fat_disk();
 
@@ -47,7 +48,7 @@ fn main() {
         .arg("-no-shutdown");
 
     //memory
-    cmd.arg("-m").arg("256M");
+    cmd.arg("-m").arg(format!("{}M", memory_megabytes));
 
     //cpu
     match run_mode {

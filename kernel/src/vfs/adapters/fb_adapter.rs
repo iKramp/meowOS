@@ -50,6 +50,7 @@ impl FbAdapter {
             modification_time: 0,
             stat_change_time: 0,
             internal_synchronization: true,
+            requires_aligned_position: false,
         }
     }
 }

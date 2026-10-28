@@ -533,6 +533,7 @@ impl FileSystem for FatDriver {
                 modification_time: 0,
                 stat_change_time: 0,
                 internal_synchronization: false,
+                requires_aligned_position: true,
             });
         }
 
@@ -568,6 +569,7 @@ impl FileSystem for FatDriver {
             modification_time: 0,
             stat_change_time: 0,
             internal_synchronization: false,
+            requires_aligned_position: true,
         })
     }
     async fn set_stat(&self, _inode_index: InodeIndex, _parent: InodeIndex, _inode_data: Inode) -> Result<(), KernelError> {
