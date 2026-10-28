@@ -1,4 +1,5 @@
 pub mod ahci;
+pub mod block_dev_cache;
 pub mod disk;
 pub mod virtio;
 
