@@ -19,6 +19,7 @@ use crate::vfs::{DeviceId, InodeIndex};
 const SECTORS_PER_PAGE: usize = 4096 / 512;
 
 const USE_CACHE: bool = true;
+const DO_CACHE_LOGGING: bool = false;
 
 #[async_trait::async_trait]
 pub trait BlockDevice: Debug + Send + Sync {
@@ -59,10 +60,12 @@ impl MountedPartition {
         assert!(sector + sec_count <= self.partition.size_sectors);
         if USE_CACHE {
             let sector = self.partition.start_sector + sector;
-            println!(
-                "reading {} sectors at {} from partition {} (device {:?}). Using cache",
-                sec_count, sector, self.partition.part_id, self.partition.device
-            );
+            if DO_CACHE_LOGGING {
+                println!(
+                    "reading {} sectors at {} from partition {} (device {:?}). Using cache",
+                    sec_count, sector, self.partition.part_id, self.partition.device
+                );
+            }
             CacheReader {
                 device: self.disk.clone(),
                 device_ref: self.disk.get(),
@@ -84,10 +87,12 @@ impl MountedPartition {
         assert!(sector + sec_count <= self.partition.size_sectors);
         if USE_CACHE {
             let sector = self.partition.start_sector + sector;
-            println!(
-                "writing {} sectors at {} to partition {} (device {:?}). Using cache",
-                sec_count, sector, self.partition.part_id, self.partition.device
-            );
+            if DO_CACHE_LOGGING {
+                println!(
+                    "writing {} sectors at {} to partition {} (device {:?}). Using cache",
+                    sec_count, sector, self.partition.part_id, self.partition.device
+                );
+            }
             let mut cache = lock_w_info!(BLOCK_DEVICE_CACHE);
             for i in 0..sec_count {
                 let arr_index = i / SECTORS_PER_PAGE;
@@ -95,10 +100,14 @@ impl MountedPartition {
                 let slice = unsafe { core::slice::from_raw_parts(src_ptr, 4096) };
                 let chunks: &[[u8; 512]] = slice.as_chunks().0;
                 let data = chunks[i % SECTORS_PER_PAGE];
-                println!("updating cache for sector {}", sector + i);
+                if DO_CACHE_LOGGING {
+                    println!("updating cache for sector {}", sector + i);
+                }
                 let callback = cache.update_entry(self.partition.device, sector, &data, false);
                 if let Some(callback) = callback {
-                    println!("evicting entry for sector {}", sector + i);
+                    if DO_CACHE_LOGGING {
+                        println!("evicting entry for sector {}", sector + i);
+                    }
                     callback(self.disk.clone());
                 }
             }
@@ -141,11 +150,13 @@ impl<'a> Future for CacheReader<'a> {
                 let res = Future::poll(curr_fut.as_mut(), cx);
                 match res {
                     Poll::Ready(()) => {
-                        println!(
-                            "CacheReader: read from disk completed for sector {} (device {:?})",
-                            self.sector + self.read_sectors.get(),
-                            self.device_id
-                        );
+                        if DO_CACHE_LOGGING {
+                            println!(
+                                "CacheReader: read from disk completed for sector {} (device {:?})",
+                                self.sector + self.read_sectors.get(),
+                                self.device_id
+                            );
+                        }
                         //read SECTORS_PER_PAGE sectors into currently_reading_addr
                         let phys_addr = unsafe { *(self.currently_reading_addr.get() as *const PhysAddr) };
 
@@ -181,11 +192,13 @@ impl<'a> Future for CacheReader<'a> {
                         drop(owned_addr);
                     }
                     Poll::Pending => {
-                        println!(
-                            "CacheReader: read from disk pending for sector {} (device {:?})",
-                            self.sector + self.read_sectors.get(),
-                            self.device_id
-                        );
+                        if DO_CACHE_LOGGING {
+                            println!(
+                                "CacheReader: read from disk pending for sector {} (device {:?})",
+                                self.sector + self.read_sectors.get(),
+                                self.device_id
+                            );
+                        }
                         unsafe { *self.currently_reading_fut.get() = Some(curr_fut) }
                         return Poll::Pending;
                     }
@@ -201,14 +214,18 @@ impl<'a> Future for CacheReader<'a> {
 
             let mut cache = lock_w_info!(BLOCK_DEVICE_CACHE);
 
-            println!(
-                "CacheReader: Getting cache entry for sector {} (device {:?})",
-                to_read_sector, self.device_id
-            );
+            if DO_CACHE_LOGGING {
+                println!(
+                    "CacheReader: Getting cache entry for sector {} (device {:?})",
+                    to_read_sector, self.device_id
+                );
+            }
             let entry = cache.get_entry(self.device_id, to_read_sector, cx.waker());
             match entry {
                 GetEntryResult::Found(cache_entry) => {
-                    println!("CacheReader: Found cache entry",);
+                    if DO_CACHE_LOGGING {
+                        println!("CacheReader: Found cache entry",);
+                    }
                     let dest_arr_index = read_sectors / SECTORS_PER_PAGE;
                     let offset_in_page = (read_sectors % SECTORS_PER_PAGE) * 512;
                     let dest = VirtAddr::from(self.destination[dest_arr_index]).0 + offset_in_page as u64;
@@ -216,15 +233,19 @@ impl<'a> Future for CacheReader<'a> {
 
                     let src = cache_entry.data.as_ptr();
                     unsafe { core::ptr::copy(src, dest, 512) };
-                    println!("CacheReader: Copied sector {} to destination", to_read_sector);
+                    if DO_CACHE_LOGGING {
+                        println!("CacheReader: Copied sector {} to destination", to_read_sector);
+                    }
                     self.read_sectors.set(read_sectors + 1);
                 }
                 GetEntryResult::Reading => return Poll::Pending, //will be waken up eventually
                 GetEntryResult::NotFound => {
-                    println!(
-                        "CacheReader: Cache entry not found for sector {} (device {:?}). Reading from disk.",
-                        to_read_sector, self.device_id
-                    );
+                    if DO_CACHE_LOGGING {
+                        println!(
+                            "CacheReader: Cache entry not found for sector {} (device {:?}). Reading from disk.",
+                            to_read_sector, self.device_id
+                        );
+                    }
                     let mut frame = physical_allocator::allocate();
                     unsafe { core::ptr::swap(self.currently_reading_addr.get(), &raw mut frame) };
                     forget(frame);
