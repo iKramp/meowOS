@@ -1,8 +1,10 @@
 use core::{
+    any::Any,
     future::AsyncDrop,
     mem::ManuallyDrop,
     sync::atomic::{AtomicBool, AtomicU64},
 };
+use std::fmt::Debug;
 use std::{
     boxed::Box,
     collections::btree_map::BTreeMap,
@@ -36,6 +38,18 @@ static FILE_STORAGE: NoIntSpinlock<FileStorage> = NoIntSpinlock::new(FileStorage
     open_files: BTreeMap::new(),
 });
 
+pub trait FileHandleExtraData: Any + Send + Sync + Debug {
+    ///No as_any_mut because file_handle is never mut. Use internal sync
+    fn as_any(&self) -> &dyn Any;
+}
+#[derive(Debug)]
+pub struct EmptyFileHandleExtraData;
+impl FileHandleExtraData for EmptyFileHandleExtraData {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
 #[derive(Debug)]
 pub struct FileHandle {
     pub inode: InodeIdentifier,
@@ -44,7 +58,7 @@ pub struct FileHandle {
     pub reached_eof: AtomicBool,
     pub file_flags: FileFlags,
     pub(in crate::vfs) open_file: Arc<OpenFile>,
-    pub(in crate::vfs) fs_extra_data: Box<[u8]>,
+    pub(in crate::vfs) fs_extra_data: Box<dyn FileHandleExtraData>,
 }
 
 impl FileHandle {
@@ -60,9 +74,9 @@ impl FileHandle {
             .expect("Partition not found for device in FileHandle::clone_from")
             .clone();
         drop(vfs);
-        let extra_data = partition.open(other.inode.index).unwrap_or_else(|e| {
+        let extra_data = partition.f_handle_open(other.inode.index).unwrap_or_else(|e| {
             println!("Error opening file for clone: {:?}", e);
-            Box::new([]) // Return an empty box on error
+            Box::new(EmptyFileHandleExtraData) // Return an empty box on error
         });
 
         FileHandle {
@@ -220,8 +234,7 @@ impl AsyncDrop for OpenFile {
 impl Drop for FileHandle {
     fn drop(&mut self) {
         println!("Dropping FileHandle for inode: {:?}", self.inode);
-        let dummy_data = Box::new([]);
-        let mut dummy_data: Box<[u8]> = (*dummy_data).into();
+        let mut dummy_data: Box<dyn FileHandleExtraData> = Box::new(EmptyFileHandleExtraData);
         core::mem::swap(&mut self.fs_extra_data, &mut dummy_data);
 
         let vfs = lock_w_info!(VFS);
@@ -235,7 +248,7 @@ impl Drop for FileHandle {
         };
         drop(vfs);
         let inode_index = self.inode.index;
-        let res = partition.close(inode_index, dummy_data);
+        let res = partition.f_handle_close(inode_index, dummy_data);
         if let Err(e) = res {
             println!("Error closing file: {:?}", e);
         }

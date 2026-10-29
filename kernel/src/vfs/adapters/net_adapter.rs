@@ -12,7 +12,8 @@ use std::{kerror, kerror_unwrapped, lock_w_info, println, r_lock_w_info, w_lock_
 use crate::drivers::block_device::disk::DirEntry;
 use crate::memory::addresses::*;
 use crate::vfs::adapters::VfsAdapterTrait;
-use crate::vfs::{DeviceId, FileReadResult, FileSystem, Inode, InodeIndex, InodeTypeAndPerms, inode};
+use crate::vfs::file::FileHandleExtraData;
+use crate::vfs::{DeviceId, FileReadResult, FileSystem, Inode, InodeExtraData, InodeIndex, InodeTypeAndPerms, inode};
 
 const ENTRIES_PER_NIC_DEVICE: u64 = 2;
 const _: () = assert!(ENTRIES_PER_NIC_DEVICE.is_power_of_two());
@@ -64,6 +65,61 @@ impl NetAdapter {
             .fetch_add(ENTRIES_PER_NIC_DEVICE, core::sync::atomic::Ordering::SeqCst);
         w_lock_w_info!(self.ether_devices).insert(inode_index, device);
     }
+
+    fn internal_stat(&self, inode: crate::vfs::InodeIndex) -> Result<crate::vfs::Inode, KernelError> {
+        let entry_type = match get_entry_type_from_inode(inode) {
+            Some(v) => v,
+            None => return kerror!(InodeNotPresent),
+        };
+        let stat = match entry_type {
+            NICEntryType::MainFolder => inode::Inode {
+                index: inode,
+                device: self.device_id,
+                type_mode: InodeTypeAndPerms::new_dir(0o444),
+                link_cnt: 1,
+                uid: 0,
+                gid: 0,
+                size: 0,
+                access_time: 0,
+                modification_time: 0,
+                stat_change_time: 0,
+                internal_synchronization: true,
+                requires_aligned_position: false,
+                extra_data: Box::new(crate::vfs::EmptyExtraInodeData),
+            },
+            NICEntryType::MacAddress | NICEntryType::Mtu => inode::Inode {
+                index: inode,
+                device: self.device_id,
+                type_mode: InodeTypeAndPerms::new_file(0o444),
+                link_cnt: 1,
+                uid: 0,
+                gid: 0,
+                size: 6,
+                access_time: 0,
+                modification_time: 0,
+                stat_change_time: 0,
+                internal_synchronization: true,
+                requires_aligned_position: false,
+                extra_data: Box::new(crate::vfs::EmptyExtraInodeData),
+            },
+            NICEntryType::Data => inode::Inode {
+                index: inode,
+                device: self.device_id,
+                type_mode: InodeTypeAndPerms::new_file(0o600),
+                link_cnt: 1,
+                uid: 0,
+                gid: 0,
+                size: 0,
+                access_time: 0,
+                modification_time: 0,
+                stat_change_time: 0,
+                internal_synchronization: true,
+                requires_aligned_position: false,
+                extra_data: Box::new(crate::vfs::EmptyExtraInodeData),
+            },
+        };
+        Ok(stat)
+    }
 }
 
 #[async_trait::async_trait]
@@ -76,18 +132,11 @@ impl VfsAdapterTrait for NetAdapter {
         self.device_details.partition
     }
 
-    fn open(&self, _inode: crate::vfs::InodeIndex) -> Result<Box<[u8]>, KernelError> {
-        Ok(Box::new([]))
-    }
-
-    fn close(&self, _inode: crate::vfs::InodeIndex, _extra_data: Box<[u8]>) -> Result<(), KernelError> {
-        Ok(())
-    }
-
     async fn read(
         &self,
         _inode: crate::vfs::InodeIndex,
-        _extra_data: &Box<[u8]>,
+        _f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
         _offset_bytes: u64,
         size_bytes: u64,
         buffer: &[PhysAddr],
@@ -129,7 +178,11 @@ impl VfsAdapterTrait for NetAdapter {
         }
     }
 
-    async fn read_dir(&self, inode: crate::vfs::InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {
+    async fn read_dir(
+        &self,
+        inode: crate::vfs::InodeIndex,
+        _inode_extra_data: &dyn InodeExtraData,
+    ) -> Result<Box<[DirEntry]>, KernelError> {
         let entry_type = get_entry_type_from_inode(inode).ok_or(kerror_unwrapped!(InodeNotPresent))?;
 
         return match entry_type {
@@ -165,13 +218,14 @@ impl VfsAdapterTrait for NetAdapter {
     async fn write(
         &self,
         inode: InodeIndex,
-        _extra_data: &Box<[u8]>,
+        _f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
         _offset: u64,
         size: u64,
         buffer: &[PhysAddr],
     ) -> Result<(Inode, u64), KernelError> {
         if size == 0 {
-            return Ok((VfsAdapterTrait::stat(self, inode).await?, 0));
+            return Ok((self.internal_stat(inode)?, 0));
         }
         if buffer.len() != size.div_ceil(4096) as usize {
             return kerror!(InvalidArgument);
@@ -200,62 +254,18 @@ impl VfsAdapterTrait for NetAdapter {
                 let slice = unsafe { core::slice::from_raw_parts(ptr, size as usize) };
                 device.send_packet(slice)?;
 
-                Ok((VfsAdapterTrait::stat(self, inode).await?, size))
+                Ok((self.internal_stat(inode)?, size))
             }
             _ => return kerror!(UnsupportedOperation),
         }
     }
 
-    async fn stat(&self, inode: crate::vfs::InodeIndex) -> Result<crate::vfs::Inode, KernelError> {
-        let entry_type = match get_entry_type_from_inode(inode) {
-            Some(v) => v,
-            None => return kerror!(InodeNotPresent),
-        };
-        let stat = match entry_type {
-            NICEntryType::MainFolder => inode::Inode {
-                index: inode,
-                device: self.device_id,
-                type_mode: InodeTypeAndPerms::new_dir(0o444),
-                link_cnt: 1,
-                uid: 0,
-                gid: 0,
-                size: 0,
-                access_time: 0,
-                modification_time: 0,
-                stat_change_time: 0,
-                internal_synchronization: true,
-                requires_aligned_position: false,
-            },
-            NICEntryType::MacAddress | NICEntryType::Mtu => inode::Inode {
-                index: inode,
-                device: self.device_id,
-                type_mode: InodeTypeAndPerms::new_file(0o444),
-                link_cnt: 1,
-                uid: 0,
-                gid: 0,
-                size: 6,
-                access_time: 0,
-                modification_time: 0,
-                stat_change_time: 0,
-                internal_synchronization: true,
-                requires_aligned_position: false,
-            },
-            NICEntryType::Data => inode::Inode {
-                index: inode,
-                device: self.device_id,
-                type_mode: InodeTypeAndPerms::new_file(0o600),
-                link_cnt: 1,
-                uid: 0,
-                gid: 0,
-                size: 0,
-                access_time: 0,
-                modification_time: 0,
-                stat_change_time: 0,
-                internal_synchronization: true,
-                requires_aligned_position: false,
-            },
-        };
-        Ok(stat)
+    async fn stat(
+        &self,
+        inode: crate::vfs::InodeIndex,
+        _parent: crate::vfs::InodeIndex,
+    ) -> Result<crate::vfs::Inode, KernelError> {
+        self.internal_stat(inode)
     }
 }
 

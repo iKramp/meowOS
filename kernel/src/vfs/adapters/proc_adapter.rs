@@ -1,6 +1,6 @@
 use crate::{
     memory::addresses::*,
-    vfs::{DeviceId, FileReadResult, FileSystem, InodeTypeAndPerms},
+    vfs::{DeviceId, FileReadResult, FileSystem, InodeExtraData, InodeTypeAndPerms, file::FileHandleExtraData},
 };
 
 use super::{DirEntry, VfsAdapterTrait};
@@ -44,18 +44,11 @@ impl VfsAdapterTrait for ProcAdapter {
         self.device_details.partition
     }
 
-    fn open(&self, _inode: crate::vfs::InodeIndex) -> Result<Box<[u8]>, KernelError> {
-        Ok(Box::new([]))
-    }
-
-    fn close(&self, _inode: crate::vfs::InodeIndex, _extra_data: Box<[u8]>) -> Result<(), KernelError> {
-        Ok(())
-    }
-
     async fn read(
         &self,
         _inode: crate::vfs::InodeIndex,
-        _extra_data: &Box<[u8]>,
+        _f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
         _offset_bytes: u64,
         _size_bytes: u64,
         _buffer: &[PhysAddr],
@@ -64,14 +57,19 @@ impl VfsAdapterTrait for ProcAdapter {
         todo!()
     }
 
-    async fn read_dir(&self, _inode: crate::vfs::InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {
+    async fn read_dir(
+        &self,
+        _inode: crate::vfs::InodeIndex,
+        _inode_extra_data: &dyn InodeExtraData,
+    ) -> Result<Box<[DirEntry]>, KernelError> {
         kerror!(UnsupportedOperation)
     }
 
     async fn write(
         &self,
         _inode: crate::vfs::InodeIndex,
-        _extra_data: &Box<[u8]>,
+        _f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
         _offset: u64,
         _size: u64,
         _buffer: &[PhysAddr],
@@ -79,7 +77,11 @@ impl VfsAdapterTrait for ProcAdapter {
         todo!()
     }
 
-    async fn stat(&self, inode: crate::vfs::InodeIndex) -> Result<crate::vfs::Inode, KernelError> {
+    async fn stat(
+        &self,
+        inode: crate::vfs::InodeIndex,
+        _parent: crate::vfs::InodeIndex,
+    ) -> Result<crate::vfs::Inode, KernelError> {
         Ok(crate::vfs::Inode {
             index: inode,
             device: self.device_id,
@@ -93,6 +95,7 @@ impl VfsAdapterTrait for ProcAdapter {
             stat_change_time: 0,
             internal_synchronization: true,
             requires_aligned_position: false,
+            extra_data: Box::new(crate::vfs::EmptyExtraInodeData),
         })
     }
 }

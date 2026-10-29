@@ -7,7 +7,11 @@ use std::{
     error::KernelError,
     kerror, kerror_unwrapped, lock_w_info, println, printlnc,
     string::ToString,
-    sync::{arc::Arc, no_int_spinlock::NoIntSpinlockGuard},
+    sync::{
+        arc::Arc,
+        async_rw_lock::{AsyncRWLockModeRead, AsyncRWlockGuard},
+        no_int_spinlock::NoIntSpinlockGuard,
+    },
     vec::Vec,
     w_lock_w_info,
 };
@@ -192,16 +196,24 @@ async fn make_new_root_checks(fs: &Arc<dyn FileSystem + Send>) -> Result<(), Ker
     };
     fs_tree::init(inode_id);
 
+    let inode = fs.stat(ROOT_INODE_INDEX, ROOT_INODE_INDEX).await?;
     //root checks
-    let root_dirs = fs.read_dir(ROOT_INODE_INDEX).await?;
+    let root_dirs = fs.read_dir(ROOT_INODE_INDEX, &*inode.extra_data).await?;
 
     let required_dirs = ["tty", "proc", "net", "null", "input", "fb"];
     for required_dir in required_dirs.iter() {
         if !root_dirs.iter().any(|entry| entry.name.as_ref() == *required_dir) {
             println!("Root filesystem is missing required directory {required_dir}, creating it");
             //create the required directory
-            fs.create(required_dir, ROOT_INODE_INDEX, InodeTypeAndPerms::new_dir(0o755), 0, 0)
-                .await?;
+            fs.create(
+                required_dir,
+                ROOT_INODE_INDEX,
+                &*inode.extra_data,
+                InodeTypeAndPerms::new_dir(0o755),
+                0,
+                0,
+            )
+            .await?;
         }
     }
 
@@ -246,7 +258,15 @@ async fn mount_vfs_adapters(fs: &Arc<dyn FileSystem + Send>) {
     }
     drop(vfs);
 
-    let dir_entries = fs.read_dir(ROOT_INODE_INDEX).await.expect("Failed to read root dir");
+    let inode = fs
+        .stat(ROOT_INODE_INDEX, ROOT_INODE_INDEX)
+        .await
+        .expect("failed to stat root inode");
+
+    let dir_entries = fs
+        .read_dir(ROOT_INODE_INDEX, &*inode.extra_data)
+        .await
+        .expect("Failed to read root dir");
 
     for (mountpoint, adapter, _partition_id) in adapters.iter() {
         let entry = dir_entries
@@ -334,7 +354,7 @@ pub async fn open_file(
         .mounted_filesystems
         .get_mut(&partition_id)
         .ok_or(kerror_unwrapped!(NoEntry))?;
-    let extra_data = fs.open(inode_index.index)?;
+    let extra_data = fs.f_handle_open(inode_index.index)?;
     drop(vfs);
 
     //TODO: check permissions
@@ -366,7 +386,7 @@ pub async fn get_dir_entries(file_handle: &FileHandle) -> Result<Box<[DirEntry]>
         .ok_or(kerror_unwrapped!(NoEntry))?;
     let fs = fs.clone();
     drop(vfs);
-    fs.read_dir(file_handle.inode.index).await
+    fs.read_dir(inode.index, &*inode.extra_data).await
 }
 
 pub async fn create_file(parent_dir: &FileHandle, name: &str, inode_type: InodeTypeAndPerms) -> Result<(), KernelError> {
@@ -391,7 +411,9 @@ pub async fn create_file(parent_dir: &FileHandle, name: &str, inode_type: InodeT
     let fs = fs.clone();
     drop(vfs);
 
-    let (new_parent_inode, file_inode) = fs.create(name, parent_inode.index, inode_type, 0, 0).await?;
+    let (new_parent_inode, file_inode) = fs
+        .create(name, parent_inode.index, &*parent_inode.extra_data, inode_type, 0, 0)
+        .await?;
     println!(
         "create file returned file and parent inodes: {:X?}, {:X?}",
         file_inode, new_parent_inode
@@ -437,7 +459,9 @@ pub async fn link_file(parent_dir: &FileHandle, name: &str, target: &FileHandle)
     let fs = fs.clone();
     drop(vfs);
 
-    let (new_parent_inode, _new_child_inode) = fs.link(target_inode.index, parent_inode.index, name).await?;
+    let (new_parent_inode, _new_child_inode) = fs
+        .link(target_inode.index, parent_inode.index, &*parent_inode.extra_data, name)
+        .await?;
     println!("link file returned new parent inode: {:X?}", new_parent_inode);
     let child_id = InodeIdentifier {
         device_id: parent_inode.device,
@@ -476,7 +500,7 @@ pub async fn unlink_file(parent_dir: &FileHandle, name: &str) -> Result<(), Kern
     let fs = fs.clone();
     drop(vfs);
 
-    let (new_parent_inode, new_child_inode) = fs.unlink(parent_inode.index, name).await?;
+    let (new_parent_inode, new_child_inode) = fs.unlink(parent_inode.index, &*parent_inode.extra_data, name).await?;
     //ignore error, at most there's no entry, but that shouldn't matter too much
     fs_tree::unlink_inode(parent_dir.inode, name);
 
@@ -538,7 +562,14 @@ pub async fn write_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64
     drop(vfs);
 
     let res = fs
-        .write(inode_index, &file_handle.fs_extra_data, desired_offset, size, buffer)
+        .write(
+            inode_index,
+            &*file_handle.fs_extra_data,
+            &*inode_read_ref.extra_data,
+            desired_offset,
+            size,
+            buffer,
+        )
         .await?;
 
     println!("Wrote {} bytes", res.1);
@@ -556,8 +587,8 @@ pub async fn write_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64
     Ok(res.1)
 }
 
-pub async fn stat_file(file_handle: &FileHandle) -> Inode {
-    file_handle.open_file.inode.lock_read().await.clone()
+pub async fn stat_file<'a>(file_handle: &'a FileHandle) -> AsyncRWlockGuard<'a, Inode, AsyncRWLockModeRead> {
+    file_handle.open_file.inode.lock_read().await
 }
 
 pub async fn read_file(
@@ -611,7 +642,15 @@ pub async fn read_file(
     drop(vfs);
 
     let (bytes_read, mut read_result) = fs
-        .read(inode_index, &file_handle.fs_extra_data, offset, size, buffer, blocking)
+        .read(
+            inode_index,
+            &*file_handle.fs_extra_data,
+            &*inode_read_ref.extra_data,
+            offset,
+            size,
+            buffer,
+            blocking,
+        )
         .await?;
 
     if !internal_sync {

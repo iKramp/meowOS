@@ -7,7 +7,10 @@ use std::{
     vec::Vec,
 };
 
-use crate::vfs::{DeviceId, GLOBAL_MOUNTS, InodeIdentifier, InodeIdentifierChain, ResolvedPathBorrowed, VFS};
+use crate::vfs::{
+    DeviceId, EmptyExtraInodeData, GLOBAL_MOUNTS, InodeExtraData, InodeIdentifier, InodeIdentifierChain, ResolvedPathBorrowed,
+    VFS,
+};
 
 static INODE_CACHE: NoIntSpinlock<FsTreeCache> = NoIntSpinlock::new(FsTreeCache::new());
 
@@ -170,7 +173,7 @@ async fn load_dir(current: InodeIdentifier) -> Result<NoIntSpinlockGuard<'static
         .clone();
     drop(vfs);
 
-    let dir = fs.read_dir(current.index).await?;
+    let dir = fs.read_dir(current.index, &EmptyExtraInodeData).await?;
     println!("load_dir: loaded directory for inode {:X?}, entries: {}", current, dir.len());
     println!("load_dir: directory entries for inode {:X?}: {:?}", current, dir);
 

@@ -1,6 +1,25 @@
+use core::any::Any;
+use std::alloc::boxed::Box;
+use std::fmt::Debug;
+
 use bitfield::bitfield;
 
 use super::{DeviceId, InodeIndex};
+
+pub trait InodeExtraData: Any + Send + Sync + Debug {
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+}
+#[derive(Debug)]
+pub struct EmptyExtraInodeData;
+impl InodeExtraData for EmptyExtraInodeData {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
 
 //keep in sync
 #[repr(C)]
@@ -29,7 +48,7 @@ pub struct UserspaceInode {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Inode {
     //RO
     pub index: InodeIndex,
@@ -62,6 +81,8 @@ pub struct Inode {
     ///IF true, the filesystem that owns this inode ignores file position (never true for disk
     ///filesystems). Kernel will not perform file position alignment on userspace syscalls
     pub requires_aligned_position: bool,
+
+    pub extra_data: Box<dyn InodeExtraData>,
 }
 
 impl Inode {
@@ -90,6 +111,7 @@ impl Inode {
             stat_change_time: 0,
             internal_synchronization: false,
             requires_aligned_position: false,
+            extra_data: Box::new(EmptyExtraInodeData),
         }
     }
 

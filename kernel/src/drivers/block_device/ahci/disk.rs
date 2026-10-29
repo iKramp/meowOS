@@ -579,8 +579,6 @@ impl VirtualPort {
 #[async_trait::async_trait]
 impl BlockDevice for VirtualPort {
     async fn read(&self, start_sec_index: usize, sec_count: usize, buffer: &[PhysAddr]) {
-        println!(level:debug, "Reading from ahci disk, sector {}, n sectors {}", start_sec_index, sec_count);
-
         OPERATIONS.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
         assert!(sec_count <= self.sectors as usize);
         let prdt_entries = sec_count.div_ceil(8); //8 sectors in one physical frame
@@ -640,8 +638,6 @@ impl BlockDevice for VirtualPort {
 
     ///Returns the virtual address of the read data and the command index used
     async fn write(&self, start_sec_index: usize, sec_count: usize, buffer: &[PhysAddr]) {
-        println!("writing to disk at sector {} with sec count {}", start_sec_index, sec_count);
-
         OPERATIONS.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
         assert!(sec_count <= self.sectors as usize);
         let prdt_entries = sec_count.div_ceil(8); //8 sectors in one physical frame

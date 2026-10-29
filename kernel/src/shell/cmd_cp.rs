@@ -136,6 +136,7 @@ async fn copy_file(
 
     let inode = vfs::stat_file(source).await;
     let mut total_size = inode.size;
+    drop(inode);
 
     loop {
         if total_size == 0 {

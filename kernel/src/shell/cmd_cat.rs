@@ -23,8 +23,8 @@ async fn cmd_cat_internal(mut args: CommandSplitter) -> Result<(), KernelError> 
     let resolved_path = vfs::resolve_path(&path);
     let file_handle = vfs::open_file((&resolved_path).into(), None, OpenFlags(1)).await?;
     let file_info = vfs::stat_file(&file_handle).await;
-
     let file_size = file_info.size;
+    drop(file_info);
     let mut remaining_size = file_size;
     let frames = READ_CHUNK_SIZE.min(file_size).div_ceil(4096) as usize;
     let mut buffer = Vec::with_capacity(frames);

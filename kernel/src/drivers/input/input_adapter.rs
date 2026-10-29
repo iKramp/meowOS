@@ -6,7 +6,11 @@ use crate::{
         input::{InputDeviceType, InputEvent},
     },
     memory::addresses::{PhysAddr, VirtAddr},
-    vfs::{DeviceId as VfsDeviceId, FileReadResult, Inode, ROOT_INODE_INDEX, adapters::VfsAdapterTrait},
+    vfs::{
+        DeviceId as VfsDeviceId, FileReadResult, Inode, InodeExtraData, ROOT_INODE_INDEX,
+        adapters::VfsAdapterTrait,
+        file::{EmptyFileHandleExtraData, FileHandleExtraData},
+    },
 };
 use std::{
     alloc::{
@@ -19,6 +23,17 @@ use std::{
     kerror, kerror_unwrapped, println,
     sync::{arc::Arc, once_lock::OnceLock},
 };
+
+#[derive(Debug)]
+struct InputFHandleExtraData {
+    buffer_id: u64,
+}
+
+impl FileHandleExtraData for InputFHandleExtraData {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
 
 #[derive(Debug)]
 pub struct InputVfsAdapter {
@@ -39,6 +54,28 @@ impl InputVfsAdapter {
             })
             .clone()
     }
+
+    fn internal_stat(&self, inode: crate::vfs::InodeIndex) -> Result<Inode, KernelError> {
+        Ok(Inode {
+            index: inode,
+            device: self.vfs_device_id,
+            type_mode: if inode & PREFIX_MASK == STRUCTURE_FOLDER_PREFIX {
+                crate::vfs::InodeTypeAndPerms::new_dir(0o755)
+            } else {
+                crate::vfs::InodeTypeAndPerms::new_file(0o777)
+            },
+            link_cnt: 1,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            access_time: 0,
+            modification_time: 0,
+            stat_change_time: 0,
+            internal_synchronization: true,
+            requires_aligned_position: false,
+            extra_data: Box::new(crate::vfs::EmptyExtraInodeData),
+        })
+    }
 }
 
 const PREFIX_MASK: u64 = 0xF000_0000_0000_0000;
@@ -52,13 +89,12 @@ const INPUT_DEVICE_TYPE_FOLDER_INODE_INDEX: u64 = (ROOT_INODE_INDEX + 1) | STRUC
 const INPUT_DEVICE_ID_FOLDER_INODE_INDEX: u64 = (ROOT_INODE_INDEX + 2) | STRUCTURE_FOLDER_PREFIX;
 const ALL_INPUT_INODE_INDEX: u64 = ALL_PREFIX;
 
-fn get_buffer_id(extra_data: &[u8]) -> Result<u64, KernelError> {
-    if extra_data.len() != 8 {
-        return kerror!(InvalidArgument);
-    }
-    let mut buffer_id_bytes = [0u8; 8];
-    buffer_id_bytes.copy_from_slice(&extra_data[..8]);
-    Ok(u64::from_ne_bytes(buffer_id_bytes))
+fn get_buffer_id(extra_data: &dyn FileHandleExtraData) -> Result<u64, KernelError> {
+    let extra_data = extra_data
+        .as_any()
+        .downcast_ref::<InputFHandleExtraData>()
+        .ok_or_else(|| kerror_unwrapped!(InvalidArgument))?;
+    Ok(extra_data.buffer_id)
 }
 
 #[async_trait::async_trait]
@@ -71,13 +107,13 @@ impl VfsAdapterTrait for InputVfsAdapter {
         self.device_details.partition
     }
 
-    fn open(&self, inode: crate::vfs::InodeIndex) -> Result<Box<[u8]>, KernelError> {
+    fn open(&self, inode: crate::vfs::InodeIndex) -> Result<Box<dyn FileHandleExtraData>, KernelError> {
         println!("open called with inode: {:#x}", inode);
         let inode_index = inode & !PREFIX_MASK;
         let prefix = inode & PREFIX_MASK;
         if prefix == STRUCTURE_FOLDER_PREFIX {
             // Open the structure folder
-            return Ok(Box::new([]));
+            return Ok(Box::new(EmptyFileHandleExtraData));
         }
         println!("open called with inode_index: {:#x}, prefix: {:#x}", inode_index, prefix);
 
@@ -96,14 +132,14 @@ impl VfsAdapterTrait for InputVfsAdapter {
 
         println!("open called with inode: {:#x}, buffer_id: {}", inode, buffer_id);
 
-        Ok(Box::new(buffer_id.to_ne_bytes()))
+        Ok(Box::new(InputFHandleExtraData { buffer_id }))
     }
 
-    fn close(&self, inode: crate::vfs::InodeIndex, _extra_data: Box<[u8]>) -> Result<(), KernelError> {
+    fn close(&self, inode: crate::vfs::InodeIndex, extra_data: Box<dyn FileHandleExtraData>) -> Result<(), KernelError> {
         if inode & PREFIX_MASK == STRUCTURE_FOLDER_PREFIX {
             return Ok(());
         }
-        let buffer_id = get_buffer_id(&_extra_data)?;
+        let buffer_id = get_buffer_id(&*extra_data)?;
         super::INPUT_EVENT_MANAGER.remove_buffer(buffer_id);
         Ok(())
     }
@@ -111,7 +147,8 @@ impl VfsAdapterTrait for InputVfsAdapter {
     async fn read(
         &self,
         inode: crate::vfs::InodeIndex,
-        extra_data: &Box<[u8]>,
+        f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
         _offset_bytes: u64,
         mut size_bytes: u64,
         buffer: &[PhysAddr],
@@ -128,7 +165,7 @@ impl VfsAdapterTrait for InputVfsAdapter {
             return kerror!(InvalidArgument);
         }
 
-        let buffer_id = get_buffer_id(extra_data)?;
+        let buffer_id = get_buffer_id(&*f_handle_extra_data)?;
 
         let mut buffer_offset = 0;
         let mut buffer_index = 0;
@@ -190,7 +227,11 @@ impl VfsAdapterTrait for InputVfsAdapter {
         ));
     }
 
-    async fn read_dir(&self, inode: crate::vfs::InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {
+    async fn read_dir(
+        &self,
+        inode: crate::vfs::InodeIndex,
+        _inode_extra_data: &dyn InodeExtraData,
+    ) -> Result<Box<[DirEntry]>, KernelError> {
         if inode & PREFIX_MASK != STRUCTURE_FOLDER_PREFIX {
             return kerror!(InvalidArgument);
         }
@@ -210,7 +251,8 @@ impl VfsAdapterTrait for InputVfsAdapter {
     async fn write(
         &self,
         inode: crate::vfs::InodeIndex,
-        extra_data: &Box<[u8]>,
+        f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
         _offset: u64,
         mut size: u64,
         buffer: &[PhysAddr],
@@ -220,13 +262,13 @@ impl VfsAdapterTrait for InputVfsAdapter {
         }
 
         if size == 0 {
-            return Ok((self.stat(inode).await?, 0));
+            return Ok((self.internal_stat(inode)?, 0));
         }
         if buffer.len() != size.div_ceil(4096) as usize {
             return kerror!(InvalidArgument);
         }
 
-        let buffer_id = get_buffer_id(extra_data)?;
+        let buffer_id = get_buffer_id(&*f_handle_extra_data)?;
 
         let buffer_type = super::INPUT_EVENT_MANAGER
             .get_buffer_type(buffer_id)
@@ -268,28 +310,11 @@ impl VfsAdapterTrait for InputVfsAdapter {
             buffer_index += 1;
         }
 
-        Ok((self.stat(inode).await?, size))
+        Ok((self.internal_stat(inode)?, size))
     }
 
-    async fn stat(&self, inode: crate::vfs::InodeIndex) -> Result<Inode, KernelError> {
-        Ok(Inode {
-            index: inode,
-            device: self.vfs_device_id,
-            type_mode: if inode & PREFIX_MASK == STRUCTURE_FOLDER_PREFIX {
-                crate::vfs::InodeTypeAndPerms::new_dir(0o755)
-            } else {
-                crate::vfs::InodeTypeAndPerms::new_file(0o777)
-            },
-            link_cnt: 1,
-            uid: 0,
-            gid: 0,
-            size: 0,
-            access_time: 0,
-            modification_time: 0,
-            stat_change_time: 0,
-            internal_synchronization: true,
-            requires_aligned_position: false,
-        })
+    async fn stat(&self, inode: crate::vfs::InodeIndex, _parent_inode: crate::vfs::InodeIndex) -> Result<Inode, KernelError> {
+        self.internal_stat(inode)
     }
 }
 

@@ -579,6 +579,7 @@ fn fstat(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let task = async move {
         let stat_result = vfs::stat_file(file_handle.get()).await;
         let userspace_inode = stat_result.to_userspace_inode();
+        drop(stat_result);
 
         let Some(proc) = proc_clone.upgrade() else {
             return; //proc was killed

@@ -10,7 +10,10 @@ use uuid::Uuid;
 use crate::{
     drivers::block_device::disk::DirEntry,
     memory::addresses::{PhysAddr, VirtAddr},
-    vfs::{DeviceId, FileReadResult, FileSystem, Inode, adapters::VfsAdapterTrait},
+    vfs::{
+        self, DeviceId, FileReadResult, FileSystem, Inode, InodeExtraData, InodeIndex, adapters::VfsAdapterTrait,
+        file::FileHandleExtraData,
+    },
     vga,
 };
 
@@ -51,6 +54,7 @@ impl FbAdapter {
             stat_change_time: 0,
             internal_synchronization: true,
             requires_aligned_position: false,
+            extra_data: Box::new(vfs::EmptyExtraInodeData),
         }
     }
 }
@@ -72,18 +76,11 @@ impl VfsAdapterTrait for FbAdapter {
         self.device_details.partition
     }
 
-    fn open(&self, _inode: crate::vfs::InodeIndex) -> Result<Box<[u8]>, KernelError> {
-        Ok(Box::new([]))
-    }
-
-    fn close(&self, _inode: crate::vfs::InodeIndex, _extra_data: Box<[u8]>) -> Result<(), KernelError> {
-        Ok(())
-    }
-
     async fn read(
         &self,
         _inode: crate::vfs::InodeIndex,
-        _extra_data: &Box<[u8]>,
+        _f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
         _offset_bytes: u64,
         size_bytes: u64,
         buffer: &[PhysAddr],
@@ -109,14 +106,19 @@ impl VfsAdapterTrait for FbAdapter {
         Ok((core::mem::size_of::<FrameBufferInfo>() as u64, FileReadResult::PermanentEof))
     }
 
-    async fn read_dir(&self, _inode: crate::vfs::InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {
+    async fn read_dir(
+        &self,
+        _inode: crate::vfs::InodeIndex,
+        _inode_extra_data: &dyn InodeExtraData,
+    ) -> Result<Box<[DirEntry]>, KernelError> {
         kerror!(UnsupportedOperation)
     }
 
     async fn write(
         &self,
         inode: crate::vfs::InodeIndex,
-        _extra_data: &Box<[u8]>,
+        _f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
         mut fb_offset: u64,
         size: u64,
         buffer: &[PhysAddr],
@@ -160,7 +162,7 @@ impl VfsAdapterTrait for FbAdapter {
         Ok((self.get_inode(inode), size))
     }
 
-    async fn stat(&self, inode: crate::vfs::InodeIndex) -> Result<Inode, KernelError> {
+    async fn stat(&self, inode: crate::vfs::InodeIndex, _parent: InodeIndex) -> Result<Inode, KernelError> {
         Ok(self.get_inode(inode))
     }
 }

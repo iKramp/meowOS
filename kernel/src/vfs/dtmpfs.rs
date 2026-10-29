@@ -14,7 +14,11 @@ use std::{
 
 use uuid::Uuid;
 
-use crate::{drivers::block_device::disk::DirEntry, memory::addresses::*, vfs::FileReadResult};
+use crate::{
+    drivers::block_device::disk::DirEntry,
+    memory::addresses::*,
+    vfs::{FileReadResult, InodeExtraData, file::FileHandleExtraData},
+};
 
 use super::{
     DeviceId, InodeIndex, InodeTypeAndPerms, ROOT_INODE_INDEX,
@@ -87,18 +91,11 @@ impl FileSystem for Dtmpfs {
         Ok(())
     }
 
-    fn open(&self, _inode: InodeIndex) -> Result<Box<[u8]>, KernelError> {
-        Ok(Box::new([]))
-    }
-
-    fn close(&self, _inode: InodeIndex, _extra_data: Box<[u8]>) -> Result<(), KernelError> {
-        Ok(())
-    }
-
     async fn read(
         &self,
         _inode: InodeIndex,
-        _extra_data: &Box<[u8]>,
+        _f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
         _offset_bytes: u64,
         _size_bytes: u64,
         _buffer: &[PhysAddr],
@@ -107,7 +104,7 @@ impl FileSystem for Dtmpfs {
         kerror!(UnsupportedOperation)
     }
 
-    async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {
+    async fn read_dir(&self, inode: InodeIndex, _inode_extra_data: &dyn InodeExtraData) -> Result<Box<[DirEntry]>, KernelError> {
         let inner = lock_w_info!(self.global_lock);
         let mut entries = Vec::new();
         if let Some(node) = inner.inodes.get(&inode) {
@@ -125,7 +122,8 @@ impl FileSystem for Dtmpfs {
     async fn write(
         &self,
         _inode: InodeIndex,
-        _extra_data: &Box<[u8]>,
+        _f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
         _offset: u64,
         _size: u64,
         _buffer: &[PhysAddr],
@@ -147,14 +145,15 @@ impl FileSystem for Dtmpfs {
             stat_change_time: 0,
             internal_synchronization: true,
             requires_aligned_position: false,
+            extra_data: Box::new(crate::vfs::EmptyExtraInodeData),
         })
     }
 
     async fn set_stat(
         &self,
         _inode_index: InodeIndex,
-        _parent: InodeIndex,
         _inode_data: super::Inode,
+        _extra_data: &dyn InodeExtraData,
     ) -> Result<(), KernelError> {
         kerror!(UnsupportedOperation)
     }
@@ -163,7 +162,8 @@ impl FileSystem for Dtmpfs {
         &self,
         name: &str,
         parent_dir: InodeIndex,
-        _type_mode: super::InodeTypeAndPerms,
+        _parent_inode_extra_data: &dyn InodeExtraData,
+        _type_mode: InodeTypeAndPerms,
         _uid: u16,
         _gid: u16,
     ) -> Result<(super::Inode, super::Inode), KernelError> {
@@ -184,7 +184,12 @@ impl FileSystem for Dtmpfs {
         ))
     }
 
-    async fn unlink(&self, _parent_inode: InodeIndex, _name: &str) -> Result<(super::Inode, super::Inode), KernelError> {
+    async fn unlink(
+        &self,
+        _parent_inode: InodeIndex,
+        _parent_inode_extra_data: &dyn InodeExtraData,
+        _name: &str,
+    ) -> Result<(super::Inode, super::Inode), KernelError> {
         return kerror!(UnsupportedOperation);
     }
 
@@ -196,12 +201,19 @@ impl FileSystem for Dtmpfs {
         &self,
         _inode: InodeIndex,
         _parent_dir: InodeIndex,
+        _parent_inode_extra_data: &dyn InodeExtraData,
         _name: &str,
     ) -> Result<(super::Inode, super::Inode), KernelError> {
         kerror!(UnsupportedOperation)
     }
 
-    async fn truncate(&self, _inode: InodeIndex, _extra_data: &Box<[u8]>, _size: u64) -> Result<(), KernelError> {
+    async fn truncate(
+        &self,
+        _inode: InodeIndex,
+        _f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
+        _size: u64,
+    ) -> Result<(), KernelError> {
         kerror!(UnsupportedOperation)
     }
 
@@ -209,7 +221,8 @@ impl FileSystem for Dtmpfs {
         &self,
         inode: InodeIndex,
         parent_inode: InodeIndex,
-        _parent_extra_data: &Box<[u8]>,
+        _parent_f_handle_extra_data: &dyn FileHandleExtraData,
+        _parent_inode_extra_data: &dyn InodeExtraData,
         name: &str,
     ) -> Result<(), KernelError> {
         let mut inner = lock_w_info!(self.global_lock);

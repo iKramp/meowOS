@@ -1,10 +1,11 @@
 use crate::memory::addresses::*;
+use crate::vfs::file::FileHandleExtraData;
 use core::str::{self};
 use std::kerror;
 use std::{boxed::Box, error::KernelError, println, string::ToString, vec::Vec};
 
 use super::InodeIndex;
-use crate::vfs::{DeviceId, Inode as VfsInode};
+use crate::vfs::{DeviceId, Inode as VfsInode, InodeExtraData};
 use crate::vfs::{FileReadResult, InodeIndex as VfsInodeIndex};
 use crate::{
     drivers::{
@@ -95,6 +96,7 @@ impl InodeInfo {
             stat_change_time: self.stat_change_seconds_since_epoch,
             internal_synchronization: false, //possibly true but... meh
             requires_aligned_position: true,
+            extra_data: Box::new(crate::vfs::EmptyExtraInodeData),
         }
     }
 
@@ -167,7 +169,8 @@ impl FileSystem for Rfs2 {
     async fn read(
         &self,
         inode: VfsInodeIndex,
-        _extra_data: &Box<[u8]>,
+        _f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
         offset_bytes: u64,
         size_bytes: u64,
         buffer: &[PhysAddr],
@@ -192,15 +195,11 @@ impl FileSystem for Rfs2 {
         res.map(|read| (read, FileReadResult::Invalid))
     }
 
-    fn open(&self, _inode: VfsInodeIndex) -> Result<Box<[u8]>, KernelError> {
-        return Ok(Box::new([]));
-    }
-
-    fn close(&self, _inode: VfsInodeIndex, _extra_data: Box<[u8]>) -> Result<(), KernelError> {
-        return Ok(());
-    }
-
-    async fn read_dir(&self, inode: VfsInodeIndex) -> Result<Box<[VfsDirEntry]>, KernelError> {
+    async fn read_dir(
+        &self,
+        inode: VfsInodeIndex,
+        _inode_extra_data: &dyn InodeExtraData,
+    ) -> Result<Box<[VfsDirEntry]>, KernelError> {
         let lock = self.get_file_lock(inode as InodeIndex);
         let locked = lock.lock();
 
@@ -230,7 +229,8 @@ impl FileSystem for Rfs2 {
     async fn write(
         &self,
         inode: VfsInodeIndex,
-        _extra_data: &Box<[u8]>,
+        _f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
         offset_bytes: u64,
         size: u64,
         buffer: &[PhysAddr],
@@ -266,8 +266,8 @@ impl FileSystem for Rfs2 {
     async fn set_stat(
         &self,
         inode_index: VfsInodeIndex,
-        _parent: VfsInodeIndex,
         inode_data: VfsInode,
+        _inode_extra_data: &dyn InodeExtraData,
     ) -> Result<(), KernelError> {
         let lock = self.get_file_lock(inode_index as InodeIndex);
         let locked = lock.lock();
@@ -289,6 +289,7 @@ impl FileSystem for Rfs2 {
         &self,
         name: &str,
         parent_dir: VfsInodeIndex,
+        parent_inode_extra_data: &dyn InodeExtraData,
         type_mode: InodeTypeAndPerms,
         uid: u16,
         gid: u16,
@@ -316,7 +317,9 @@ impl FileSystem for Rfs2 {
         self.set_file_info(new_block, new_inode_info.clone()).await;
 
         println!("created new file, linking");
-        let res = self.link(new_inode as VfsInodeIndex, parent_dir, name).await;
+        let res = self
+            .link(new_inode as VfsInodeIndex, parent_dir, parent_inode_extra_data, name)
+            .await;
         match res {
             Err(e) => {
                 self.release_block(new_block).await;
@@ -330,7 +333,12 @@ impl FileSystem for Rfs2 {
         }
     }
 
-    async fn unlink(&self, parent_inode: VfsInodeIndex, name: &str) -> Result<(VfsInode, VfsInode), KernelError> {
+    async fn unlink(
+        &self,
+        parent_inode: VfsInodeIndex,
+        _parent_inode_extra_data: &dyn InodeExtraData,
+        name: &str,
+    ) -> Result<(VfsInode, VfsInode), KernelError> {
         if name.len() > 256 {
             return kerror!(InvalidArgument);
         }
@@ -402,6 +410,7 @@ impl FileSystem for Rfs2 {
         &self,
         child_inode: VfsInodeIndex,
         parent_inode: VfsInodeIndex,
+        _parent_inode_extra_data: &dyn InodeExtraData,
         name: &str,
     ) -> Result<(VfsInode, VfsInode), KernelError> {
         if name.len() > 256 {
@@ -461,7 +470,13 @@ impl FileSystem for Rfs2 {
         Ok((new_parent_inode, new_child_inode))
     }
 
-    async fn truncate(&self, inode: VfsInodeIndex, _extra_data: &Box<[u8]>, size: u64) -> Result<(), KernelError> {
+    async fn truncate(
+        &self,
+        inode: VfsInodeIndex,
+        _f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
+        size: u64,
+    ) -> Result<(), KernelError> {
         let lock = self.get_file_lock(inode as InodeIndex);
         let locked = lock.lock();
 
@@ -477,7 +492,8 @@ impl FileSystem for Rfs2 {
         &self,
         inode: VfsInodeIndex,
         parent_inode: VfsInodeIndex,
-        _parent_extra_data: &Box<[u8]>,
+        _parent_f_handle_extra_data: &dyn FileHandleExtraData,
+        _parent_inode_extra_data: &dyn InodeExtraData,
         name: &str,
     ) -> Result<(), KernelError> {
         if name.len() > 256 {

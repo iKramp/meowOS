@@ -7,12 +7,29 @@ use uuid::Uuid;
 use crate::{
     drivers::block_device::disk::MountedPartition,
     memory::{addresses::*, physical_allocator},
-    vfs::{DeviceId, FileReadResult, FileSystem, FileSystemFactory, Inode, InodeIndex, InodeTypeAndPerms},
+    vfs::{
+        DeviceId, FileReadResult, FileSystem, FileSystemFactory, Inode, InodeExtraData, InodeIndex, InodeTypeAndPerms,
+        file::{EmptyFileHandleExtraData, FileHandleExtraData},
+    },
 };
 
 use std::{boxed::Box, error::KernelError};
 
 use crate::drivers::block_device::disk::DirEntry;
+
+#[derive(Debug)]
+struct FatInodeExtraData {
+    parent_inode: InodeIndex,
+}
+impl crate::vfs::InodeExtraData for FatInodeExtraData {
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn core::any::Any {
+        self
+    }
+}
 
 #[allow(non_snake_case)]
 #[repr(C, packed)]
@@ -98,6 +115,10 @@ struct FatLongDirEntry {
     name2: [u8; 12],
     first_cluster_low: u16,
     name3: [u8; 4],
+}
+
+struct FileHandleMetadata {
+    file_size_rounded: u64,
 }
 
 impl FatDirEntry {
@@ -402,11 +423,11 @@ impl FileSystem for FatDriver {
         self.partition.partition.part_id
     }
 
-    fn open(&self, _inode: InodeIndex) -> Result<Box<[u8]>, KernelError> {
-        Ok(Box::new([]))
+    fn f_handle_open(&self, _inode: InodeIndex) -> Result<Box<dyn FileHandleExtraData>, KernelError> {
+        Ok(Box::new(EmptyFileHandleExtraData))
     }
 
-    fn close(&self, _inode: InodeIndex, _extra_data: Box<[u8]>) -> Result<(), KernelError> {
+    fn f_handle_close(&self, _inode: InodeIndex, _extra_data: Box<dyn FileHandleExtraData>) -> Result<(), KernelError> {
         Ok(())
     }
 
@@ -417,7 +438,8 @@ impl FileSystem for FatDriver {
     async fn read(
         &self,
         inode: InodeIndex,
-        _extra_data: &Box<[u8]>,
+        _f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
         offset_bytes: u64,
         size_bytes: u64,
         buffer: &[PhysAddr],
@@ -475,7 +497,7 @@ impl FileSystem for FatDriver {
         Ok(((size_sectors * 512).min(size_bytes), FileReadResult::Invalid))
     }
 
-    async fn read_dir(&self, inode: InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {
+    async fn read_dir(&self, inode: InodeIndex, _inode_extra_data: &dyn InodeExtraData) -> Result<Box<[DirEntry]>, KernelError> {
         let entries = self.read_dir_internal(inode).await?;
         let vfs_entries: Vec<DirEntry> = entries
             .into_iter()
@@ -512,7 +534,8 @@ impl FileSystem for FatDriver {
     async fn write(
         &self,
         _inode: InodeIndex,
-        _extra_data: &Box<[u8]>,
+        _f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
         _offset: u64,
         _size: u64,
         _buffer: &[PhysAddr],
@@ -534,6 +557,7 @@ impl FileSystem for FatDriver {
                 stat_change_time: 0,
                 internal_synchronization: false,
                 requires_aligned_position: true,
+                extra_data: Box::new(FatInodeExtraData { parent_inode: parent }),
             });
         }
 
@@ -570,9 +594,15 @@ impl FileSystem for FatDriver {
             stat_change_time: 0,
             internal_synchronization: false,
             requires_aligned_position: true,
+            extra_data: Box::new(FatInodeExtraData { parent_inode: parent }),
         })
     }
-    async fn set_stat(&self, _inode_index: InodeIndex, _parent: InodeIndex, _inode_data: Inode) -> Result<(), KernelError> {
+    async fn set_stat(
+        &self,
+        _inode_index: InodeIndex,
+        _inode_data: Inode,
+        _extra_data: &dyn InodeExtraData,
+    ) -> Result<(), KernelError> {
         return kerror!(UnsupportedOperation);
     }
     ///returns the new parent inode in the first field and the new inode in the second
@@ -580,6 +610,7 @@ impl FileSystem for FatDriver {
         &self,
         _name: &str,
         _parent_dir: InodeIndex,
+        _parent_inode_extra_data: &dyn InodeExtraData,
         _type_mode: InodeTypeAndPerms,
         _uid: u16,
         _gid: u16,
@@ -587,7 +618,12 @@ impl FileSystem for FatDriver {
         return kerror!(UnsupportedOperation);
     }
     //returns the new inodes (parent, child). Reaching link count 0 doesn't remove the file yet
-    async fn unlink(&self, _parent_inode: InodeIndex, _name: &str) -> Result<(Inode, Inode), KernelError> {
+    async fn unlink(
+        &self,
+        _parent_inode: InodeIndex,
+        _parent_inode_extra_data: &dyn InodeExtraData,
+        _name: &str,
+    ) -> Result<(Inode, Inode), KernelError> {
         return kerror!(UnsupportedOperation);
     }
     //removes the inode and all its data. Link count has to be 0
@@ -595,17 +631,30 @@ impl FileSystem for FatDriver {
         return kerror!(UnsupportedOperation);
     }
     ///returns the new inodes (parent, child)
-    async fn link(&self, _inode: InodeIndex, _parent_dir: InodeIndex, _name: &str) -> Result<(Inode, Inode), KernelError> {
+    async fn link(
+        &self,
+        _inode: InodeIndex,
+        _parent_dir: InodeIndex,
+        _parent_inode_extra_data: &dyn InodeExtraData,
+        _name: &str,
+    ) -> Result<(Inode, Inode), KernelError> {
         return kerror!(UnsupportedOperation);
     }
-    async fn truncate(&self, _inode: InodeIndex, _extra_data: &Box<[u8]>, _size: u64) -> Result<(), KernelError> {
+    async fn truncate(
+        &self,
+        _inode: InodeIndex,
+        _f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
+        _size: u64,
+    ) -> Result<(), KernelError> {
         return kerror!(UnsupportedOperation);
     }
     async fn rename(
         &self,
         _inode: InodeIndex,
         _parent_inode: InodeIndex,
-        _parent_extra_data: &Box<[u8]>,
+        _parent_f_handle_extra_data: &dyn FileHandleExtraData,
+        _parent_inode_extra_data: &dyn InodeExtraData,
         _name: &str,
     ) -> Result<(), KernelError> {
         return kerror!(UnsupportedOperation);

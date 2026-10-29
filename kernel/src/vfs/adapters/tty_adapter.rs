@@ -12,7 +12,8 @@ use uuid::Uuid;
 
 use crate::memory::addresses::{PhysAddr, VirtAddr};
 use crate::tty::{self, TTY};
-use crate::vfs::{DeviceId, FileReadResult, FileSystem, Inode, InodeIndex, InodeTypeAndPerms};
+use crate::vfs::file::FileHandleExtraData;
+use crate::vfs::{DeviceId, FileReadResult, FileSystem, Inode, InodeExtraData, InodeIndex, InodeTypeAndPerms};
 
 use super::{DirEntry, VfsAdapterTrait};
 
@@ -55,6 +56,7 @@ impl TtyAdapter {
             stat_change_time: 0,
             internal_synchronization: true,
             requires_aligned_position: false,
+            extra_data: Box::new(crate::vfs::EmptyExtraInodeData),
         }
     }
 }
@@ -96,18 +98,11 @@ impl VfsAdapterTrait for TtyAdapter {
         self.device_details.partition
     }
 
-    fn open(&self, _inode: crate::vfs::InodeIndex) -> Result<Box<[u8]>, KernelError> {
-        Ok(Box::new([]))
-    }
-
-    fn close(&self, _inode: crate::vfs::InodeIndex, _extra_data: Box<[u8]>) -> Result<(), KernelError> {
-        Ok(())
-    }
-
     async fn read(
         &self,
         _inode: crate::vfs::InodeIndex,
-        _extra_data: &Box<[u8]>,
+        _f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
         _offset_bytes: u64,
         size_bytes: u64,
         buffer: &[PhysAddr],
@@ -154,14 +149,19 @@ impl VfsAdapterTrait for TtyAdapter {
         Ok((read_size, read_res))
     }
 
-    async fn read_dir(&self, _inode: crate::vfs::InodeIndex) -> Result<Box<[DirEntry]>, KernelError> {
+    async fn read_dir(
+        &self,
+        _inode: crate::vfs::InodeIndex,
+        inode_extra_data: &dyn InodeExtraData,
+    ) -> Result<Box<[DirEntry]>, KernelError> {
         kerror!(UnsupportedOperation)
     }
 
     async fn write(
         &self,
         inode: crate::vfs::InodeIndex,
-        _extra_data: &Box<[u8]>,
+        _f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
         _offset: u64,
         size: u64,
         buffer: &[PhysAddr],
@@ -190,7 +190,7 @@ impl VfsAdapterTrait for TtyAdapter {
         Ok((self.get_inode(inode), size))
     }
 
-    async fn stat(&self, inode: crate::vfs::InodeIndex) -> Result<Inode, KernelError> {
+    async fn stat(&self, inode: crate::vfs::InodeIndex, _parent: InodeIndex) -> Result<Inode, KernelError> {
         Ok(self.get_inode(inode))
     }
 }
