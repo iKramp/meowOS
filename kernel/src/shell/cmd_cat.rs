@@ -38,22 +38,18 @@ async fn cmd_cat_internal(mut args: CommandSplitter) -> Result<(), KernelError> 
     for _ in 0..chunks {
         let non_owned_buffer = owned_phys_slice_to_non_owned(&buffer);
         vfs::read_file(&file_handle, non_owned_buffer, READ_CHUNK_SIZE.min(remaining_size), false).await?;
-        remaining_size -= READ_CHUNK_SIZE.min(remaining_size);
-
-        let mut read_data = 0;
 
         let tty = lock_w_info!(TTY);
 
         for frame in &buffer {
-            let to_read = (file_size - read_data).min(4096);
+            let to_read = READ_CHUNK_SIZE.min(remaining_size);
             let virt_addr = VirtAddr::from(frame.0);
             let ptr = virt_addr.0 as *const u8;
             let data = unsafe { core::slice::from_raw_parts(ptr, to_read as usize) };
             let string = unsafe { str::from_utf8_unchecked(data) };
             tty.print(string);
-
-            read_data += to_read;
         }
+        remaining_size -= READ_CHUNK_SIZE.min(remaining_size);
     }
     let tty = lock_w_info!(TTY);
     tty.print("\n");

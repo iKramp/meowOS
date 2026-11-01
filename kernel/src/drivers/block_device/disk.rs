@@ -174,7 +174,7 @@ impl<'a> Future for CacheReader<'a> {
                                 callback(self.device.clone())
                             }
 
-                            if read_sectors >= self.sec_count {
+                            if read_sectors + i >= self.sec_count {
                                 continue;
                             }
 

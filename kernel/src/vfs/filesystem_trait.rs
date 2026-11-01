@@ -21,6 +21,7 @@ pub trait FileSystemFactory: Send + Sync {
     async fn mount(&self, partition: MountedPartition) -> Arc<dyn FileSystem + Send>;
 }
 
+#[allow(clippy::too_many_arguments)]
 #[async_trait::async_trait]
 pub trait FileSystem: Debug + Send + Sync {
     fn device_id(&self) -> DeviceId;
@@ -32,7 +33,11 @@ pub trait FileSystem: Debug + Send + Sync {
     ///If the filesystem needs to do async work, it should:
     ///on open - insert "pending" data and fill in real data on the next call
     ///on close - spawn a task to do the async work and return immediately
-    fn f_handle_open(&self, _inode: InodeIndex) -> Result<Box<dyn FileHandleExtraData>, KernelError> {
+    fn f_handle_open(
+        &self,
+        _inode: InodeIndex,
+        _inode_extra_data: &dyn InodeExtraData,
+    ) -> Result<Box<dyn FileHandleExtraData>, KernelError> {
         Ok(Box::new(EmptyFileHandleExtraData))
     }
     fn f_handle_close(&self, _inode: InodeIndex, _extra_data: Box<dyn FileHandleExtraData>) -> Result<(), KernelError> {

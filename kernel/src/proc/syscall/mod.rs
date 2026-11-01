@@ -24,6 +24,7 @@ mod syscall_registry;
 pub use syscall_registry::*;
 
 const KERNEL_START_ADDR: u64 = 1 << (VIRTUAL_ADDRESS_BITS - 1);
+pub const LOG_SYSCALLS_STATE: bool = false;
 
 ///Prepare all necessary things for executing syscalls. This includes setting interrupt handlers,
 ///MSRs and more
@@ -101,7 +102,9 @@ pub extern "C" fn main_syscall_handler(saved_regs_ptr: u64) -> ! {
     save_cpu_state(&StackCpuStateData::Syscall(saved_regs), &curr_proc);
 
     let syscall_number = saved_regs.get_syscall_number();
-    println!("Syscall number: {:X}, state: {:#X?}", syscall_number, saved_regs);
+    if LOG_SYSCALLS_STATE {
+        println!("Syscall number: {:X}, state: {:#X?}", syscall_number, saved_regs);
+    }
 
     let Some(syscall_namespace) = curr_proc.get_mutable().get_namespaces().get_namespace::<SyscallNamespace>(0) else {
         proc::kill_process(curr_proc.pid(), u64::MAX);

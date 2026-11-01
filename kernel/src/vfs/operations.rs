@@ -37,6 +37,8 @@ use super::{
     fs_tree::{self},
 };
 
+const LOG_COMMON_OPERATIONS: bool = false;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileReadResult {
     Normal = 0,
@@ -354,7 +356,10 @@ pub async fn open_file(
         .mounted_filesystems
         .get_mut(&partition_id)
         .ok_or(kerror_unwrapped!(NoEntry))?;
-    let extra_data = fs.f_handle_open(inode_index.index)?;
+
+    let extra_data = &*inode_read_ref.extra_data;
+
+    let extra_data = fs.f_handle_open(inode_index.index, extra_data)?;
     drop(vfs);
 
     //TODO: check permissions
@@ -572,7 +577,9 @@ pub async fn write_file(file_handle: &FileHandle, buffer: &[PhysAddr], size: u64
         )
         .await?;
 
-    println!("Wrote {} bytes", res.1);
+    if LOG_COMMON_OPERATIONS {
+        println!("Wrote {} bytes", res.1);
+    }
 
     file_handle
         .position
@@ -621,10 +628,12 @@ pub async fn read_file(
         (size, Some(inode))
     };
 
-    println!(
-        "Reading max {} bytes from file {:?} at offset {}",
-        size, file_handle.inode, offset
-    );
+    if LOG_COMMON_OPERATIONS {
+        println!(
+            "Reading max {} bytes from file {:?} at offset {}",
+            size, file_handle.inode, offset
+        );
+    }
 
     if is_dir {
         println!("file {:?} is a directory, cannot read", file_handle.inode);

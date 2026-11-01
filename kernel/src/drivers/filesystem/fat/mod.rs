@@ -1,5 +1,11 @@
+#![allow(clippy::slow_vector_initialization)]
+
 use bitfield::bitfield;
-use core::{mem::MaybeUninit, slice};
+use core::{
+    mem::MaybeUninit,
+    slice,
+    sync::atomic::{AtomicU64, Ordering::Relaxed},
+};
 use std::{alloc::string::ToString, format, kerror, kerror_unwrapped, println, string::String, sync::arc::Arc, vec::Vec};
 
 use uuid::Uuid;
@@ -9,7 +15,7 @@ use crate::{
     memory::{addresses::*, physical_allocator},
     vfs::{
         DeviceId, FileReadResult, FileSystem, FileSystemFactory, Inode, InodeExtraData, InodeIndex, InodeTypeAndPerms,
-        file::{EmptyFileHandleExtraData, FileHandleExtraData},
+        file::FileHandleExtraData,
     },
 };
 
@@ -17,19 +23,7 @@ use std::{boxed::Box, error::KernelError};
 
 use crate::drivers::block_device::disk::DirEntry;
 
-#[derive(Debug)]
-struct FatInodeExtraData {
-    parent_inode: InodeIndex,
-}
-impl crate::vfs::InodeExtraData for FatInodeExtraData {
-    fn as_any(&self) -> &dyn core::any::Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn core::any::Any {
-        self
-    }
-}
+const USE_TREE_CACHE: bool = true;
 
 #[allow(non_snake_case)]
 #[repr(C, packed)]
@@ -117,10 +111,6 @@ struct FatLongDirEntry {
     name3: [u8; 4],
 }
 
-struct FileHandleMetadata {
-    file_size_rounded: u64,
-}
-
 impl FatDirEntry {
     fn is_used(&self) -> bool {
         self.dir_name[0] != 0x00 && self.dir_name[0] != 0xE5
@@ -168,6 +158,11 @@ impl FatLongDirEntry {
         .collect::<String>();
         format!("{}{}{}", name1, name2, name3)
     }
+}
+
+struct PageCache {
+    page_data: OwnedPhysAddr,
+    start_sector: u64,
 }
 
 pub(super) fn init_fat() {
@@ -295,36 +290,37 @@ impl FatDriver {
         }
     }
 
-    fn get_sector_from_cluster(&self, cluster: u32) -> u32 {
-        println!("Translating cluster {} to sector", cluster);
-        let res = self.data_start_sector + ((cluster - 2) * self.header.BPB_SectorsPerCluster as u32);
-        println!("Cluster {} translates to sector {}", cluster, res);
-        res
+    fn get_sector_from_cluster(&self, cluster: u32) -> u64 {
+        self.data_start_sector as u64 + ((cluster as u64 - 2) * self.header.BPB_SectorsPerCluster as u64)
     }
 
-    fn get_fat_entry_sec_offset(&self, entry: u32) -> (u32, u32) {
-        let sec_num = self.header.BPB_ReservedSectorCount as u32 + (entry * 4 / self.header.BPB_BytesPerSector as u32);
+    fn get_fat_entry_sec_offset(&self, entry: u32) -> (u64, u32) {
+        let sec_num = self.header.BPB_ReservedSectorCount as u64 + (entry as u64 * 4 / self.header.BPB_BytesPerSector as u64);
         let offset = (entry * 4) % self.header.BPB_BytesPerSector as u32;
         (sec_num, offset)
     }
 
-    async fn read_sector(&self, sector: u32) -> Box<[u8; 512]> {
-        let page = physical_allocator::allocate();
-        let page_virt = VirtAddr::from(&page);
-        self.partition.read(sector as usize, 1, &[page.0]).await;
-        let mut data = Box::new([0_u8; 512]);
-        let data_src = page_virt.0 as *const u8;
+    async fn read_sector(&self, sector: u64, cache: &mut PageCache, data: &mut [u8; 512]) {
+        let page_virt = VirtAddr::from(cache.page_data.0);
+
+        if sector < cache.start_sector || sector - cache.start_sector >= 8 {
+            let to_read = sector & !0b111;
+            self.partition.read(to_read as usize, 8, &[cache.page_data.0]).await;
+            cache.start_sector = to_read;
+        }
+
+        let src_off = (sector - cache.start_sector) * 512;
+
+        let data_src = (page_virt.0 + src_off) as *const u8;
         let data_dest = data.as_mut_ptr();
         unsafe {
             data_dest.copy_from(data_src, 512);
         }
-        drop(page);
-        data
     }
 
-    async fn read_fat_entry(&self, entry_index: u32) -> u32 {
+    async fn read_fat_entry(&self, entry_index: u32, cache: &mut PageCache, data: &mut [u8; 512]) -> u32 {
         let (sector, offset) = self.get_fat_entry_sec_offset(entry_index);
-        let data = self.read_sector(sector).await;
+        self.read_sector(sector, cache, data).await;
         //my allocator should handle this fine
         debug_assert!(data.as_ptr() as usize % 4 == 0, "data pointer is not aligned to 4 bytes");
         let data_ptr = data.as_ptr() as *const u32;
@@ -335,50 +331,79 @@ impl FatDriver {
         entry_val >= 0x0FFFFFF8
     }
 
-    async fn find_sector_cluster(&self, sector: u32, file_cluster_start: u32) -> Option<(u32, u32)> {
-        //(cluster, sector_in_cluster)
-        let nth_cluster = sector / self.header.BPB_SectorsPerCluster as u32;
-
-        //not the value of the cluster, but the index of the cluster in the chain
-        let mut curr_cluster = file_cluster_start;
-        for _ in 0..nth_cluster {
-            curr_cluster = self.read_fat_entry(curr_cluster).await;
+    ///chain_follow_count: How many times to follow the chain. 0 means noop
+    ///chain_start_disk_cluster: The starting cluster in the disk to follow the chain from
+    ///chain_start_file_cluster: which cluster of the disk in order is the start of this chain
+    async fn get_disk_cluster_from_file_cluster(
+        &self,
+        chain_follow_count: u32,
+        chain_start_disk_cluster: u32,
+        chain_start_file_cluster: u32,
+        cache: &mut PageCache,
+        data: &mut [u8; 512],
+        inode_extra_data: Option<&FatInodeExtraData>,
+    ) -> Option<u32> {
+        let mut curr_cluster = chain_start_disk_cluster;
+        for i in 0..chain_follow_count {
+            curr_cluster = self.read_fat_entry(curr_cluster, cache, data).await;
+            curr_cluster &= 0x0FFFFFFF; //mask to 28 bits, as per FAT32 spec
             if curr_cluster == 0 || Self::entry_is_final(curr_cluster) {
                 return None;
             }
-            curr_cluster &= 0x0FFFFFFF; //mask to 28 bits, as per FAT32 spec
-        }
 
-        let sector_in_cluster = sector % self.header.BPB_SectorsPerCluster as u32;
-        Some((curr_cluster, sector_in_cluster))
+            if !USE_TREE_CACHE {
+                continue;
+            }
+
+            let Some(inode_extra_data) = inode_extra_data else {
+                continue;
+            };
+
+            let cache_chunk = (chain_start_file_cluster + i + 1) / inode_extra_data.tree_chunk_clusters;
+            let mut data = ExtraDataTreeEntry(0);
+            data.set_valid(true);
+            data.set_file_cluster((chain_start_file_cluster + i + 1) as u64);
+            data.set_disk_cluster(curr_cluster as u64);
+            inode_extra_data.cluster_tree[cache_chunk as usize].store(data.0, Relaxed);
+        }
+        Some(curr_cluster)
     }
 
-    async fn read_file_sector(&self, sector: u32, file_cluster_start: u32) -> Option<(Box<[u8; 512]>, u32)> {
-        //(data, cluster)
+    async fn read_file_sector(
+        &self,
+        sector: u32,
+        file_cluster_start: u32,
+        cache: &mut PageCache,
+        data: &mut [u8; 512],
+    ) -> Option<u32> {
+        //cluster
         let nth_cluster = sector / self.header.BPB_SectorsPerCluster as u32;
 
-        //not the value of the cluster, but the index of the cluster in the chain
-        let mut curr_cluster = file_cluster_start;
-        for _ in 0..nth_cluster {
-            curr_cluster = self.read_fat_entry(curr_cluster).await;
-            if curr_cluster == 0 || Self::entry_is_final(curr_cluster) {
-                return None;
-            }
-            curr_cluster &= 0x0FFFFFFF; //mask to 28 bits, as per FAT32 spec
-        }
+        let curr_cluster = self
+            .get_disk_cluster_from_file_cluster(nth_cluster, file_cluster_start, 0, cache, data, None)
+            .await?;
 
-        let sector_in_cluster = sector % self.header.BPB_SectorsPerCluster as u32;
+        let sector_in_cluster = sector as u64 % self.header.BPB_SectorsPerCluster as u64;
         let cluster_start_sector = self.get_sector_from_cluster(curr_cluster);
-        Some((self.read_sector(cluster_start_sector + sector_in_cluster).await, curr_cluster))
+        self.read_sector(cluster_start_sector + sector_in_cluster, cache, data).await;
+        Some(curr_cluster)
     }
 
     async fn read_dir_internal(&self, inode_index: InodeIndex) -> Result<Box<[(FatDirEntry, Option<String>)]>, KernelError> {
         let mut sector_offset = 0;
         let mut buf = Vec::new();
         let mut curr_long_name: Option<String> = None;
+        let mut data = [0_u8; 512];
+        let mut page_cache = PageCache {
+            page_data: physical_allocator::allocate(),
+            start_sector: u64::MAX,
+        };
         loop {
             //don't wanna deal with optimization
-            let Some((data, _cluster)) = self.read_file_sector(sector_offset, inode_index as u32).await else {
+            let Some(_cluster) = self
+                .read_file_sector(sector_offset, inode_index as u32, &mut page_cache, &mut data)
+                .await
+            else {
                 return Ok(buf.into_boxed_slice());
             };
             sector_offset += 1;
@@ -423,11 +448,20 @@ impl FileSystem for FatDriver {
         self.partition.partition.part_id
     }
 
-    fn f_handle_open(&self, _inode: InodeIndex) -> Result<Box<dyn FileHandleExtraData>, KernelError> {
-        Ok(Box::new(EmptyFileHandleExtraData))
+    fn f_handle_open(
+        &self,
+        inode: InodeIndex,
+        _inode_data: &dyn InodeExtraData,
+    ) -> Result<Box<dyn FileHandleExtraData>, KernelError> {
+        let file_handle_data = FatFileHandleExtraData {
+            cluster_start: inode as u32,
+        };
+
+        Ok(Box::new(file_handle_data))
     }
 
     fn f_handle_close(&self, _inode: InodeIndex, _extra_data: Box<dyn FileHandleExtraData>) -> Result<(), KernelError> {
+        //nothing to free
         Ok(())
     }
 
@@ -437,64 +471,138 @@ impl FileSystem for FatDriver {
     ///Offset must be page aligned
     async fn read(
         &self,
-        inode: InodeIndex,
-        _f_handle_extra_data: &dyn FileHandleExtraData,
+        _inode: InodeIndex,
+        f_handle_extra_data: &dyn FileHandleExtraData,
         _inode_extra_data: &dyn InodeExtraData,
         offset_bytes: u64,
-        size_bytes: u64,
+        size_to_read_bytes: u64,
         buffer: &[PhysAddr],
         _blocking: bool,
     ) -> Result<(u64, FileReadResult), KernelError> {
         if !offset_bytes.is_multiple_of(512) {
             return kerror!(IllegalValue);
         }
+        if size_to_read_bytes == 0 {
+            return Ok((0, FileReadResult::Normal));
+        }
+        if size_to_read_bytes.div_ceil(4096) != buffer.len() as u64 {
+            return kerror!(IllegalValue);
+        }
 
-        let size_sectors = size_bytes.div_ceil(512);
-        let size_sectors = size_sectors.min(buffer.len() as u64 * 8);
+        let mut data = [0_u8; 512];
+        let mut page_cache = PageCache {
+            page_data: physical_allocator::allocate(),
+            start_sector: u64::MAX,
+        };
 
-        let start_sector = offset_bytes / 512;
-        let sectors_per_cluster = self.header.BPB_SectorsPerCluster as u64;
+        let size_to_read_sectors = size_to_read_bytes.div_ceil(512);
+        let handle_extra_data = f_handle_extra_data
+            .as_any()
+            .downcast_ref::<FatFileHandleExtraData>()
+            .ok_or(kerror_unwrapped!(IllegalValue))?;
+        let inode_extra_data = _inode_extra_data
+            .as_any()
+            .downcast_ref::<FatInodeExtraData>()
+            .ok_or(kerror_unwrapped!(IllegalValue))?;
 
-        // Find the cluster containing the first requested sector.
-        let (mut cluster_to_read, mut sector_in_cluster) = self
-            .find_sector_cluster(start_sector as u32, inode as u32)
-            .await
-            .ok_or(kerror_unwrapped!(InternalFSError))?;
+        let offset_sectors = offset_bytes / self.header.BPB_BytesPerSector as u64;
 
-        for buffer_sector in 0..size_sectors {
-            let Some(data) = self
-                .read_sector(self.get_sector_from_cluster(cluster_to_read) + sector_in_cluster)
-                .await
-                .into()
-            else {
-                return Ok(((buffer_sector * 512).min(size_bytes), FileReadResult::Invalid));
-            };
+        let mut starting_file_cluster = offset_sectors / self.header.BPB_SectorsPerCluster as u64;
 
-            let buffer_phys = buffer[buffer_sector as usize / 8];
-            let buffer_virt: VirtAddr = buffer_phys.into();
-            let in_buffer_offset = (buffer_sector % 8) * 512;
-            let ptr_dest = (buffer_virt + in_buffer_offset).0 as *mut u8;
-
-            unsafe {
-                ptr_dest.copy_from(data.as_ptr(), 512);
-            }
-
-            sector_in_cluster += 1;
-
-            if sector_in_cluster == sectors_per_cluster as u32 {
-                sector_in_cluster = 0;
-
-                let next_cluster = self.read_fat_entry(cluster_to_read).await;
-
-                if next_cluster == 0 || Self::entry_is_final(next_cluster) {
-                    return Ok((((buffer_sector + 1) * 512).min(size_bytes), FileReadResult::Invalid));
+        let cluster_tree_chunk = starting_file_cluster as u32 / inode_extra_data.tree_chunk_clusters;
+        let mut starting_disk_cluster = None;
+        if USE_TREE_CACHE {
+            for i in (0..cluster_tree_chunk).rev() {
+                let Some(data) = inode_extra_data.cluster_tree.get(i as usize) else {
+                    continue;
+                };
+                let data = ExtraDataTreeEntry(data.load(Relaxed));
+                if data.valid() {
+                    starting_file_cluster = data.file_cluster();
+                    starting_disk_cluster = Some(data.disk_cluster() as u32);
+                    break;
                 }
-
-                cluster_to_read = next_cluster & 0x0FFFFFFF;
             }
         }
 
-        Ok(((size_sectors * 512).min(size_bytes), FileReadResult::Invalid))
+        let mut previous_file_cluster = starting_file_cluster as u32;
+        let mut previous_disk_cluster = if let Some(a) = starting_disk_cluster {
+            a
+        } else {
+            self.get_disk_cluster_from_file_cluster(
+                previous_file_cluster,
+                handle_extra_data.cluster_start,
+                0,
+                &mut page_cache,
+                &mut data,
+                Some(inode_extra_data),
+            )
+            .await
+            .ok_or(kerror_unwrapped!(InternalFSError))?
+        };
+
+        let mut total_sectors_read = 0;
+
+        for i in 0..size_to_read_sectors {
+            let curr_sector = offset_sectors + i;
+            let curr_file_cluster = (curr_sector / self.header.BPB_SectorsPerCluster as u64) as u32;
+            let curr_disk_cluster = if curr_file_cluster == previous_file_cluster {
+                previous_disk_cluster
+            } else {
+                //next cluster. Use old as a reference
+                let Some(cluster) = self
+                    .get_disk_cluster_from_file_cluster(
+                        curr_file_cluster - previous_file_cluster,
+                        previous_disk_cluster,
+                        previous_file_cluster,
+                        &mut page_cache,
+                        &mut data,
+                        Some(inode_extra_data),
+                    )
+                    .await
+                else {
+                    total_sectors_read = i;
+                    break;
+                };
+                cluster
+            };
+
+            let sector_in_cluster = curr_sector % self.header.BPB_SectorsPerCluster as u64;
+
+            let curr_disk_sector = self.get_sector_from_cluster(curr_disk_cluster) + sector_in_cluster;
+
+            self.read_sector(curr_disk_sector, &mut page_cache, &mut data).await;
+
+            let buffer_phys = buffer[i as usize / 8];
+            let buffer_virt = VirtAddr::from(buffer_phys);
+            let in_buffer_offset = (i % 8) * 512;
+            let ptr_dest = (buffer_virt + in_buffer_offset).0 as *mut u8;
+
+            let len_to_copy = if i == (size_to_read_sectors - 1) {
+                ((size_to_read_bytes - 1) % 512) + 1 //modulo but 1-512, not 0-511
+            } else {
+                512
+            };
+
+            let dest_slice = unsafe { core::slice::from_raw_parts_mut(ptr_dest, len_to_copy as usize) };
+
+            dest_slice.copy_from_slice(&data[..(len_to_copy as usize)]);
+
+            previous_file_cluster = curr_file_cluster;
+            previous_disk_cluster = curr_disk_cluster;
+            total_sectors_read = i + 1;
+        }
+
+        let result = if total_sectors_read == size_to_read_sectors {
+            FileReadResult::Normal
+        } else {
+            #[cfg(debug_assertions)]
+            panic!();
+            #[allow(unreachable_code)]
+            FileReadResult::Invalid
+        };
+
+        return Ok(((total_sectors_read * 512).min(size_to_read_bytes), result));
     }
 
     async fn read_dir(&self, inode: InodeIndex, _inode_extra_data: &dyn InodeExtraData) -> Result<Box<[DirEntry]>, KernelError> {
@@ -557,7 +665,13 @@ impl FileSystem for FatDriver {
                 stat_change_time: 0,
                 internal_synchronization: false,
                 requires_aligned_position: true,
-                extra_data: Box::new(FatInodeExtraData { parent_inode: parent }),
+                extra_data: Box::new(FatInodeExtraData {
+                    parent_inode: parent,
+                    size_bytes: 0,
+                    size_clusters: 0,
+                    cluster_tree: Box::new([]),
+                    tree_chunk_clusters: 0,
+                }),
             });
         }
 
@@ -581,6 +695,14 @@ impl FileSystem for FatDriver {
             InodeTypeAndPerms::new_file(0o555) //r-wr-wr-w
         };
 
+        let size_sectors = entry_to_find.file_size.div_ceil(self.header.BPB_BytesPerSector as u32);
+        let size_clusters = size_sectors.div_ceil(self.header.BPB_SectorsPerCluster as u32);
+        let cluster_tree_size = get_cluster_tree_size(size_clusters);
+        let tree_chunk_clusters = size_clusters.div_ceil(cluster_tree_size as u32);
+        let mut cluster_tree_vec = Vec::with_capacity(cluster_tree_size);
+        cluster_tree_vec.resize_with(cluster_tree_size, || AtomicU64::new(0));
+        let cluster_tree = cluster_tree_vec.into_boxed_slice();
+
         Ok(Inode {
             index: inode,
             device: self.device_id(),
@@ -594,7 +716,13 @@ impl FileSystem for FatDriver {
             stat_change_time: 0,
             internal_synchronization: false,
             requires_aligned_position: true,
-            extra_data: Box::new(FatInodeExtraData { parent_inode: parent }),
+            extra_data: Box::new(FatInodeExtraData {
+                parent_inode: parent,
+                size_bytes: entry_to_find.file_size,
+                size_clusters,
+                cluster_tree,
+                tree_chunk_clusters,
+            }),
         })
     }
     async fn set_stat(
@@ -659,4 +787,47 @@ impl FileSystem for FatDriver {
     ) -> Result<(), KernelError> {
         return kerror!(UnsupportedOperation);
     }
+}
+
+bitfield! {
+    struct ExtraDataTreeEntry(u64);
+    impl Debug;
+    valid, set_valid: 0;
+    file_cluster, set_file_cluster: 31, 1;
+    disk_cluster, set_disk_cluster: 63, 32;
+}
+
+#[derive(Debug)]
+struct FatFileHandleExtraData {
+    cluster_start: u32,
+}
+
+#[derive(Debug)]
+struct FatInodeExtraData {
+    parent_inode: InodeIndex,
+    size_bytes: u32,
+    size_clusters: u32,
+    tree_chunk_clusters: u32,
+    cluster_tree: Box<[AtomicU64]>,
+}
+
+impl crate::vfs::InodeExtraData for FatInodeExtraData {
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn core::any::Any {
+        self
+    }
+}
+impl crate::vfs::file::FileHandleExtraData for FatFileHandleExtraData {
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+}
+
+fn get_cluster_tree_size(size_clusters: u32) -> usize {
+    let res = size_clusters.isqrt();
+    let res = if res * res < size_clusters { res + 1 } else { res };
+    res as usize
 }

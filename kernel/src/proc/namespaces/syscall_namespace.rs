@@ -8,7 +8,7 @@ use std::{
 
 use crate::proc::{
     namespaces::ProcNamespace,
-    syscall::{self, SyscallHandler, SyscallPack},
+    syscall::{self, LOG_SYSCALLS_STATE, SyscallHandler, SyscallPack},
 };
 
 #[derive(Debug)]
@@ -137,17 +137,21 @@ impl SyscallNamespace {
         let pack = Self::get_pack(syscall_number, &mapped_syscalls)?;
         let in_pack_index = syscall_number.checked_sub(pack.base)?;
 
-        println!(
-            "syscall_number: {syscall_number:X}, pack.base: {:X}, in_pack_index: {:X}",
-            pack.base, in_pack_index
-        );
+        if LOG_SYSCALLS_STATE {
+            println!(
+                "syscall_number: {syscall_number:X}, pack.base: {:X}, in_pack_index: {:X}",
+                pack.base, in_pack_index
+            );
+        }
 
         if pack.mask & (1 << in_pack_index) == 0 {
             return None;
         }
         let syscall = pack.pack.get_handler(in_pack_index as usize);
         if let Some((handler, name)) = syscall {
-            println!("syscall_name: {name}");
+            if LOG_SYSCALLS_STATE {
+                println!("syscall_name: {name}");
+            }
             return Some(handler);
         }
         None

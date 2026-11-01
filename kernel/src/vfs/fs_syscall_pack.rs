@@ -326,7 +326,6 @@ fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
 
         //return
         proc.set_syscall_return(&[bytes_written]);
-        println!("fwrite: finished processing fwrite for pid {pid:?}, bytes_written: {bytes_written}");
         crate::proc::wake_process(proc.pid())
     };
 

@@ -93,7 +93,7 @@ fn get_buffer_id(extra_data: &dyn FileHandleExtraData) -> Result<u64, KernelErro
     let extra_data = extra_data
         .as_any()
         .downcast_ref::<InputFHandleExtraData>()
-        .ok_or_else(|| kerror_unwrapped!(InvalidArgument))?;
+        .ok_or(kerror_unwrapped!(InvalidArgument))?;
     Ok(extra_data.buffer_id)
 }
 
@@ -107,7 +107,11 @@ impl VfsAdapterTrait for InputVfsAdapter {
         self.device_details.partition
     }
 
-    fn open(&self, inode: crate::vfs::InodeIndex) -> Result<Box<dyn FileHandleExtraData>, KernelError> {
+    fn open(
+        &self,
+        inode: crate::vfs::InodeIndex,
+        _inode_extra_data: &dyn InodeExtraData,
+    ) -> Result<Box<dyn FileHandleExtraData>, KernelError> {
         println!("open called with inode: {:#x}", inode);
         let inode_index = inode & !PREFIX_MASK;
         let prefix = inode & PREFIX_MASK;

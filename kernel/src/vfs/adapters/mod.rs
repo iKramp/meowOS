@@ -52,6 +52,7 @@ impl VfsAdapterDevice {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 #[async_trait::async_trait]
 pub trait VfsAdapterTrait: Debug + Send + Sync {
     fn device_id(&self) -> DeviceId;
@@ -61,11 +62,11 @@ pub trait VfsAdapterTrait: Debug + Send + Sync {
     //inconsistent by writes/reads to other instances of FileHandle to the same Inode.
     //Open may also be called for FileHandles that are cloned from existing FileHandles (extra data
     //is not blindly copied). This happens when cloning namespaces
-    fn open(&self, _inode: InodeIndex) -> Result<Box<dyn FileHandleExtraData>, KernelError> {
-        return Ok(Box::new(EmptyFileHandleExtraData));
+    fn open(&self, _inode: InodeIndex, _extra_data: &dyn InodeExtraData) -> Result<Box<dyn FileHandleExtraData>, KernelError> {
+        Ok(Box::new(EmptyFileHandleExtraData))
     }
     fn close(&self, _inode: InodeIndex, _extra_data: Box<dyn FileHandleExtraData>) -> Result<(), KernelError> {
-        return Ok(());
+        Ok(())
     }
     async fn read(
         &self,
@@ -100,8 +101,12 @@ impl<T: VfsAdapterTrait> FileSystem for T {
         VfsAdapterTrait::partition_id(self)
     }
 
-    fn f_handle_open(&self, inode: InodeIndex) -> Result<Box<dyn FileHandleExtraData>, KernelError> {
-        VfsAdapterTrait::open(self, inode)
+    fn f_handle_open(
+        &self,
+        inode: InodeIndex,
+        inode_extra_data: &dyn InodeExtraData,
+    ) -> Result<Box<dyn FileHandleExtraData>, KernelError> {
+        VfsAdapterTrait::open(self, inode, inode_extra_data)
     }
 
     fn f_handle_close(&self, inode: InodeIndex, extra_data: Box<dyn FileHandleExtraData>) -> Result<(), KernelError> {

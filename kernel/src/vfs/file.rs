@@ -74,10 +74,14 @@ impl FileHandle {
             .expect("Partition not found for device in FileHandle::clone_from")
             .clone();
         drop(vfs);
-        let extra_data = partition.f_handle_open(other.inode.index).unwrap_or_else(|e| {
-            println!("Error opening file for clone: {:?}", e);
-            Box::new(EmptyFileHandleExtraData) // Return an empty box on error
-        });
+        let extra_data = partition
+            .f_handle_open(other.inode.index, unsafe {
+                &*other.open_file.inode.get_read_reference().extra_data
+            })
+            .unwrap_or_else(|e| {
+                println!("Error opening file for clone: {:?}", e);
+                Box::new(EmptyFileHandleExtraData) // Return an empty box on error
+            });
 
         FileHandle {
             inode: other.inode,

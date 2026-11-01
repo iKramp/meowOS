@@ -102,11 +102,12 @@ impl BlockDeviceCache {
         };
         let device_entry = &mut self.cache[device_entry_pos];
         let sector_entry_pos = device_entry.1.iter_mut().position(|(sec, _)| *sec == sector);
-        match sector_entry_pos {
+        let result = match sector_entry_pos {
             Some(pos) => {
                 let existing_entry = &mut device_entry.1[pos];
                 if !existing_entry.1.reading && read_from_disk {
-                    println!(level:warn, "outdated data from disk!");
+                    //Happens on cache miss, 8 sectors are filled even if some sectors are in cache
+                    //don't overwrite. Either it's identical or there's newer data from processes
                     return None;
                 }
                 existing_entry.1.reading = false;
@@ -129,7 +130,18 @@ impl BlockDeviceCache {
                 device_entry.1.push((sector, entry));
                 callback
             }
+        };
+
+        //wake up any waiters
+        let to_wake = self
+            .wait_callbacks
+            .extract_if(.., |(dev, sec, _)| *dev == device_id && *sec == sector);
+
+        for (_, _, waker) in to_wake {
+            waker.wake();
         }
+
+        result
     }
 
     //returns if an entry was evicted. Can fail if all MAX entries are reading (unlikely)

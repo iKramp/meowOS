@@ -1,6 +1,6 @@
 use std::{
     boxed::Box,
-    lock_w_info,
+    lock_w_info, print,
     string::{String, ToString},
     sync::no_int_spinlock::NoIntSpinlock,
     vec::Vec,
@@ -268,6 +268,7 @@ impl TtyState {
 
     pub fn print(&self, data: &str) {
         lock_w_info!(vga_text::VGA_TEXT).write_text(data);
+        print!("[TTY] {}", data);
     }
 
     fn send_line(&mut self, eof_line: bool) {

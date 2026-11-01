@@ -11,6 +11,7 @@ use crate::{
 use super::{ProcessData, process_data::CpuStateType, syscall::return_syscalled};
 
 const MAX_PROC_TIME_SLICE: Duration = Duration::from_millis(100);
+const LOG_DISPATCH_STATE: bool = false;
 
 /*
  * Things that need to be done: (Intel SDM, Vol 3, chapter 8.1.2
@@ -49,7 +50,9 @@ pub(super) fn dispatch(new_proc: &ProcessData) -> ! {
 
     let mut locals = CpuLocals::get_mut();
     let cpu_state = new_proc.take_cpu_state();
-    println!("Dispatching process with state: {:x?}", cpu_state);
+    if LOG_DISPATCH_STATE {
+        println!("Dispatching process with state: {:x?}", cpu_state);
+    }
 
     locals.int_depth -= 1;
     locals.preemtion_id = Some(event_id);
