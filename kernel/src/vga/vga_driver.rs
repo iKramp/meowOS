@@ -3,6 +3,7 @@
 
 use crate::limine::{self, LIMINE_BOOTLOADER_REQUESTS};
 use core::arch::asm;
+use std::println;
 
 #[derive(Debug)]
 pub struct FrameBuffer {
@@ -86,6 +87,24 @@ pub fn clear_screen() {
         *max_offset.offset(-2) = 0;
         *max_offset.offset(-1) = 0;
     }
+}
+
+pub fn print_framebuffer_info() {
+    let fb = unsafe { &VGA_BINDING };
+    println!(level:info, "Framebuffer Info:");
+    println!(level:info, "Width: {}", fb.width);
+    println!(level:info, "Height: {}", fb.height);
+    println!(level:info, "Stride: {}", fb.stride);
+    println!(level:info, "Bits per Pixel: {}", fb.bits_per_pixel);
+    println!(level:info, "Blue Offset: {}", fb.blue_offset);
+    println!(level:info, "Green Offset: {}", fb.green_offset);
+    println!(level:info, "Red Offset: {}", fb.red_offset);
+    println!(level:info, "Blue Size: {}", fb.blue_size);
+    println!(level:info, "Green Size: {}", fb.green_size);
+    println!(level:info, "Red Size: {}", fb.red_size);
+    println!(level:info, "Buffer Address: {:?}", fb.buffer);
+    println!(level:info, "Buffer Size: {}", fb.stride * fb.height);
+    println!(level:info, "Buffer End Address: {:?}", unsafe { fb.buffer.add(fb.stride * fb.height) });
 }
 
 pub fn draw_pixel(x: usize, y: usize, color: (u8, u8, u8)) {

@@ -53,10 +53,6 @@ pub fn init_memory(stack_start: VirtAddr) {
         core::mem::forget(reserved);
         println!(level:info, "initializing pager");
         virt_mem_manager::init_paging();
-
-        printlnc!(level:info, (255, 200, 100), "Limine mem map:");
-        virt_mem_manager::print_mem_mapping();
-        virt_mem_manager::init_paging();
         printlnc!(level:info, (0, 255, 0), "memory initialized");
     }
 }

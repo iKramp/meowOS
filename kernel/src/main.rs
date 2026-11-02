@@ -61,6 +61,7 @@ extern "C" fn _start() -> ! {
 
     println!(level:info, "starting RustOs...");
     println!(level:info, "stack pointer: {:?}", stack_pointer);
+    vga::print_framebuffer_info();
 
     memory::init_memory(VirtAddr(stack_pointer as u64));
 
