@@ -220,7 +220,7 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let dst = buf_ptr;
         let buffer_alloc_virt: VirtAddr = buffer_alloc.0.start.into();
         let src = buffer_alloc_virt.0 + extra_offset;
-        let valid_copy = safe_memcpy_to_user(dst, src, size as usize);
+        let valid_copy = safe_memcpy_to_user(dst, src, bytes_read as usize - extra_offset as usize);
         if !valid_copy {
             proc.set_syscall_return(&[u64::MAX]);
             crate::proc::wake_process(proc.pid());

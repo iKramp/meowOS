@@ -245,6 +245,8 @@ async fn mount_vfs_adapters(fs: &Arc<dyn FileSystem + Send>) {
     let input_adapter_partition_id = input_adapter.partition_id();
     let fb_adapter = crate::vfs::adapters::FbAdapter::get();
     let fb_adapter_partition_id = fb_adapter.partition_id();
+    let static_fs_adapter = crate::vfs::adapters::StaticFsAdapter::get();
+    let static_fs_adapter_partition_id = static_fs_adapter.partition_id();
 
     let adapters = [
         ("tty", tty_adapter, tty_adapter_partition_id),
@@ -252,6 +254,7 @@ async fn mount_vfs_adapters(fs: &Arc<dyn FileSystem + Send>) {
         ("null", null_adapter, null_adapter_partition_id),
         ("input", input_adapter, input_adapter_partition_id),
         ("fb", fb_adapter, fb_adapter_partition_id),
+        ("doom", static_fs_adapter, static_fs_adapter_partition_id),
     ];
 
     let mut vfs = lock_w_info!(VFS);

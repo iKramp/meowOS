@@ -16,11 +16,13 @@ mod fb_adapter;
 mod net_adapter;
 mod null_adapter;
 mod proc_adapter;
+mod static_fs_adapter;
 mod tty_adapter;
 
 pub use fb_adapter::FbAdapter;
 pub use null_adapter::NullAdapter;
 pub use proc_adapter::ProcAdapter;
+pub use static_fs_adapter::StaticFsAdapter;
 pub use tty_adapter::TtyAdapter;
 use uuid::Uuid;
 

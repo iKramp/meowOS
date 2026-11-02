@@ -220,11 +220,6 @@ impl VfsAdapterTrait for InputVfsAdapter {
             total_elements_read += 1;
         }
 
-        println!(
-            "read called with inode: {:#x}, buffer_id: {}, total_elements_read: {}",
-            inode, buffer_id, total_elements_read
-        );
-
         return Ok((
             total_elements_read as u64 * std::mem::size_of::<InputEvent>() as u64,
             FileReadResult::TemporaryEof,
