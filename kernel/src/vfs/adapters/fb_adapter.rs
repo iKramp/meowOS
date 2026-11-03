@@ -1,3 +1,4 @@
+use core::sync::atomic::AtomicU64;
 use std::{
     boxed::Box,
     error::KernelError,
@@ -11,8 +12,9 @@ use crate::{
     drivers::block_device::disk::DirEntry,
     memory::addresses::{PhysAddr, VirtAddr},
     vfs::{
-        self, DeviceId, FileReadResult, FileSystem, Inode, InodeExtraData, InodeIndex, adapters::VfsAdapterTrait,
-        file::FileHandleExtraData,
+        self, DeviceId, FileReadResult, FileSystem, Inode, InodeExtraData, InodeIndex,
+        adapters::VfsAdapterTrait,
+        file::{EmptyFileHandleExtraData, FileHandleExtraData},
     },
     vga,
 };
@@ -24,6 +26,11 @@ pub struct FbAdapter {
 }
 
 static FB_ADAPTER: OnceLock<Arc<dyn FileSystem + Send>> = OnceLock::new();
+static FB_ADAPTER_USERS: AtomicU64 = AtomicU64::new(0);
+
+pub fn framebuffer_has_users() -> bool {
+    FB_ADAPTER_USERS.load(core::sync::atomic::Ordering::Relaxed) > 0
+}
 
 impl FbAdapter {
     pub fn get() -> Arc<dyn FileSystem + Send> {
@@ -74,6 +81,24 @@ impl VfsAdapterTrait for FbAdapter {
 
     fn partition_id(&self) -> Uuid {
         self.device_details.partition
+    }
+
+    fn open(
+        &self,
+        _inode: crate::vfs::InodeIndex,
+        _extra_data: &dyn InodeExtraData,
+    ) -> Result<Box<dyn FileHandleExtraData>, KernelError> {
+        FB_ADAPTER_USERS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        Ok(Box::new(EmptyFileHandleExtraData))
+    }
+
+    fn close(
+        &self,
+        _inode: crate::vfs::InodeIndex,
+        _f_handle_extra_data: Box<dyn FileHandleExtraData>,
+    ) -> Result<(), KernelError> {
+        FB_ADAPTER_USERS.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
+        Ok(())
     }
 
     async fn read(

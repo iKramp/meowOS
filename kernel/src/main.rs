@@ -25,7 +25,6 @@ mod cmd_args;
 mod drivers;
 mod file_operations;
 mod interrupts;
-mod keyboard;
 mod limine;
 mod memory;
 mod msr;

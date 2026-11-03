@@ -100,25 +100,25 @@ pub extern "C" fn spurious_interrupt(_proc_data: &mut InterruptProcessorState) -
 }
 
 pub extern "C" fn legacy_keyboard_interrupt(_proc_data: &mut InterruptProcessorState) -> InterruptReturnType {
-    ps2::handle_ps2_keyboard_interrupt();
+    ps2::handle_ps2_interrupt(1);
     legacy_eoi();
     InterruptReturnType::Normal
 }
 
 pub extern "C" fn apic_keyboard_interrupt(_proc_data: &mut InterruptProcessorState) -> InterruptReturnType {
-    ps2::handle_ps2_keyboard_interrupt();
+    ps2::handle_ps2_interrupt(1);
     apic_eoi();
     InterruptReturnType::Normal
 }
 
 pub extern "C" fn legacy_mouse_interrupt(_proc_data: &mut InterruptProcessorState) -> InterruptReturnType {
-    ps2::handle_ps2_mouse_interrupt();
+    ps2::handle_ps2_interrupt(2);
     legacy_eoi();
     InterruptReturnType::Normal
 }
 
 pub extern "C" fn apic_mouse_interrupt(_proc_data: &mut InterruptProcessorState) -> InterruptReturnType {
-    ps2::handle_ps2_mouse_interrupt();
+    ps2::handle_ps2_interrupt(2);
     apic_eoi();
     InterruptReturnType::Normal
 }

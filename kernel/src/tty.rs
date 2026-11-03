@@ -7,9 +7,10 @@ use std::{
 };
 
 use crate::{
-    keyboard::{self, Key, KeyEvent},
+    drivers::keyboard::{self, Key, KeyEvent},
     proc::kill_process,
     shell,
+    vfs::adapters,
     vga::vga_text,
 };
 
@@ -267,7 +268,9 @@ impl TtyState {
     }
 
     pub fn print(&self, data: &str) {
-        lock_w_info!(vga_text::VGA_TEXT).write_text(data);
+        if !adapters::framebuffer_has_users() {
+            lock_w_info!(vga_text::VGA_TEXT).write_text(data);
+        }
         print!("[TTY] {}", data);
     }
 

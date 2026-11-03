@@ -152,7 +152,7 @@ impl VfsAdapterTrait for TtyAdapter {
     async fn read_dir(
         &self,
         _inode: crate::vfs::InodeIndex,
-        inode_extra_data: &dyn InodeExtraData,
+        _inode_extra_data: &dyn InodeExtraData,
     ) -> Result<Box<[DirEntry]>, KernelError> {
         kerror!(UnsupportedOperation)
     }

@@ -19,7 +19,7 @@ mod proc_adapter;
 mod static_fs_adapter;
 mod tty_adapter;
 
-pub use fb_adapter::FbAdapter;
+pub use fb_adapter::{FbAdapter, framebuffer_has_users};
 pub use null_adapter::NullAdapter;
 pub use proc_adapter::ProcAdapter;
 pub use static_fs_adapter::StaticFsAdapter;

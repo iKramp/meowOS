@@ -2,6 +2,8 @@ pub mod block_device;
 pub mod filesystem;
 pub mod gpt;
 pub mod input;
+pub mod keyboard;
+mod mouse;
 pub mod net_device;
 pub mod pci;
 pub mod ps2;
