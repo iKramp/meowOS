@@ -1,7 +1,7 @@
 use std::{lock_w_info, println, sync::no_int_spinlock::NoIntSpinlock, vec::Vec};
 
 use crate::{
-    drivers::input::{self, InputDeviceType},
+    drivers::input::{self, InputDeviceType, evnet_codes::REL_X},
     keyboard::KeyboardState,
     utils::{byte_from_port, byte_to_port},
 };
@@ -75,6 +75,8 @@ pub(super) fn init() {
     if lock.dual_port {
         reset_device(2);
     }
+
+    send_to_device(2, 0xF4); //enable mouse
 
     drop(lock);
 }
@@ -164,6 +166,7 @@ pub fn read_scancodes() -> Vec<u8> {
 }
 
 pub fn handle_ps2_keyboard_interrupt() {
+    let lock = lock_w_info!(PS2_WRITE_LOCK);
     let scancodes = crate::drivers::ps2::read_scancodes();
     let keeb_state = unsafe { &mut PS2_KEYBOARD_STATE };
     let keys = crate::keyboard::handle_keyboard_data(scancodes, keeb_state);
@@ -181,6 +184,72 @@ pub fn handle_ps2_keyboard_interrupt() {
             .collect::<Vec<_>>();
         input::INPUT_EVENT_MANAGER.add_events(Some(InputDeviceType::Keyboard), None, &events);
     }
+    drop(lock);
+}
+
+pub fn handle_ps2_mouse_interrupt() {
+    let lock = lock_w_info!(PS2_WRITE_LOCK);
+    static mut MOUSE_BUTTON_STATE: (bool, bool, bool) = (false, false, false); //left, right, middle
+    let scancodes = crate::drivers::ps2::read_scancodes();
+    for bytes in scancodes.chunks_exact(3) {
+        let x = bytes[1] as u16 as i16; //extend without sign extension
+        let y = bytes[2] as u16 as i16; //extend without sign extension
+        let rel_x = x - if bytes[0] & 0x10 != 0 { 256 } else { 0 };
+        let rel_y = y - if bytes[0] & 0x20 != 0 { 256 } else { 0 };
+        let buttons = bytes[0] & 0b00000111;
+        let left_button = buttons & 0b00000001 != 0;
+        let right_button = buttons & 0b00000010 != 0;
+        let middle_button = buttons & 0b00000100 != 0;
+        if rel_x != 0 {
+            let event = crate::drivers::input::InputEvent {
+                generated_at: std::time::Instant::now().into(),
+                device_type: (&InputDeviceType::Mouse).into(),
+                code: REL_X,
+                value: rel_x.cast_unsigned(),
+            };
+            input::INPUT_EVENT_MANAGER.add_events(Some(InputDeviceType::Mouse), None, &[event]);
+        }
+        if rel_y != 0 {
+            let event = crate::drivers::input::InputEvent {
+                generated_at: std::time::Instant::now().into(),
+                device_type: (&InputDeviceType::Mouse).into(),
+                code: crate::drivers::input::evnet_codes::REL_Y,
+                value: rel_y.cast_unsigned(),
+            };
+            input::INPUT_EVENT_MANAGER.add_events(Some(InputDeviceType::Mouse), None, &[event]);
+        }
+        if left_button != unsafe { MOUSE_BUTTON_STATE.0 } {
+            let event = crate::drivers::input::InputEvent {
+                generated_at: std::time::Instant::now().into(),
+                device_type: (&InputDeviceType::Mouse).into(),
+                code: crate::drivers::input::evnet_codes::BTN_LEFT,
+                value: if left_button { 1 } else { 0 },
+            };
+            input::INPUT_EVENT_MANAGER.add_events(Some(InputDeviceType::Mouse), None, &[event]);
+        }
+        if right_button != unsafe { MOUSE_BUTTON_STATE.1 } {
+            let event = crate::drivers::input::InputEvent {
+                generated_at: std::time::Instant::now().into(),
+                device_type: (&InputDeviceType::Mouse).into(),
+                code: crate::drivers::input::evnet_codes::BTN_RIGHT,
+                value: if right_button { 1 } else { 0 },
+            };
+            input::INPUT_EVENT_MANAGER.add_events(Some(InputDeviceType::Mouse), None, &[event]);
+        }
+        if middle_button != unsafe { MOUSE_BUTTON_STATE.2 } {
+            let event = crate::drivers::input::InputEvent {
+                generated_at: std::time::Instant::now().into(),
+                device_type: (&InputDeviceType::Mouse).into(),
+                code: crate::drivers::input::evnet_codes::BTN_MIDDLE,
+                value: if middle_button { 1 } else { 0 },
+            };
+            input::INPUT_EVENT_MANAGER.add_events(Some(InputDeviceType::Mouse), None, &[event]);
+        }
+        unsafe {
+            MOUSE_BUTTON_STATE = (left_button, right_button, middle_button);
+        }
+    }
+    drop(lock);
 }
 
 //write lock must be held
@@ -194,6 +263,10 @@ fn get_config_byte() -> u8 {
 fn set_config_byte(config: u8) {
     write_command(0x60);
     write_data(config);
+}
+
+fn get_identification(port: u8) -> Ps2DeviceType {
+    write_command(port, 0xF2);
 }
 
 fn with_devices_disabled<T>(driver: &Ps2Driver, f: impl FnOnce() -> T) -> T {

@@ -107,21 +107,24 @@ pub fn print_framebuffer_info() {
     println!(level:info, "Buffer End Address: {:?}", unsafe { fb.buffer.add(fb.stride * fb.height) });
 }
 
+//expects RGB
 pub fn draw_pixel(x: usize, y: usize, color: (u8, u8, u8)) {
     unsafe {
         let offset = (y * VGA_BINDING.stride + x * (VGA_BINDING.bits_per_pixel >> 3)) as isize;
-        for pixel_byte in (VGA_BINDING.blue_offset >> 3)..((VGA_BINDING.blue_offset + VGA_BINDING.blue_size) >> 3) {
+
+        for pixel_byte in (VGA_BINDING.red_offset >> 3)..((VGA_BINDING.red_offset + VGA_BINDING.red_size) >> 3) {
             *VGA_BINDING.buffer.offset(offset + pixel_byte as isize) = color.0;
         }
         for pixel_byte in (VGA_BINDING.green_offset >> 3)..((VGA_BINDING.green_offset + VGA_BINDING.green_size) >> 3) {
             *VGA_BINDING.buffer.offset(offset + pixel_byte as isize) = color.1;
         }
-        for pixel_byte in (VGA_BINDING.red_offset >> 3)..((VGA_BINDING.red_offset + VGA_BINDING.red_size) >> 3) {
+        for pixel_byte in (VGA_BINDING.blue_offset >> 3)..((VGA_BINDING.blue_offset + VGA_BINDING.blue_size) >> 3) {
             *VGA_BINDING.buffer.offset(offset + pixel_byte as isize) = color.2;
         }
     }
 }
 
+//expexts RGB
 pub fn draw_rectangle(x: usize, y: usize, width: usize, height: usize, color: (u8, u8, u8)) {
     for i in 0..width {
         for j in 0..height {

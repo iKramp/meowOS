@@ -129,6 +129,7 @@ impl Idt {
 
         self.set(Entry::new(handler!(legacy_timer_tick)), 32);
         self.set(Entry::new(handler!(legacy_keyboard_interrupt)), 33);
+        self.set(Entry::new(handler!(legacy_mouse_interrupt)), 44);
 
         self.set(Entry::new(handler!(apic_timer_tick)), 100);
         self.set(Entry::new(handler!(inter_processor_interrupt)), 101);

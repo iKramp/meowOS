@@ -153,7 +153,7 @@ impl InputEventManager {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct InputEvent {
     pub generated_at: FfiInstant,
     pub device_type: u16,

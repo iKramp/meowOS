@@ -2,7 +2,7 @@
 
 use crate::arch::interrupts::disable_pic_completely;
 use crate::arch::interrupts::handlers::{
-    apic_error, apic_keyboard_interrupt, fpu_interrupt, other_apic_interrupt, primary_ata_hard_disk, ps2_mouse_interrupt,
+    apic_error, apic_keyboard_interrupt, apic_mouse_interrupt, fpu_interrupt, other_apic_interrupt, primary_ata_hard_disk,
 };
 use crate::arch::interrupts::idt::{Entry, IDT};
 use crate::arch::memory::flush_tlb;
@@ -98,7 +98,7 @@ pub fn enable_apic(platform_info: &crate::acpi::platform_info::PlatformInfo, pro
         IDT.set(Entry::new(handler!(apic_error)), 67);
 
         IDT.set(Entry::new(handler!(apic_keyboard_interrupt)), 32 + 1);
-        IDT.set(Entry::new(handler!(ps2_mouse_interrupt)), 32 + 12);
+        IDT.set(Entry::new(handler!(apic_mouse_interrupt)), 32 + 12);
         IDT.set(Entry::new(handler!(fpu_interrupt)), 32 + 13);
         IDT.set(Entry::new(handler!(primary_ata_hard_disk)), 32 + 14);
     }

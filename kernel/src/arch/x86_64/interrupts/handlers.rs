@@ -111,7 +111,14 @@ pub extern "C" fn apic_keyboard_interrupt(_proc_data: &mut InterruptProcessorSta
     InterruptReturnType::Normal
 }
 
-pub extern "C" fn ps2_mouse_interrupt(_proc_data: &mut InterruptProcessorState) -> InterruptReturnType {
+pub extern "C" fn legacy_mouse_interrupt(_proc_data: &mut InterruptProcessorState) -> InterruptReturnType {
+    ps2::handle_ps2_mouse_interrupt();
+    legacy_eoi();
+    InterruptReturnType::Normal
+}
+
+pub extern "C" fn apic_mouse_interrupt(_proc_data: &mut InterruptProcessorState) -> InterruptReturnType {
+    ps2::handle_ps2_mouse_interrupt();
     apic_eoi();
     InterruptReturnType::Normal
 }

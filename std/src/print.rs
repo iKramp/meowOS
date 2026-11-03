@@ -95,21 +95,23 @@ pub fn _print_locked(lock: &mut NoIntSpinlockGuard<dyn Print>, args: core::fmt::
 }
 
 #[doc(hidden)]
+///Due to backwards compatibility, expects BGR instead of RGB
 pub fn _print_colored(fg: (u8, u8, u8), args: core::fmt::Arguments, log_level: LogLevel) {
     let mut lock = unsafe { lock_w_info!(PRINT.as_mut().expect("printer was not set before printing")) };
-    lock.set_fg_color(fg);
+    lock.set_fg_color((fg.2, fg.1, fg.0));
     _print_locked(&mut lock, args, log_level);
     lock.reset_color();
 }
 
 #[doc(hidden)]
+///Due to backwards compatibility, expects BGR instead of RGB
 pub fn _print_colored_locked(
     fg: (u8, u8, u8),
     lock: &mut NoIntSpinlockGuard<dyn Print>,
     args: core::fmt::Arguments,
     log_level: LogLevel,
 ) {
-    lock.set_fg_color(fg);
+    lock.set_fg_color((fg.2, fg.1, fg.0));
     _print_locked(lock, args, log_level);
     lock.reset_color();
 }

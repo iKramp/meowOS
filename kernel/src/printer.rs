@@ -61,6 +61,7 @@ impl Print for Printer {
         // byte_to_port(0xe9, b'm');
     }
 
+    ///expects RGB
     fn set_fg_color(&mut self, color: (u8, u8, u8)) {
         let mut vga = lock_w_info!(self.vga_text);
         vga.set_fg_color(color);

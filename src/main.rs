@@ -31,7 +31,7 @@ fn main() {
     let snapshot = true;
     let cores = 1;
     let net = false;
-    let run_mode = RunMode::Tcg;
+    let run_mode = RunMode::Kvm;
     let disk_type = DiskType::Ahci;
     let memory_megabytes = 1024;
 

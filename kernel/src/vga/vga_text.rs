@@ -7,7 +7,9 @@ use std::sync::no_int_spinlock::*;
 
 #[derive(Debug)]
 pub struct VgaText {
+    //RGB
     pub foreground: (u8, u8, u8),
+    //RGB
     pub background: (u8, u8, u8),
     height_lines: usize,
     width_chars: usize,
@@ -124,10 +126,12 @@ impl core::fmt::Write for VgaText {
 }
 
 impl std::Print for VgaText {
+    ///expects RGB
     fn set_bg_color(&mut self, color: (u8, u8, u8)) {
         self.background = color;
     }
 
+    ///expects RGB
     fn set_fg_color(&mut self, color: (u8, u8, u8)) {
         self.foreground = color;
     }

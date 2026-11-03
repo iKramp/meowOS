@@ -9,14 +9,14 @@ pub struct Instant {
 }
 
 #[repr(C)]
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Default)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Default, Debug)]
 pub struct FfiDuration {
     pub seconds: u64,
     pub nanos: u32,
 }
 
 #[repr(C)]
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Default)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Default, Debug)]
 pub struct FfiInstant {
     pub since_epoch: FfiDuration,
 }
