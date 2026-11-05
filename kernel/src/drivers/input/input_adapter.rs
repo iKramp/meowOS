@@ -140,10 +140,13 @@ impl VfsAdapterTrait for InputVfsAdapter {
     }
 
     fn close(&self, inode: crate::vfs::InodeIndex, extra_data: Box<dyn FileHandleExtraData>) -> Result<(), KernelError> {
+        println!("close called with inode: {:#x}", inode);
         if inode & PREFIX_MASK == STRUCTURE_FOLDER_PREFIX {
+            println!("close called on structure folder, nothing to do");
             return Ok(());
         }
         let buffer_id = get_buffer_id(&*extra_data)?;
+        println!("close called with inode: {:#x}, buffer_id: {}", inode, buffer_id);
         super::INPUT_EVENT_MANAGER.remove_buffer(buffer_id);
         Ok(())
     }

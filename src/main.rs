@@ -26,12 +26,12 @@ enum DiskType {
 
 fn main() {
     //chose whether to debug with GDB
-    let debug = false;
+    let debug = true;
     let uefi = false;
     let snapshot = true;
     let cores = 1;
     let net = false;
-    let run_mode = RunMode::Kvm;
+    let run_mode = RunMode::Tcg;
     let disk_type = DiskType::Ahci;
     let memory_megabytes = 1024;
 

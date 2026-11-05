@@ -3,12 +3,13 @@ use core::{
     alloc::Layout,
     fmt::Debug,
     marker::Unsize,
-    mem::{ManuallyDrop, align_of_val_raw},
+    mem::{Alignment, ManuallyDrop, align_of_val_raw},
     ops::{CoerceUnsized, Deref},
-    ptr::{self, Alignment, NonNull},
+    ptr::{self, NonNull},
     sync::atomic::Ordering,
 };
 
+use crate::println;
 use alloc::boxed::Box;
 
 #[repr(C)]
@@ -32,6 +33,14 @@ unsafe impl<T: ?Sized + Send + Sync> Sync for Arc<T> {}
 unsafe impl<T: ?Sized + Send + Sync> Send for Weak<T> {}
 unsafe impl<T: ?Sized + Send + Sync> Sync for Weak<T> {}
 
+const ARC_DBG_MASK: &[&str] = &["ProcessData"];
+
+//debug lines: "[ARC_DBG.{t}.{:p}.a.b]"
+//t -> type name
+//p -> pointer to ArcInner
+//a -> all_ref_count. 1 for initial
+//b -> strong_ref_count. 1 for initial
+
 impl<T> Arc<T> {
     pub fn new(data: T) -> Self {
         let address = Box::into_raw(Box::new(ArcInner {
@@ -39,6 +48,15 @@ impl<T> Arc<T> {
             all_ref_count: core::sync::atomic::AtomicUsize::new(1),
             data: ManuallyDrop::new(data),
         })) as usize;
+
+        #[cfg(debug_assertions)]
+        {
+            let type_name = core::any::type_name::<T>();
+            if ARC_DBG_MASK.iter().any(|&mask| type_name.contains(mask)) {
+                println!("[ARC_DBG.{}.{:p}.1.1]", type_name, address as *const ArcInner<T>);
+            }
+        }
+
         Self {
             inner: NonNull::new(address as *mut ArcInner<T>).unwrap(),
         }
@@ -64,6 +82,20 @@ impl<T: ?Sized> Arc<T> {
                 .as_ref()
                 .all_ref_count
                 .fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        }
+
+        #[cfg(debug_assertions)]
+        {
+            let type_name = core::any::type_name::<T>();
+            if ARC_DBG_MASK.iter().any(|&mask| type_name.contains(mask)) {
+                println!(
+                    "[ARC_DBG.{}.{:p}.{}.{:?}]",
+                    type_name,
+                    self.inner.as_ptr(),
+                    self.all_ref_count(),
+                    self.strong_ref_count()
+                );
+            }
         }
         Weak { inner: self.inner }
     }
@@ -119,6 +151,20 @@ impl<T: ?Sized> Weak<T> {
 
         unsafe { self.inner.as_ref().all_ref_count.fetch_add(1, Ordering::Relaxed) };
 
+        #[cfg(debug_assertions)]
+        {
+            let type_name = core::any::type_name::<T>();
+            if ARC_DBG_MASK.iter().any(|&mask| type_name.contains(mask)) {
+                println!(
+                    "[ARC_DBG.{}.{:p}.{}.{:?}]",
+                    type_name,
+                    self.inner.as_ptr(),
+                    unsafe { self.inner.as_ref().all_ref_count.load(Ordering::Relaxed) },
+                    unsafe { self.inner.as_ref().strong_count.load(Ordering::Relaxed) }
+                );
+            }
+        }
+
         Some(Arc { inner: self.inner })
     }
 }
@@ -135,6 +181,20 @@ impl<T: ?Sized> Clone for Arc<T> {
                 .strong_count
                 .fetch_add(1, core::sync::atomic::Ordering::Relaxed);
 
+            #[cfg(debug_assertions)]
+            {
+                let type_name = core::any::type_name::<T>();
+                if ARC_DBG_MASK.iter().any(|&mask| type_name.contains(mask)) {
+                    println!(
+                        "[ARC_DBG.{}.{:p}.{}.{:?}]",
+                        type_name,
+                        self.inner.as_ptr(),
+                        self.all_ref_count(),
+                        self.strong_ref_count()
+                    );
+                }
+            }
+
             Self { inner: self.inner }
         }
     }
@@ -147,6 +207,20 @@ impl<T: ?Sized> Clone for Weak<T> {
                 .as_ref()
                 .all_ref_count
                 .fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+
+            #[cfg(debug_assertions)]
+            {
+                let type_name = core::any::type_name::<T>();
+                if ARC_DBG_MASK.iter().any(|&mask| type_name.contains(mask)) {
+                    println!(
+                        "[ARC_DBG.{}.{:p}.{}.{:?}]",
+                        type_name,
+                        self.inner.as_ptr(),
+                        self.inner.as_ref().all_ref_count.load(Ordering::Relaxed),
+                        self.inner.as_ref().strong_count.load(Ordering::Relaxed)
+                    );
+                }
+            }
 
             Self { inner: self.inner }
         }
@@ -206,6 +280,21 @@ impl<T: ?Sized> Drop for Arc<T> {
             unsafe { ptr::drop_in_place(inner_data as *const T as *mut T) };
         }
         let prev = inner.all_ref_count.fetch_sub(1, Ordering::Release);
+
+        #[cfg(debug_assertions)]
+        {
+            let type_name = core::any::type_name::<T>();
+            if ARC_DBG_MASK.iter().any(|&mask| type_name.contains(mask)) {
+                println!(
+                    "[ARC_DBG.{}.{:p}.{}.{:?}]",
+                    type_name,
+                    self.inner.as_ptr(),
+                    unsafe { self.inner.as_ref().all_ref_count.load(Ordering::Relaxed) },
+                    unsafe { self.inner.as_ref().strong_count.load(Ordering::Relaxed) }
+                );
+            }
+        }
+
         unsafe {
             if prev == 1 {
                 let address = self.inner.as_ptr();
@@ -218,6 +307,21 @@ impl<T: ?Sized> Drop for Arc<T> {
 impl<T: ?Sized> Drop for Weak<T> {
     fn drop(&mut self) {
         let prev = unsafe { self.inner.as_ref().all_ref_count.fetch_sub(1, Ordering::Release) };
+
+        #[cfg(debug_assertions)]
+        {
+            let type_name = core::any::type_name::<T>();
+            if ARC_DBG_MASK.iter().any(|&mask| type_name.contains(mask)) {
+                println!(
+                    "[ARC_DBG.{}.{:p}.{}.{:?}]",
+                    type_name,
+                    self.inner.as_ptr(),
+                    unsafe { self.inner.as_ref().all_ref_count.load(Ordering::Relaxed) },
+                    unsafe { self.inner.as_ref().strong_count.load(Ordering::Relaxed) }
+                );
+            }
+        }
+
         unsafe {
             if prev == 1 {
                 let address = self.inner.as_ptr();

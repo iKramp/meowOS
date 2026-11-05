@@ -207,6 +207,32 @@ impl MemoryNamespace {
         }
     }
 
+    //keep impl consistent with remove_mem_range_by_index
+    //Doesn't call remove_mem_range_by_index for each range because flushing tlb is slow
+    fn remove_all_mem_ranges(&self) {
+        let mut dynamic_data = lock_w_info!(self.dynamic_data);
+        for range in dynamic_data.memory_ranges.drain(..) {
+            let Some(table_entry) = memory::get_page_table_entry_at_level(
+                self.page_tree_root,
+                range.map_address,
+                range.shared_range.level() + 1,
+                false,
+            ) else {
+                println!("checks did not catch invalid unmap");
+                continue;
+            };
+            if table_entry.address() != range.shared_range.node_addr() {
+                println!("checks did not catch invalid unmap");
+                continue;
+            }
+            *table_entry = PageTableEntry(0);
+        }
+        let current_root = arch::memory::current_root();
+        if current_root == self.page_tree_root {
+            arch::memory::flush_tlb(None);
+        }
+    }
+
     pub fn find_hole(&self, size: VirtualMemoryRangeCapacity) -> Option<VirtAddr> {
         let mut current_addr = VirtAddr(1);
         'repeat: loop {
@@ -299,24 +325,7 @@ impl MemoryNamespaceDynamicData {
 
 impl Drop for MemoryNamespace {
     fn drop(&mut self) {
-        for range in lock_w_info!(self.dynamic_data).memory_ranges.iter() {
-            let Some(table_entry) = memory::get_page_table_entry_at_level(
-                self.page_tree_root,
-                range.map_address,
-                range.shared_range.level() + 1,
-                false,
-            ) else {
-                println!("checks did not catch invalid unmap");
-                continue;
-            };
-            if table_entry.address() != range.shared_range.node_addr() {
-                println!("checks did not catch invalid unmap");
-                continue;
-            }
-
-            table_entry.0 = 0;
-        }
-
+        self.remove_all_mem_ranges();
         memory::delete_page_table(self.page_tree_root, 4, false);
     }
 }

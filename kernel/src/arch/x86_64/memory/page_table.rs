@@ -29,6 +29,13 @@ impl PageTable {
     ///Optionally deallocates the physical memory this tree eventually points to
     ///Level 1 is the lowest valid level
     pub fn delete(self_phys: PhysAddr, level: u8, dealloc_phys: bool) {
+        if level == 0 {
+            if dealloc_phys {
+                drop(OwnedPhysAddr(self_phys));
+            }
+            return;
+        }
+
         if level != 1 || dealloc_phys {
             let self_obj = unsafe { get_at_addr::<Self, _>(self_phys) };
 
