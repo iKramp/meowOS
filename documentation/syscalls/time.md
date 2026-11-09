@@ -12,11 +12,11 @@
 ```rust
 #[repr(C)]
 struct TimeInfo {
-    current_time: FfiDuration,
-    monotonic_time: FfiDuration,
-    boot_time: FfiDuration,
-    uptime: FfiDuration,
-    timezone_offset: i64,
+    time_since_epoch: FfiDuration,
+    time_since_boot: FfiDuration,
+    program_start_time: FfiDuration,
+    program_userspace_cpu_time: FfiDuration,
+    program_kernelspace_cpu_time: FfiDuration,
 }
 ```
 
