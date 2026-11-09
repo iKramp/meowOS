@@ -1,16 +1,9 @@
-use std::{
-    boxed::Box,
-    error::KernelError,
-    lock_w_info,
-    string::ToString,
-    sync::arc::Arc,
-    time::{FfiDuration, UNIX_EPOCH},
-};
+use std::{boxed::Box, error::KernelError, lock_w_info, string::ToString, sync::arc::Arc};
 
 use crate::{
     clocks::{ScheduledEvent, schedule_event},
     interrupts::InterruptProcessorState,
-    memory::{safe_memcpy_from_user, safe_memcpy_to_user},
+    memory::safe_memcpy_from_user,
     proc::{
         self, NamespaceIds, PROCESS_ID_COUNTER, Pid, ProcNamespaces, ProcessData, SCHEDULER,
         process_data::CpuStateType,
@@ -18,8 +11,8 @@ use crate::{
     },
 };
 
-pub fn init_proc_syscalls() {
-    let handlers: [(SyscallHandler, &'static str); _] = [(exec, "exec"), (exit, "exit"), (sleep, "sleep"), (time, "time")];
+pub(super) fn init_proc_syscalls() {
+    let handlers: [(SyscallHandler, &'static str); _] = [(exec, "exec"), (exit, "exit"), (sleep, "sleep")];
 
     let exec_syscall_pack = SyscallPack::new(Box::new(handlers));
     crate::proc::syscall::register_syscall_pack("proc".into(), Arc::new(exec_syscall_pack));
@@ -54,15 +47,6 @@ struct ExecArgs {
     start_ptr: u64,
     name_len: u64,
     name_ptr: u64,
-}
-
-#[repr(C)]
-struct TimeInfo {
-    time_since_epoch: FfiDuration,
-    time_since_boot: FfiDuration,
-    program_start_time: FfiDuration,
-    program_userspace_cpu_time: FfiDuration,
-    program_kernelspace_cpu_time: FfiDuration,
 }
 
 fn exec(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
@@ -181,26 +165,4 @@ fn sleep(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     proc.set_sleeping(true);
 
     schedule_event(scheduled_event);
-}
-
-fn time(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
-    let now = std::time::Instant::now();
-    let time_info = TimeInfo {
-        time_since_epoch: now.duration_since(UNIX_EPOCH).into(),
-        time_since_boot: now.duration_since(crate::clocks::get_time_of_boot()).into(),
-        program_start_time: now.duration_since(UNIX_EPOCH).into(), //don't track proc time yet
-        program_userspace_cpu_time: now.duration_since(UNIX_EPOCH).into(),
-        program_kernelspace_cpu_time: now.duration_since(UNIX_EPOCH).into(),
-    };
-
-    let valid = safe_memcpy_to_user(
-        args.get_arg(0),
-        &time_info as *const TimeInfo as u64,
-        core::mem::size_of::<TimeInfo>(),
-    );
-    if !valid {
-        proc.set_syscall_return(&[u64::MAX]);
-    } else {
-        proc.set_syscall_return(&[0]);
-    }
 }

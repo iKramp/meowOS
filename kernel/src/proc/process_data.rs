@@ -6,6 +6,7 @@ use std::{
     boxed::Box,
     lock_w_info,
     sync::no_int_spinlock::{NoIntSpinlock, NoIntSpinlockGuard},
+    time::Instant,
     vec::Vec,
 };
 
@@ -28,6 +29,9 @@ pub struct ProcessData {
     cmdline: Box<str>,
     internal: NoIntSpinlock<ProcessDataMutable>,
     exit_hooks: NoIntSpinlock<Vec<ProcExitHook>>,
+    //tracks the start time in absolute monotonic time. Time namespace may change the value returned
+    //on syscalls
+    proc_start_time: Instant,
 }
 
 impl Debug for ProcessData {
@@ -88,6 +92,7 @@ impl ProcessData {
             cmdline,
             internal: NoIntSpinlock::new(ProcessDataMutable { cpu_state, namespaces }),
             exit_hooks: NoIntSpinlock::new(Vec::new()),
+            proc_start_time: Instant::now(),
         }
     }
 
@@ -163,5 +168,9 @@ impl ProcessData {
 
     pub fn is_sleeping(&self) -> bool {
         self.sleeping.load(core::sync::atomic::Ordering::Acquire)
+    }
+
+    pub fn get_start_time(&self) -> Instant {
+        self.proc_start_time
     }
 }

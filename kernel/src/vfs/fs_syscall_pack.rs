@@ -271,7 +271,6 @@ fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         }
     };
 
-    let proc_downgraded = proc.downgrade();
     let proc_cloned = proc.clone();
     let task = async move {
         let f_handle = file_handle; //get to local
@@ -308,6 +307,7 @@ fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
             proc_cloned.set_syscall_return(&[u64::MAX]);
             return;
         }
+        let proc_downgraded = proc_cloned.downgrade();
         drop(proc_cloned); //don't keep proc alive across awaits
 
         let buffers = buffer_alloc.get_range().get_addresses().collect::<Vec<PhysAddr>>();

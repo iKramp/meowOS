@@ -68,6 +68,16 @@ struct Buffer<T> {
 For clarity, whenever these values are passed via registers in syscall args (see exec path, arg list and env list) they
 will be split
 
+## 128 BIT INTEGERS
+128 bit integers are used sometimes. They are passed as 2 64 bit integers. In a struct:
+```C
+struct I128 {
+    uint64_t high;
+    uint64_t low;
+};
+```
+When passed in registers, the high part is passed first
+
 ## SYSCALL NAMESPACE
 A syscall namespace defines what syscalls a process can use and at what indexes they exist. This is achieved through mapping syscall groups
 A syscall group is a group of related syscalls. For example, all filesystem related syscalls would be in the same group. Syscalls within a group

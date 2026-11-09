@@ -29,6 +29,7 @@ mod proc_syscall_pack;
 mod process_data;
 mod scheduler;
 pub mod syscall;
+mod time_syscall_pack;
 pub use context::CommandSplitter;
 pub use context_switch::{context_switch, interrupt_context_switch};
 pub use process_data::{ProcessData, StackCpuStateData};
@@ -59,6 +60,7 @@ pub fn init() {
     namespaces::init_namespace_management_syscalls();
     proc_syscall_pack::init_proc_syscalls();
     memory_syscall_pack::init_mem_syscalls();
+    time_syscall_pack::init_time_syscalls();
 
     syscall::init();
     set_proc_initialized();

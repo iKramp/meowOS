@@ -7,11 +7,13 @@ use std::{boxed::Box, error::KernelError, kerror, sync::arc::Arc, vec::Vec};
 pub use filesystem_namespace::*;
 pub(in crate::proc) use memory_namespace::*;
 pub(in crate::proc) use syscall_namespace::*;
+pub(in crate::proc) use time_namespace::*;
 
 mod filesystem_namespace;
 pub mod memory_namespace;
 mod namespace_management_pack;
 mod syscall_namespace;
+mod time_namespace;
 
 pub(super) use namespace_management_pack::init_namespace_management_syscalls;
 
@@ -30,6 +32,7 @@ pub(in crate::proc) enum NamespaceType {
     Syscall = 0,
     Mem = 1,
     Fs = 2,
+    Time = 3,
 }
 
 #[derive(Debug)]
@@ -37,6 +40,7 @@ pub(in crate::proc) enum NamespaceHolder {
     Syscall(Arc<SyscallNamespace>),
     Mem(Arc<MemoryNamespace>),
     Fs(Arc<FilesystemNamespace>),
+    Time(Arc<TimeNamespace>),
 }
 
 #[derive(Debug)]
@@ -45,6 +49,7 @@ pub struct ProcNamespaces {
     pub(in crate::proc) memory_namespace: Arc<MemoryNamespace>,
     syscall_namespace: Arc<SyscallNamespace>,
     filesystem_namespace: Arc<FilesystemNamespace>,
+    time_namespace: Arc<TimeNamespace>,
 }
 
 #[derive(Clone)]
@@ -53,6 +58,7 @@ pub(in crate::proc) struct NamespaceIds {
     memory_namespace: u64,
     syscall_namespace: u64,
     filesystem_namespace: u64,
+    time_namespace: u64,
 }
 
 type ChangeNamespaceFn = Box<dyn FnOnce(ProcessData)>;
@@ -62,11 +68,13 @@ impl ProcNamespaces {
         memory_namespace: Arc<MemoryNamespace>,
         syscall_namespace: Arc<SyscallNamespace>,
         filesystem_namespace: Arc<FilesystemNamespace>,
+        time_namespace: Arc<TimeNamespace>,
     ) -> Self {
         let mut owned_namespaces = Vec::new();
         owned_namespaces.push(NamespaceHolder::Mem(memory_namespace.clone()));
         owned_namespaces.push(NamespaceHolder::Syscall(syscall_namespace.clone()));
         owned_namespaces.push(NamespaceHolder::Fs(filesystem_namespace.clone()));
+        owned_namespaces.push(NamespaceHolder::Time(time_namespace.clone()));
 
         owned_namespaces.sort_by_key(|ns| ns.get_id());
 
@@ -75,6 +83,7 @@ impl ProcNamespaces {
             memory_namespace,
             syscall_namespace,
             filesystem_namespace,
+            time_namespace,
         }
     }
 
@@ -89,6 +98,9 @@ impl ProcNamespaces {
         if ids.filesystem_namespace == 0 {
             ids.filesystem_namespace = self.filesystem_namespace.get_id();
         }
+        if ids.time_namespace == 0 {
+            ids.time_namespace = self.time_namespace.get_id();
+        }
 
         let Some(NamespaceHolder::Mem(memory_namespace)) = self.get_namespace_holder(ids.memory_namespace) else {
             return kerror!(InvalidArgument);
@@ -99,10 +111,14 @@ impl ProcNamespaces {
         let Some(NamespaceHolder::Fs(filesystem_namespace)) = self.get_namespace_holder(ids.filesystem_namespace) else {
             return kerror!(InvalidArgument);
         };
+        let Some(NamespaceHolder::Time(time_namespace)) = self.get_namespace_holder(ids.time_namespace) else {
+            return kerror!(InvalidArgument);
+        };
         Ok(Self::new(
             memory_namespace.clone(),
             syscall_namespace.clone(),
             filesystem_namespace.clone(),
+            time_namespace.clone(),
         ))
     }
 
@@ -147,6 +163,10 @@ impl ProcNamespaces {
                 self.filesystem_namespace = ns.clone();
                 None
             }
+            NamespaceHolder::Time(ns) => {
+                self.time_namespace = ns.clone();
+                None
+            }
         };
         Ok(fn_to_call)
     }
@@ -156,6 +176,7 @@ impl ProcNamespaces {
             NamespaceHolder::Syscall(ns) => ns.get_id(),
             NamespaceHolder::Mem(ns) => ns.get_id(),
             NamespaceHolder::Fs(ns) => ns.get_id(),
+            NamespaceHolder::Time(ns) => ns.get_id(),
         };
         let index = self
             .owned_namespaces
@@ -195,6 +216,7 @@ impl NamespaceHolder {
             NamespaceHolder::Syscall(ns) => ns.get_id(),
             NamespaceHolder::Mem(ns) => ns.get_id(),
             NamespaceHolder::Fs(ns) => ns.get_id(),
+            NamespaceHolder::Time(ns) => ns.get_id(),
         }
     }
 
@@ -203,6 +225,7 @@ impl NamespaceHolder {
             NamespaceHolder::Syscall(_) => NamespaceType::Syscall,
             NamespaceHolder::Mem(_) => NamespaceType::Mem,
             NamespaceHolder::Fs(_) => NamespaceType::Fs,
+            NamespaceHolder::Time(_) => NamespaceType::Time,
         }
     }
 
@@ -226,6 +249,12 @@ impl NamespaceHolder {
                 };
                 Ok(NamespaceHolder::Fs(Arc::new(new_ns)))
             }
+            NamespaceHolder::Time(other_ns) => {
+                let Ok(new_ns) = TimeNamespace::create_from(id, other_ns) else {
+                    return kerror!(InvalidArgument);
+                };
+                Ok(NamespaceHolder::Time(Arc::new(new_ns)))
+            }
         }
     }
 
@@ -238,6 +267,8 @@ impl NamespaceHolder {
             NamespaceHolder::Mem(_) => return None,
             NamespaceHolder::Fs(ns) if ns.get().type_id() == type_id => Arc::into_raw(ns.clone()) as *const T,
             NamespaceHolder::Fs(_) => return None,
+            NamespaceHolder::Time(ns) if ns.get().type_id() == type_id => Arc::into_raw(ns.clone()) as *const T,
+            NamespaceHolder::Time(_) => return None,
             //no wildcard to get exhaustiveness checking
         };
         Some(unsafe { Arc::from_raw(raw_ptr) })
@@ -259,6 +290,7 @@ impl NamespaceType {
             NamespaceType::Syscall => 0,
             NamespaceType::Mem => 1,
             NamespaceType::Fs => 2,
+            NamespaceType::Time => 3,
         }
     }
 
@@ -267,6 +299,7 @@ impl NamespaceType {
             NamespaceType::Syscall => Some(NamespaceHolder::Syscall(Arc::new(SyscallNamespace::create_empty(id).ok()?))),
             NamespaceType::Mem => Some(NamespaceHolder::Mem(Arc::new(MemoryNamespace::create_empty(id).ok()?))),
             NamespaceType::Fs => Some(NamespaceHolder::Fs(Arc::new(FilesystemNamespace::create_empty(id).ok()?))),
+            NamespaceType::Time => Some(NamespaceHolder::Time(Arc::new(TimeNamespace::create_empty(id).ok()?))),
         }
     }
 }

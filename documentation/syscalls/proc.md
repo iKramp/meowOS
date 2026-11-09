@@ -7,7 +7,6 @@
 | 0 | exec | executes a new program |
 | 1 | exit | terminates the current process |
 | 2 | sleep | puts the process to sleep for a specified duration |
-| 3 | time | retrieves various time related info |
 
 ## STRUCTURE INFORMATION
 
@@ -17,6 +16,7 @@ struct NamespaceIds {
     memory_namespace: u64,
     syscall_namespace: u64,
     filesystem_namespace: u64,
+    time_namespace: u64,
 }
 
 //This changes based on the architecture
@@ -56,16 +56,6 @@ struct FfiDuration {
     nsec: u64,
 }
 
-#[repr(C)]
-struct TimeInfo {
-    time_since_epoch: FfiDuration,
-    time_since_boot: FfiDuration,
-    program_start_time: FfiDuration,
-    program_userspace_cpu_time: FfiDuration,
-    program_kernelspace_cpu_time: FfiDuration,
-}
-    
-
 ```
 
 ## DETAILED SYSCALL DOCUMENTATION
@@ -98,15 +88,3 @@ Terminates the current process and returns the given exit code to the parent pro
  - On failure, returns -1
 #### Description:
 Puts the process to sleep for the specified duration
-
-### Syscall 3: time
-#### Args:
-1. time_info_ptr: u64 - pointer to a TimeInfo structure where the time information will be stored
-#### Return Value:
- - On success, returns 0
- - On failure, returns -1
-#### Description:
-Retrieves various time-related information, including time since epoch, time since boot, 
-program start time, and CPU time spent in user and kernel space. 
-The information is stored in the provided TimeInfo structure.
-Fails if the pointer is invalid
