@@ -1,5 +1,5 @@
 use core::time::Duration;
-use std::{boxed::Box, println};
+use std::{boxed::Box, println, sync::arc::Arc};
 
 use crate::{
     acpi::cpu_locals::CpuLocals,
@@ -31,36 +31,43 @@ fn preemtion_callback() {
 }
 
 //WARN: DROP ALL HEAP DATA BEFORE DISPATCHING to avoid leaking memory
-pub(super) fn dispatch(new_proc: &ProcessData) -> ! {
-    //INFO: any kind of change here should be matched with the one in interrupts/macros.rs and
-    //syscall.rs
+pub(super) fn dispatch(new_proc: Arc<ProcessData>) -> ! {
+    let cpu_state;
+    {
+        //INFO: any kind of change here should be matched with the one in interrupts/macros.rs and
+        //syscall.rs
 
-    //change page tree
-    let new_page_tree = new_proc.page_tree();
-    arch::memory::set_page_tree_root(new_page_tree);
+        //change page tree
+        let new_page_tree = new_proc.page_tree();
+        arch::memory::set_page_tree_root(new_page_tree);
 
-    //schedule preemption
-    let scheduled_event = ScheduledEvent {
-        time: std::time::Instant::now() + MAX_PROC_TIME_SLICE,
-        callback: Box::new(preemtion_callback),
-    };
-    let event_id = schedule_event(scheduled_event);
+        //schedule preemption
+        let scheduled_event = ScheduledEvent {
+            time: std::time::Instant::now() + MAX_PROC_TIME_SLICE,
+            callback: Box::new(preemtion_callback),
+        };
+        let event_id = schedule_event(scheduled_event);
 
-    disable_interrupts();
+        disable_interrupts();
 
-    let mut locals = CpuLocals::get_mut();
-    let cpu_state = new_proc.take_cpu_state();
-    if LOG_DISPATCH_STATE {
-        println!("Dispatching process with state: {:x?}", cpu_state);
+        let mut locals = CpuLocals::get_mut();
+        cpu_state = new_proc.take_cpu_state();
+        if LOG_DISPATCH_STATE {
+            println!("Dispatching process with state: {:x?}", cpu_state);
+        }
+
+        locals.int_depth -= 1;
+        locals.preemtion_id = Some(event_id);
+
+        let dispatch_time = std::time::Instant::now();
+        locals.current_process = Some((new_proc, dispatch_time));
+
+        drop(locals);
+
+        unsafe { CpuLocals::get_lock_info().assert_no_locks() };
+
+        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
     }
-
-    locals.int_depth -= 1;
-    locals.preemtion_id = Some(event_id);
-    drop(locals);
-
-    unsafe { CpuLocals::get_lock_info().assert_no_locks() };
-
-    core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
 
     match cpu_state {
         CpuStateType::Interrupt(interrupt_frame) => return_interrupted(&interrupt_frame),

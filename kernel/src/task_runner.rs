@@ -6,10 +6,13 @@ use core::{
 };
 use std::{
     boxed::Box,
-    ffi_future::future::{Future, Poll},
-    ffi_future::wake::*,
+    ffi_future::{
+        future::{Future, Poll},
+        wake::*,
+    },
     lock_w_info, println,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
+    time::{Instant, UsDuration},
     vec::Vec,
     w_lock_w_info,
 };
@@ -197,6 +200,7 @@ pub fn process_tasks() {
 
     unsafe { CpuLocals::get_lock_info().assert_no_locks() };
 
+    let mut task_process_start = Instant::now();
     loop {
         let locals = CpuLocals::get_mut();
         let mut task_list = lock_w_info!(locals.async_task_data.task_list);
@@ -218,6 +222,17 @@ pub fn process_tasks() {
         }
         switch_mem_tree(&mut None, proc.as_ref());
         process_single_task(task);
+
+        let task_process_end = Instant::now();
+
+        if let Some(proc) = proc {
+            let cpu_time = task_process_end.duration_since(task_process_start);
+            let cpu_time_us = cpu_time.as_micros() as i64;
+            let cpu_time = UsDuration::from_micros(cpu_time_us);
+            proc.add_cpu_time_kernelspace(cpu_time);
+        }
+
+        task_process_start = task_process_end;
     }
 }
 

@@ -5,6 +5,8 @@ use crate::arch::syscall::cpu_syscall_init;
 use crate::clocks::cancel_scheduled_event;
 pub use arch_syscall::SyscallCpuState;
 pub use arch_syscall::return_syscalled;
+use std::time::Instant;
+use std::time::UsDuration;
 use std::{boxed::Box, println, string::String};
 
 use super::{
@@ -86,10 +88,12 @@ pub extern "C" fn main_syscall_handler(saved_regs_ptr: u64) -> ! {
 
         let mut locals = CpuLocals::get_mut();
         locals.int_depth = 1;
-        let curr_proc = locals
+        let (curr_proc, dispatch_time) = locals
             .current_process
             .take()
             .expect("syscalled while no current process in locals");
+
+        let syscall_entry_time = Instant::now();
 
         let preemption_id = locals.preemtion_id.take();
         drop(locals);
@@ -99,6 +103,11 @@ pub extern "C" fn main_syscall_handler(saved_regs_ptr: u64) -> ! {
         }
 
         enable_interrupts();
+
+        let cpu_time = syscall_entry_time.duration_since(dispatch_time);
+        let cpu_time_micros = cpu_time.as_micros() as i64;
+        let cpu_time_us_duration = UsDuration::from_micros(cpu_time_micros);
+        curr_proc.add_cpu_time_userspace(cpu_time_us_duration);
 
         save_cpu_state(&StackCpuStateData::Syscall(saved_regs), &curr_proc);
 
@@ -112,12 +121,26 @@ pub extern "C" fn main_syscall_handler(saved_regs_ptr: u64) -> ! {
             let syscall_handler = syscall_namespace.get_syscall_handler(syscall_number as u32);
             drop(proc_mut);
 
+            let before_syscall_time = Instant::now();
+
             if let Some(syscall_handler) = syscall_handler {
                 syscall_handler(saved_regs, &curr_proc);
             } else {
                 println!(level:warn, "Invalid syscall number: {}", syscall_number);
                 curr_proc.set_syscall_return(&[u64::MAX, 0]);
             };
+
+            let after_syscall_time = Instant::now();
+            let mut syscall_time = after_syscall_time.duration_since(before_syscall_time);
+
+            let locals = CpuLocals::get();
+            let int_time = locals.int_time;
+            drop(locals);
+            syscall_time = syscall_time.saturating_sub(int_time);
+
+            let syscall_time_micros = syscall_time.as_micros() as i64;
+            let syscall_time_us_duration = UsDuration::from_micros(syscall_time_micros);
+            curr_proc.add_cpu_time_kernelspace(syscall_time_us_duration);
         } else {
             proc::kill_process(curr_proc.pid(), u64::MAX);
         }

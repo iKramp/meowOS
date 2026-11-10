@@ -6,7 +6,7 @@ use std::{
     boxed::Box,
     lock_w_info,
     sync::no_int_spinlock::{NoIntSpinlock, NoIntSpinlockGuard},
-    time::Instant,
+    time::{AtomicDuration, Instant, UsDuration},
     vec::Vec,
 };
 
@@ -32,6 +32,8 @@ pub struct ProcessData {
     //tracks the start time in absolute monotonic time. Time namespace may change the value returned
     //on syscalls
     proc_start_time: Instant,
+    cpu_time_userspace: AtomicDuration,
+    cpu_time_kernelspace: AtomicDuration,
 }
 
 impl Debug for ProcessData {
@@ -43,6 +45,7 @@ impl Debug for ProcessData {
             .field("page_tree_root", &self.page_tree_root)
             .field("cmdline", &self.cmdline)
             .field("internal", &self.internal)
+            .field("proc_start_time", &self.proc_start_time)
             .finish()
     }
 }
@@ -93,6 +96,8 @@ impl ProcessData {
             internal: NoIntSpinlock::new(ProcessDataMutable { cpu_state, namespaces }),
             exit_hooks: NoIntSpinlock::new(Vec::new()),
             proc_start_time: Instant::now(),
+            cpu_time_userspace: AtomicDuration::new(UsDuration::from_micros(0)),
+            cpu_time_kernelspace: AtomicDuration::new(UsDuration::from_micros(0)),
         }
     }
 
@@ -172,5 +177,23 @@ impl ProcessData {
 
     pub fn get_start_time(&self) -> Instant {
         self.proc_start_time
+    }
+
+    pub fn add_cpu_time_userspace(&self, duration: UsDuration) {
+        self.cpu_time_userspace
+            .fetch_add(duration, core::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn add_cpu_time_kernelspace(&self, duration: UsDuration) {
+        self.cpu_time_kernelspace
+            .fetch_add(duration, core::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn get_cpu_time_userspace(&self) -> UsDuration {
+        self.cpu_time_userspace.load(core::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn get_cpu_time_kernelspace(&self) -> UsDuration {
+        self.cpu_time_kernelspace.load(core::sync::atomic::Ordering::Relaxed)
     }
 }

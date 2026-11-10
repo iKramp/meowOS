@@ -1,7 +1,6 @@
 use core::time::Duration;
 use std::{
     boxed::Box,
-    println,
     sync::arc::Arc,
     time::{FfiDuration, UNIX_EPOCH},
 };

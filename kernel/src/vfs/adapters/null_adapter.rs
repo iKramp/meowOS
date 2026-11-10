@@ -97,7 +97,7 @@ impl VfsAdapterTrait for NullAdapter {
         Ok((self.get_inode(inode), size))
     }
 
-    async fn stat(&self, inode: crate::vfs::InodeIndex, parent: crate::vfs::InodeIndex) -> Result<Inode, KernelError> {
+    async fn stat(&self, inode: crate::vfs::InodeIndex, _parent: crate::vfs::InodeIndex) -> Result<Inode, KernelError> {
         Ok(self.get_inode(inode))
     }
 }

@@ -1,5 +1,5 @@
 use core::time::Duration;
-use std::{println, time::Instant};
+use std::{println, sync::arc::Arc, time::Instant};
 
 use crate::{
     arch::interrupts::{
@@ -11,6 +11,7 @@ use crate::{
     interrupts::{
         InterruptProcessorState, InterruptReturnType, disable_interrupts, enable_interrupts, register_interrupt_handler,
     },
+    proc::ProcessData,
 };
 
 static mut TIMER_CONF: u32 = 0;
@@ -174,7 +175,10 @@ pub fn set_timeout(duration: Duration) {
     lapic_registers.initial_count().bytes().write(ticks as u32);
 }
 
-pub extern "C" fn apic_interrupt_handler(_proc_data: &mut InterruptProcessorState) -> InterruptReturnType {
+pub extern "C" fn apic_interrupt_handler(
+    _cpu_data: &mut InterruptProcessorState,
+    _proc_data: Option<&Arc<ProcessData>>,
+) -> InterruptReturnType {
     handle_scheduled_events();
     apic_eoi();
     InterruptReturnType::Normal

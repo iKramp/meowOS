@@ -7,14 +7,20 @@ use crate::{
     },
     handler,
     interrupts::{self, InterruptReturnType},
+    proc::ProcessData,
 };
 use core::{
     fmt::Debug,
     sync::atomic::{AtomicU8, Ordering},
 };
 use std::{
-    boxed::Box, collections::btree_map::BTreeMap, error::KernelError, kerror, println, printlnc, r_lock_w_info,
-    sync::rw_lock::RWSpinlock, vec::Vec, w_lock_w_info,
+    boxed::Box,
+    collections::btree_map::BTreeMap,
+    error::KernelError,
+    kerror, println, printlnc, r_lock_w_info,
+    sync::{arc::Arc, rw_lock::RWSpinlock},
+    vec::Vec,
+    w_lock_w_info,
 };
 
 use crate::interrupts::{InterruptProcessorState, end_of_interrupt};
@@ -256,7 +262,10 @@ fn common_pci_interrupt_handler(irq_index: u8) {
 fn init_interrupts() {
     for i in 128..160 {
         {
-            extern "C" fn pci_interrupt_handler(_state: &mut InterruptProcessorState) -> interrupts::InterruptReturnType {
+            extern "C" fn pci_interrupt_handler(
+                _cpu_state: &mut InterruptProcessorState,
+                _proc_state: Option<&Arc<ProcessData>>,
+            ) -> interrupts::InterruptReturnType {
                 common_pci_interrupt_handler((i - 128) as u8);
                 InterruptReturnType::Normal
             }

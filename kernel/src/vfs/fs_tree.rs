@@ -8,8 +8,7 @@ use std::{
 };
 
 use crate::vfs::{
-    DeviceId, EmptyExtraInodeData, GLOBAL_MOUNTS, InodeExtraData, InodeIdentifier, InodeIdentifierChain, ResolvedPathBorrowed,
-    VFS,
+    DeviceId, EmptyExtraInodeData, GLOBAL_MOUNTS, InodeIdentifier, InodeIdentifierChain, ResolvedPathBorrowed, VFS,
 };
 
 static INODE_CACHE: NoIntSpinlock<FsTreeCache> = NoIntSpinlock::new(FsTreeCache::new());

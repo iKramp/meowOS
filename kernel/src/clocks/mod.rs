@@ -1,10 +1,11 @@
 use core::mem::MaybeUninit;
-use std::{boxed::Box, println, time::Instant};
+use std::{boxed::Box, println, sync::arc::Arc, time::Instant};
 
 use crate::{
     clocks::hpet::HpetWrapper,
     handler,
     interrupts::{self, InterruptProcessorState, InterruptReturnType},
+    proc::ProcessData,
 };
 
 mod hpet;
@@ -69,7 +70,10 @@ fn try_use_timer(timer: &mut Box<dyn Timer>) -> bool {
     success
 }
 
-extern "C" fn service_interrupt(_state: &mut InterruptProcessorState) -> InterruptReturnType {
+extern "C" fn service_interrupt(
+    _cpu_state: &mut InterruptProcessorState,
+    _proc_state: Option<&Arc<ProcessData>>,
+) -> InterruptReturnType {
     unsafe { SELECTED_TIMER.assume_init_ref().service_interrupt() };
     InterruptReturnType::Normal
 }

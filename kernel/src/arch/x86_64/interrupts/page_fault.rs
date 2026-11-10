@@ -2,9 +2,13 @@ use crate::{
     arch::{self, memory::PAGING_LEVELS},
     interrupts::InterruptReturnType,
     memory::addresses::*,
-    proc::{kill_process, namespaces::memory_namespace::MemoryNamespace},
+    proc::{ProcessData, kill_process, namespaces::memory_namespace::MemoryNamespace},
 };
-use std::{println, printlnc};
+use std::{
+    println, printlnc,
+    sync::arc::Arc,
+    time::{Instant, UsDuration},
+};
 
 use crate::{interrupts::InterruptProcessorState, memory};
 
@@ -30,38 +34,47 @@ impl From<u64> for PageFaultErrorCode {
     }
 }
 
-pub extern "C" fn page_fault(proc_data: &mut InterruptProcessorState) -> InterruptReturnType {
+pub extern "C" fn page_fault(
+    cpu_data: &mut InterruptProcessorState,
+    proc_data: Option<&Arc<ProcessData>>,
+) -> InterruptReturnType {
     let page_fault_addr: u64;
     unsafe {
         core::arch::asm!("mov {}, cr2", out(reg) page_fault_addr);
     }
 
-    if proc_data.interrupt_frame.rip >= core::ptr::addr_of!(crate::memory::probe_functions_start) as u64
-        && proc_data.interrupt_frame.rip < core::ptr::addr_of!(crate::memory::probe_functions_end) as u64 + 0x1000
+    if cpu_data.interrupt_frame.rip >= core::ptr::addr_of!(crate::memory::probe_functions_start) as u64
+        && cpu_data.interrupt_frame.rip < core::ptr::addr_of!(crate::memory::probe_functions_end) as u64 + 0x1000
     {
         println!(level:warn, "Page fault at a probe function, returning failure");
-        proc_data.interrupt_frame.rip = crate::memory::probe_fail as *const () as u64;
+        cpu_data.interrupt_frame.rip = crate::memory::probe_fail as *const () as u64;
         return InterruptReturnType::Normal;
     }
 
-    let page_fault_code = PageFaultErrorCode::from(proc_data.err_code);
+    let page_fault_code = PageFaultErrorCode::from(cpu_data.err_code);
 
-    if !page_fault_code.user_mode {
-        fatal_page_fault(proc_data, page_fault_addr)
+    if let Some(proc_data) = proc_data {
+        debug_assert!(
+            page_fault_code.user_mode,
+            "Page fault in kernel mode for process {:?}",
+            proc_data.pid()
+        );
+        user_page_fault(cpu_data, proc_data, page_fault_addr, page_fault_code)
     } else {
-        user_page_fault(proc_data, page_fault_addr, page_fault_code)
+        debug_assert!(!page_fault_code.user_mode, "Page fault in user mode with no process data");
+        fatal_page_fault(cpu_data, page_fault_addr)
     }
 }
 
-fn fatal_page_fault(proc_data: &InterruptProcessorState, page_fault_addr: u64) -> ! {
-    println!("{}", proc_data as *const InterruptProcessorState as usize);
+fn fatal_page_fault(cpu_data: &InterruptProcessorState, page_fault_addr: u64) -> ! {
+    println!("{}", cpu_data as *const InterruptProcessorState as usize);
     printlnc!(level:error,
         (0, 0, 255),
         "EXCEPTION: PAGE FAULT at {:X}. error code: {:#X?}\nproc state: {:#X?}, rip: {:?}",
         page_fault_addr,
-        PageFaultErrorCode::from(proc_data.err_code),
-        proc_data,
-        proc_data.interrupt_frame.rip,
+        PageFaultErrorCode::from(cpu_data.err_code),
+        cpu_data,
+        cpu_data.interrupt_frame.rip,
     );
 
     for level in (1..=PAGING_LEVELS).rev() {
@@ -81,17 +94,14 @@ fn fatal_page_fault(proc_data: &InterruptProcessorState, page_fault_addr: u64) -
 }
 
 fn user_page_fault(
-    proc_data: &InterruptProcessorState,
+    cpu_data: &InterruptProcessorState,
+    proc_data: &Arc<ProcessData>,
     page_fault_addr: u64,
     error_code: PageFaultErrorCode,
 ) -> InterruptReturnType {
-    let locals = crate::acpi::cpu_locals::CpuLocals::get();
-    let Some(process) = &locals.current_process else {
-        drop(locals);
-        fatal_page_fault(proc_data, page_fault_addr);
-    };
+    let page_fault_start_time = Instant::now();
 
-    let proc_mut = process.get_mutable();
+    let proc_mut = proc_data.get_mutable();
     let namespaces = proc_mut.get_namespaces();
     let mem_namespace = namespaces
         .get_namespace::<MemoryNamespace>(0)
@@ -104,6 +114,11 @@ fn user_page_fault(
         true,
     );
 
+    //assume interrupts won't happen :3
+    let page_fault_duration = Instant::now() - page_fault_start_time;
+    let page_fault_duration_us = page_fault_duration.as_micros();
+    proc_data.add_cpu_time_kernelspace(UsDuration::from_micros(page_fault_duration_us as i64));
+
     if handled {
         return InterruptReturnType::Normal;
     }
@@ -112,10 +127,10 @@ fn user_page_fault(
     printlnc!(level:warn, (255, 255, 0), "User page fault at {:X}. error code: {:#X?}\nproc state: {:#X?}, rip: {:X?}",
         page_fault_addr,
         error_code,
-        proc_data,
-        proc_data.interrupt_frame.rip,
+        cpu_data,
+        cpu_data.interrupt_frame.rip,
     );
 
-    kill_process(process.pid(), 0xDEAD);
+    kill_process(proc_data.pid(), 0xDEAD);
     InterruptReturnType::ForceReschedule
 }

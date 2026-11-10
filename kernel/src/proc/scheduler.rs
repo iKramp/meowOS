@@ -58,10 +58,9 @@ impl Scheduler {
         }
         let pid = self.ready_to_run.remove(0);
         if let Some(proc_data) = self.tasks.get_mut(&pid) {
-            let mut locals = CpuLocals::get_mut();
+            let locals = CpuLocals::get();
             // Move the process to active tasks
             self.active_tasks.push((pid, locals.apic_id.into()));
-            locals.current_process = Some(proc_data.clone());
             Some(proc_data.clone())
         } else {
             switch_to_generic_mem_tree();

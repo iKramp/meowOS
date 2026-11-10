@@ -2,6 +2,8 @@ use crate::arch::x86_64::interrupts::macros::InterruptProcessorState;
 use crate::arch::x86_64::interrupts::page_fault::page_fault;
 use crate::handler;
 use crate::interrupts::InterruptReturnType;
+use crate::proc::ProcessData;
+use std::sync::arc::Arc;
 
 use super::gdt::{DEBUG_IST, DOUBLE_FAULT_IST, MACHINE_CHECK_IST, NMI_IST};
 use super::handlers::*;
@@ -10,13 +12,13 @@ use std::printlnc;
 
 macro_rules! never_exit_interrupt_message {
     ($message:expr, $func_name:ident) => {
-        extern "C" fn $func_name(proc_data: &mut InterruptProcessorState) -> InterruptReturnType {
+        extern "C" fn $func_name(cpu_data: &mut InterruptProcessorState, _proc_data: Option<&Arc<ProcessData>>) -> InterruptReturnType {
             printlnc!(level:error, (0, 0, 255), "{} exception", $message);
             printlnc!(level:error,
                 (0, 0, 255),
                 "segmetn:instruction: {:x}:{:x}",
-                proc_data.interrupt_frame.cs,
-                proc_data.interrupt_frame.rip
+                cpu_data.interrupt_frame.cs,
+                cpu_data.interrupt_frame.rip
             );
             loop {}
         }

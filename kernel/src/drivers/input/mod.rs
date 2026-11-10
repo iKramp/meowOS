@@ -12,7 +12,7 @@ use std::{
     error::KernelError,
     format, lock_w_info, r_lock_w_info,
     sync::{no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
-    time::FfiInstant,
+    time::UsInstant,
     w_lock_w_info,
 };
 
@@ -155,7 +155,7 @@ impl InputEventManager {
 #[repr(C)]
 #[derive(Clone, Copy, Default, Debug)]
 pub struct InputEvent {
-    pub generated_at: FfiInstant,
+    pub generated_at: UsInstant,
     pub device_type: u16,
     pub code: u16,
     pub value: u16,

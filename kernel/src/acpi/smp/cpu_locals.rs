@@ -1,4 +1,4 @@
-use core::mem::MaybeUninit;
+use core::{mem::MaybeUninit, time::Duration};
 use std::{
     boxed::Box,
     local_lock_read_w_info, local_lock_write_w_info,
@@ -7,6 +7,7 @@ use std::{
         local_lock::{LocalLock, LocalLockReadGuard, LocalLockWriteGuard},
         lock_info::{LockInfo, set_lock_info_func},
     },
+    time::Instant,
     vec::Vec,
 };
 
@@ -30,7 +31,7 @@ pub struct CpuLocals {
     pub userspace_stack_base: u64,
     pub stack_size_pages: u64,
 
-    pub current_process: Option<Arc<ProcessData>>,
+    pub current_process: Option<(Arc<ProcessData>, Instant)>,
     //id of scheduled event for preemtion, used to cancel preemption
     pub preemtion_id: Option<u64>,
 
@@ -39,11 +40,13 @@ pub struct CpuLocals {
 
     pub apic_id: u8,
     pub processor_id: u8,
-    pub int_depth: u32,
     pub proc_initialized: bool,
-    pub atomic_context: bool,
     pub lock_info: LockInfo,
     lock_addr: VirtAddr,
+
+    pub int_depth: u32,
+    //does not track atomic interrupts. They should be rare and fast
+    pub int_time: Duration,
 
     pub scheduled_event_id_counter: u64,
     pub scheduled_events: Vec<AcceptedScheduledEvent>,
@@ -132,11 +135,13 @@ impl CpuLocals {
 
             apic_id,
             processor_id,
-            int_depth: 0,
             proc_initialized: false,
-            atomic_context: false,
             lock_info: LockInfo::new(),
             lock_addr: VirtAddr(0),
+
+            int_depth: 0,
+            int_time: Duration::ZERO,
+
             scheduled_event_id_counter: 0,
             scheduled_events: Vec::new(),
             arch_specific,

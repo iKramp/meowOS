@@ -1,7 +1,7 @@
 use core::task::Waker;
 use std::{
     alloc::{boxed::Box, vec::Vec},
-    ffi_future, println,
+    ffi_future,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock},
 };
 

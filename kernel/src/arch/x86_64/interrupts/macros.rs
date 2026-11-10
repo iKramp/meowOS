@@ -4,13 +4,10 @@ macro_rules! handler {
         $name:ident $(, $flag:ident )* $(,)?
     ) => {{
         use $crate::interrupts::general_interrupt_handler;
-        use $crate::arch::interrupts::InterruptProcessorState;
-        use $crate::interrupts::InterruptReturnType;
+        use $crate::interrupts::InterruptHandler;
 
         //Force type checking
-        let _: extern "C" fn(
-            &mut InterruptProcessorState,
-        ) -> InterruptReturnType = $name;
+        let _: InterruptHandler = $name;
 
         #[unsafe(naked)]
         extern "C" fn wrapper() -> ! {
