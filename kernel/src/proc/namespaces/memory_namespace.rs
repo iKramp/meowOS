@@ -55,35 +55,38 @@ pub(in crate::proc) struct MemoryNamespaceDynamicData {
     memory_ranges: Vec<OwnedVirtualMemoryRange>,
 }
 
+fn get_tree_root() -> PhysAddr {
+    let owned_root = physical_allocator::allocate();
+    let root = owned_root.0;
+    core::mem::forget(owned_root); //dealloc handled by drop impl
+    unsafe { memset_at_addr(root, 0, 0x1000) };
+    root
+}
+
 impl ProcNamespace for MemoryNamespace {
     fn get_id(&self) -> u64 {
         self.id
     }
 
-    fn create_empty(id: u64) -> Result<Self, KernelError> {
-        let owned_page_tree_root = physical_allocator::allocate();
-        let page_tree_root = owned_page_tree_root.0;
-        core::mem::forget(owned_page_tree_root); //dealloc handled by drop impl
-        unsafe { memset_at_addr(page_tree_root, 0, 0x1000) };
-        Ok(Self {
+    fn create_empty(id: u64, _other: &Self) -> Result<Self, KernelError> {
+        //ignore other
+        Ok(Self::new_empty(id))
+    }
+
+    fn create_from(id: u64, other: &Self) -> Result<MemoryNamespace, KernelError> {
+        let new_root = get_tree_root();
+
+        //drop current ranges
+        let new_namespace = Self {
             id,
-            page_tree_root,
+            page_tree_root: new_root,
             dynamic_data: NoIntSpinlock::new(MemoryNamespaceDynamicData {
                 memory_ranges: Vec::new(),
                 range_counter: 1,
             }),
-        })
-    }
+        };
 
-    fn create_from(id: u64, other: &Self) -> Result<MemoryNamespace, KernelError> {
-        let new_namespace = MemoryNamespace::create_empty(id)?;
-
-        //drop current ranges
-        let mut new_dynamic_data = lock_w_info!(new_namespace.dynamic_data);
         let other_dynamic = lock_w_info!(other.dynamic_data);
-        new_dynamic_data.memory_ranges.clear();
-        new_dynamic_data.range_counter = other_dynamic.range_counter;
-        drop(new_dynamic_data);
 
         for range in other_dynamic.memory_ranges.iter() {
             let res = new_namespace.add_mem_range(
@@ -95,6 +98,13 @@ impl ProcNamespace for MemoryNamespace {
             res?;
         }
 
+        #[cfg(debug_assertions)]
+        {
+            let new_dynamic = lock_w_info!(new_namespace.dynamic_data);
+            assert_eq!(new_dynamic.memory_ranges.len(), other_dynamic.memory_ranges.len());
+            assert_eq!(new_dynamic.range_counter, other_dynamic.range_counter);
+        }
+
         Ok(new_namespace)
     }
 
@@ -104,6 +114,19 @@ impl ProcNamespace for MemoryNamespace {
 }
 
 impl MemoryNamespace {
+    //same as ProcNamespace::create_empty but doesn't need to be called on a namespace instance
+    pub fn new_empty(id: u64) -> Self {
+        let page_tree_root = get_tree_root();
+        Self {
+            id,
+            page_tree_root,
+            dynamic_data: NoIntSpinlock::new(MemoryNamespaceDynamicData {
+                memory_ranges: Vec::new(),
+                range_counter: 1,
+            }),
+        }
+    }
+
     pub fn page_tree_root(&self) -> PhysAddr {
         self.page_tree_root
     }

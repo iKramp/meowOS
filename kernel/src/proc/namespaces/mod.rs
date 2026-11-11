@@ -4,14 +4,14 @@ use core::{
 };
 use std::{boxed::Box, error::KernelError, kerror, sync::arc::Arc, vec::Vec};
 
-pub use filesystem_namespace::*;
 pub(in crate::proc) use memory_namespace::*;
+pub use open_file_namespace::*;
 pub(in crate::proc) use syscall_namespace::*;
 pub(in crate::proc) use time_namespace::*;
 
-mod filesystem_namespace;
 pub mod memory_namespace;
 mod namespace_management_pack;
+mod open_file_namespace;
 mod syscall_namespace;
 mod time_namespace;
 
@@ -22,7 +22,7 @@ use crate::proc::ProcessData;
 pub trait ProcNamespace: Debug + Send + Sync + Any + Sized {
     fn get_id(&self) -> u64;
     fn create_from(id: u64, other: &Self) -> Result<Self, KernelError>;
-    fn create_empty(id: u64) -> Result<Self, KernelError>;
+    fn create_empty(id: u64, other: &Self) -> Result<Self, KernelError>;
     fn get_default(holder: &ProcNamespaces) -> Arc<Self>;
 }
 
@@ -31,15 +31,15 @@ pub trait ProcNamespace: Debug + Send + Sync + Any + Sized {
 pub(in crate::proc) enum NamespaceType {
     Syscall = 0,
     Mem = 1,
-    Fs = 2,
+    OpenFile = 2,
     Time = 3,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(in crate::proc) enum NamespaceHolder {
     Syscall(Arc<SyscallNamespace>),
     Mem(Arc<MemoryNamespace>),
-    Fs(Arc<FilesystemNamespace>),
+    OpenFile(Arc<OpenFileNamespace>),
     Time(Arc<TimeNamespace>),
 }
 
@@ -48,7 +48,7 @@ pub struct ProcNamespaces {
     owned_namespaces: Vec<NamespaceHolder>,
     pub(in crate::proc) memory_namespace: Arc<MemoryNamespace>,
     syscall_namespace: Arc<SyscallNamespace>,
-    filesystem_namespace: Arc<FilesystemNamespace>,
+    open_file_namespace: Arc<OpenFileNamespace>,
     time_namespace: Arc<TimeNamespace>,
 }
 
@@ -57,7 +57,7 @@ pub struct ProcNamespaces {
 pub(in crate::proc) struct NamespaceIds {
     memory_namespace: u64,
     syscall_namespace: u64,
-    filesystem_namespace: u64,
+    open_file_namespace: u64,
     time_namespace: u64,
 }
 
@@ -67,13 +67,13 @@ impl ProcNamespaces {
     pub(in crate::proc) fn new(
         memory_namespace: Arc<MemoryNamespace>,
         syscall_namespace: Arc<SyscallNamespace>,
-        filesystem_namespace: Arc<FilesystemNamespace>,
+        open_file_namespace: Arc<OpenFileNamespace>,
         time_namespace: Arc<TimeNamespace>,
     ) -> Self {
         let mut owned_namespaces = Vec::new();
         owned_namespaces.push(NamespaceHolder::Mem(memory_namespace.clone()));
         owned_namespaces.push(NamespaceHolder::Syscall(syscall_namespace.clone()));
-        owned_namespaces.push(NamespaceHolder::Fs(filesystem_namespace.clone()));
+        owned_namespaces.push(NamespaceHolder::OpenFile(open_file_namespace.clone()));
         owned_namespaces.push(NamespaceHolder::Time(time_namespace.clone()));
 
         owned_namespaces.sort_by_key(|ns| ns.get_id());
@@ -82,7 +82,7 @@ impl ProcNamespaces {
             owned_namespaces,
             memory_namespace,
             syscall_namespace,
-            filesystem_namespace,
+            open_file_namespace,
             time_namespace,
         }
     }
@@ -95,8 +95,8 @@ impl ProcNamespaces {
         if ids.syscall_namespace == 0 {
             ids.syscall_namespace = self.syscall_namespace.get_id();
         }
-        if ids.filesystem_namespace == 0 {
-            ids.filesystem_namespace = self.filesystem_namespace.get_id();
+        if ids.open_file_namespace == 0 {
+            ids.open_file_namespace = self.open_file_namespace.get_id();
         }
         if ids.time_namespace == 0 {
             ids.time_namespace = self.time_namespace.get_id();
@@ -108,7 +108,7 @@ impl ProcNamespaces {
         let Some(NamespaceHolder::Syscall(syscall_namespace)) = self.get_namespace_holder(ids.syscall_namespace) else {
             return kerror!(InvalidArgument);
         };
-        let Some(NamespaceHolder::Fs(filesystem_namespace)) = self.get_namespace_holder(ids.filesystem_namespace) else {
+        let Some(NamespaceHolder::OpenFile(open_file_namespace)) = self.get_namespace_holder(ids.open_file_namespace) else {
             return kerror!(InvalidArgument);
         };
         let Some(NamespaceHolder::Time(time_namespace)) = self.get_namespace_holder(ids.time_namespace) else {
@@ -117,7 +117,7 @@ impl ProcNamespaces {
         Ok(Self::new(
             memory_namespace.clone(),
             syscall_namespace.clone(),
-            filesystem_namespace.clone(),
+            open_file_namespace.clone(),
             time_namespace.clone(),
         ))
     }
@@ -141,6 +141,15 @@ impl ProcNamespaces {
         T::get_default(self)
     }
 
+    fn get_default_by_type(&self, ns_type: NamespaceType) -> NamespaceHolder {
+        match ns_type {
+            NamespaceType::Syscall => NamespaceHolder::Syscall(SyscallNamespace::get_default(self)),
+            NamespaceType::Mem => NamespaceHolder::Mem(MemoryNamespace::get_default(self)),
+            NamespaceType::OpenFile => NamespaceHolder::OpenFile(OpenFileNamespace::get_default(self)),
+            NamespaceType::Time => NamespaceHolder::Time(TimeNamespace::get_default(self)),
+        }
+    }
+
     pub fn change_namespace(&mut self, namespace_id: u64) -> Result<Option<ChangeNamespaceFn>, ()> {
         let index = self
             .owned_namespaces
@@ -159,8 +168,8 @@ impl ProcNamespaces {
                 });
                 Some(f)
             }
-            NamespaceHolder::Fs(ns) => {
-                self.filesystem_namespace = ns.clone();
+            NamespaceHolder::OpenFile(ns) => {
+                self.open_file_namespace = ns.clone();
                 None
             }
             NamespaceHolder::Time(ns) => {
@@ -175,7 +184,7 @@ impl ProcNamespaces {
         let id = match &namespace {
             NamespaceHolder::Syscall(ns) => ns.get_id(),
             NamespaceHolder::Mem(ns) => ns.get_id(),
-            NamespaceHolder::Fs(ns) => ns.get_id(),
+            NamespaceHolder::OpenFile(ns) => ns.get_id(),
             NamespaceHolder::Time(ns) => ns.get_id(),
         };
         let index = self
@@ -215,7 +224,7 @@ impl NamespaceHolder {
         match self {
             NamespaceHolder::Syscall(ns) => ns.get_id(),
             NamespaceHolder::Mem(ns) => ns.get_id(),
-            NamespaceHolder::Fs(ns) => ns.get_id(),
+            NamespaceHolder::OpenFile(ns) => ns.get_id(),
             NamespaceHolder::Time(ns) => ns.get_id(),
         }
     }
@@ -224,7 +233,7 @@ impl NamespaceHolder {
         match self {
             NamespaceHolder::Syscall(_) => NamespaceType::Syscall,
             NamespaceHolder::Mem(_) => NamespaceType::Mem,
-            NamespaceHolder::Fs(_) => NamespaceType::Fs,
+            NamespaceHolder::OpenFile(_) => NamespaceType::OpenFile,
             NamespaceHolder::Time(_) => NamespaceType::Time,
         }
     }
@@ -243,14 +252,43 @@ impl NamespaceHolder {
                 };
                 Ok(NamespaceHolder::Mem(Arc::new(new_ns)))
             }
-            NamespaceHolder::Fs(other_ns) => {
-                let Ok(new_ns) = FilesystemNamespace::create_from(id, other_ns) else {
+            NamespaceHolder::OpenFile(other_ns) => {
+                let Ok(new_ns) = OpenFileNamespace::create_from(id, other_ns) else {
                     return kerror!(InvalidArgument);
                 };
-                Ok(NamespaceHolder::Fs(Arc::new(new_ns)))
+                Ok(NamespaceHolder::OpenFile(Arc::new(new_ns)))
             }
             NamespaceHolder::Time(other_ns) => {
                 let Ok(new_ns) = TimeNamespace::create_from(id, other_ns) else {
+                    return kerror!(InvalidArgument);
+                };
+                Ok(NamespaceHolder::Time(Arc::new(new_ns)))
+            }
+        }
+    }
+
+    pub fn create_empty_from(id: u64, other: &Self) -> Result<Self, KernelError> {
+        match other {
+            NamespaceHolder::Syscall(other_ns) => {
+                let Ok(new_ns) = SyscallNamespace::create_empty(id, other_ns) else {
+                    return kerror!(InvalidArgument);
+                };
+                Ok(NamespaceHolder::Syscall(Arc::new(new_ns)))
+            }
+            NamespaceHolder::Mem(other_ns) => {
+                let Ok(new_ns) = MemoryNamespace::create_empty(id, other_ns) else {
+                    return kerror!(InvalidArgument);
+                };
+                Ok(NamespaceHolder::Mem(Arc::new(new_ns)))
+            }
+            NamespaceHolder::OpenFile(other_ns) => {
+                let Ok(new_ns) = OpenFileNamespace::create_empty(id, other_ns) else {
+                    return kerror!(InvalidArgument);
+                };
+                Ok(NamespaceHolder::OpenFile(Arc::new(new_ns)))
+            }
+            NamespaceHolder::Time(other_ns) => {
+                let Ok(new_ns) = TimeNamespace::create_empty(id, other_ns) else {
                     return kerror!(InvalidArgument);
                 };
                 Ok(NamespaceHolder::Time(Arc::new(new_ns)))
@@ -265,8 +303,8 @@ impl NamespaceHolder {
             NamespaceHolder::Syscall(_) => return None,
             NamespaceHolder::Mem(ns) if ns.get().type_id() == type_id => Arc::into_raw(ns.clone()) as *const T,
             NamespaceHolder::Mem(_) => return None,
-            NamespaceHolder::Fs(ns) if ns.get().type_id() == type_id => Arc::into_raw(ns.clone()) as *const T,
-            NamespaceHolder::Fs(_) => return None,
+            NamespaceHolder::OpenFile(ns) if ns.get().type_id() == type_id => Arc::into_raw(ns.clone()) as *const T,
+            NamespaceHolder::OpenFile(_) => return None,
             NamespaceHolder::Time(ns) if ns.get().type_id() == type_id => Arc::into_raw(ns.clone()) as *const T,
             NamespaceHolder::Time(_) => return None,
             //no wildcard to get exhaustiveness checking
@@ -280,7 +318,7 @@ impl NamespaceType {
         match id {
             0 => Some(Self::Syscall),
             1 => Some(Self::Mem),
-            2 => Some(Self::Fs),
+            2 => Some(Self::OpenFile),
             _ => None,
         }
     }
@@ -289,17 +327,8 @@ impl NamespaceType {
         match self {
             NamespaceType::Syscall => 0,
             NamespaceType::Mem => 1,
-            NamespaceType::Fs => 2,
+            NamespaceType::OpenFile => 2,
             NamespaceType::Time => 3,
-        }
-    }
-
-    pub fn create_empty_namespace(self, id: u64) -> Option<NamespaceHolder> {
-        match self {
-            NamespaceType::Syscall => Some(NamespaceHolder::Syscall(Arc::new(SyscallNamespace::create_empty(id).ok()?))),
-            NamespaceType::Mem => Some(NamespaceHolder::Mem(Arc::new(MemoryNamespace::create_empty(id).ok()?))),
-            NamespaceType::Fs => Some(NamespaceHolder::Fs(Arc::new(FilesystemNamespace::create_empty(id).ok()?))),
-            NamespaceType::Time => Some(NamespaceHolder::Time(Arc::new(TimeNamespace::create_empty(id).ok()?))),
         }
     }
 }

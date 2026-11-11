@@ -23,34 +23,44 @@ pub fn init_namespace_management_syscalls() {
 
 fn mknamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_type = args.get_arg(0);
-    let existing_namespace = args.get_arg(1);
+    let existing_namespace_id = args.get_arg(1);
+    let clear_namespace = args.get_arg(2) != 0;
     let Some(namespace_type) = NamespaceType::from_id(namespace_type) else {
         proc.set_syscall_return(&[u64::MAX]);
         return;
     };
 
-    let namespace = if existing_namespace == 0 {
-        let Some(namespace) = namespace_type.create_empty_namespace(get_namespace_id()) else {
+    let mutable = proc.get_mutable();
+    let namespaces = mutable.get_namespaces();
+    let existing_namespace = if existing_namespace_id == 0 {
+        namespaces.get_default_by_type(namespace_type)
+    } else {
+        let Some(existing_namespace_) = namespaces.get_namespace_holder(existing_namespace_id) else {
+            proc.set_syscall_return(&[u64::MAX]);
+            return;
+        };
+        existing_namespace_.clone()
+    };
+    drop(mutable);
+
+    let namespace = if clear_namespace {
+        let Ok(namespace) = NamespaceHolder::create_empty_from(get_namespace_id(), &existing_namespace) else {
             proc.set_syscall_return(&[u64::MAX]);
             return;
         };
         namespace
     } else {
-        let mutable = proc.get_mutable();
-        let namespaces = mutable.get_namespaces();
-        let Some(existing_namespace) = namespaces.get_namespace_holder(existing_namespace) else {
-            proc.set_syscall_return(&[u64::MAX]);
-            return;
-        };
-        let Ok(new_namespace) = NamespaceHolder::create_from(get_namespace_id(), existing_namespace) else {
+        let Ok(new_namespace) = NamespaceHolder::create_from(get_namespace_id(), &existing_namespace) else {
             proc.set_syscall_return(&[u64::MAX]);
             return;
         };
         new_namespace
     };
 
+    let id = namespace.get_id();
+
     proc.get_mutable().get_namespaces_mut().add_namespace(namespace);
-    proc.set_syscall_return(&[0]);
+    proc.set_syscall_return(&[id]);
 }
 
 fn rmnamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) {

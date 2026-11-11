@@ -31,7 +31,8 @@ impl ProcNamespace for SyscallNamespace {
         self.id
     }
 
-    fn create_empty(id: u64) -> Result<Self, KernelError> {
+    fn create_empty(id: u64, _other: &Self) -> Result<Self, KernelError> {
+        //don't clone
         Ok(Self {
             id,
             mapped_syscalls: NoIntSpinlock::new(Vec::new()),
@@ -39,7 +40,10 @@ impl ProcNamespace for SyscallNamespace {
     }
 
     fn create_from(id: u64, other: &Self) -> Result<Self, KernelError> {
-        let new_namespace = Self::create_empty(id)?;
+        let new_namespace = Self {
+            id,
+            mapped_syscalls: NoIntSpinlock::new(Vec::new()),
+        };
         let other_mapped_syscalls = lock_w_info!(other.mapped_syscalls);
         let mut mapped_syscalls = lock_w_info!(new_namespace.mapped_syscalls);
         mapped_syscalls.clear();
@@ -62,7 +66,10 @@ impl ProcNamespace for SyscallNamespace {
 
 impl SyscallNamespace {
     pub fn default(id: u64) -> Self {
-        let ns = Self::create_empty(id).expect("can't fail to create empty syscall namespace");
+        let ns = Self {
+            id,
+            mapped_syscalls: NoIntSpinlock::new(Vec::new()),
+        };
 
         let (syscall_pack, pack_id) = syscall::get_syscall_pack("syscall_management").expect("syscall pack not found");
         ns.map_syscall_pack(0xFFFFFFE0, syscall_pack, pack_id)

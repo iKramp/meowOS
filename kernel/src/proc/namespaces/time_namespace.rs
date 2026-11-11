@@ -77,11 +77,9 @@ impl ProcNamespace for TimeNamespace {
         })
     }
 
-    fn create_empty(id: u64) -> Result<Self, std::error::KernelError> {
-        Ok(TimeNamespace {
-            id,
-            ..TimeNamespace::default()
-        })
+    fn create_empty(id: u64, other: &Self) -> Result<Self, std::error::KernelError> {
+        //can't be created without offsets for security reasons
+        Self::create_from(id, other)
     }
 
     fn get_default(holder: &super::ProcNamespaces) -> std::sync::arc::Arc<Self> {

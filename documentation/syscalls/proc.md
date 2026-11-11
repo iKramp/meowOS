@@ -15,7 +15,7 @@
 struct NamespaceIds {
     memory_namespace: u64,
     syscall_namespace: u64,
-    filesystem_namespace: u64,
+    open_file_namespace: u64,
     time_namespace: u64,
 }
 

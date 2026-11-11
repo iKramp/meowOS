@@ -7,7 +7,7 @@ use std::vec::Vec;
 
 use crate::memory::addresses::*;
 use crate::memory::{physical_allocator, safe_memcpy_from_user, safe_memcpy_to_user};
-use crate::proc::namespaces::FilesystemNamespace;
+use crate::proc::namespaces::OpenFileNamespace;
 use crate::proc::syscall::{SyscallCpuState, SyscallHandler, SyscallPack, register_syscall_pack, string_from_args};
 use crate::proc::{self, ProcessData, syscall};
 use crate::task_runner::{self, PidOption};
@@ -71,10 +71,12 @@ fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let proc_mut = proc.get_mutable();
     let namespaces = proc_mut.get_namespaces();
     let fs_namespace = namespaces
-        .get_namespace::<FilesystemNamespace>(namespace_id)
+        .get_namespace::<OpenFileNamespace>(namespace_id)
         .expect("default fs namespace must exist");
 
-    let file_source: InodeIdentifierChain = if fd_rel == u64::MAX {
+    let file_source: InodeIdentifierChain = if path.starts_with('/') {
+        fs_namespace.get_root_chain()
+    } else if fd_rel == u64::MAX {
         fs_namespace.get_cwd_chain()
     } else {
         let Some(f_chain) = fs_namespace.get_whole_chain(fd_rel) else {
@@ -101,7 +103,7 @@ fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
                 let proc_mut = proc.get_mutable();
                 let namespaces = proc_mut.get_namespaces();
                 let fs_namespace = namespaces
-                    .get_namespace::<FilesystemNamespace>(namespace_id)
+                    .get_namespace::<OpenFileNamespace>(namespace_id)
                     .expect("default fs namespace must exist");
                 let f_descriptor = fs_namespace.open_file_handle(handle, fd);
                 drop(proc_mut);
@@ -128,7 +130,7 @@ fn fclose(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let proc_mut = proc.get_mutable();
     let namespaces = proc_mut.get_namespaces();
     let fs_namespace = namespaces
-        .get_namespace::<FilesystemNamespace>(namespace_id)
+        .get_namespace::<OpenFileNamespace>(namespace_id)
         .expect("default fs namespace must exist");
     drop(proc_mut);
 
@@ -164,7 +166,7 @@ fn fread(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let proc_mut = proc.get_mutable();
         let namespaces = proc_mut.get_namespaces();
         let fs_namespace = namespaces
-            .get_namespace::<FilesystemNamespace>(namespace_id)
+            .get_namespace::<OpenFileNamespace>(namespace_id)
             .expect("default fs namespace must exist");
         drop(proc_mut);
         if let Some(f_handle) = fs_namespace.get_file_handle(fd) {
@@ -259,7 +261,7 @@ fn fwrite(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let proc_mut = proc.get_mutable();
         let namespaces = proc_mut.get_namespaces();
         let fs_namespace = namespaces
-            .get_namespace::<FilesystemNamespace>(namespace_id)
+            .get_namespace::<OpenFileNamespace>(namespace_id)
             .expect("default fs namespace must exist");
         drop(proc_mut);
         if let Some(f_handle) = fs_namespace.get_file_handle(fd) {
@@ -350,7 +352,7 @@ fn fseek(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         let proc_mut = proc.get_mutable();
         let namespaces = proc_mut.get_namespaces();
         let fs_namespace = namespaces
-            .get_namespace::<FilesystemNamespace>(namespace_id)
+            .get_namespace::<OpenFileNamespace>(namespace_id)
             .expect("default fs namespace must exist");
         drop(proc_mut);
         if let Some(f_handle) = fs_namespace.get_file_handle(fd) {
@@ -415,7 +417,7 @@ fn fcreate(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let proc_mut = proc.get_mutable();
     let namespaces = proc_mut.get_namespaces();
     let fs_namespace = namespaces
-        .get_namespace::<FilesystemNamespace>(namespace_id)
+        .get_namespace::<OpenFileNamespace>(namespace_id)
         .expect("default fs namespace must exist");
     drop(proc_mut);
 
@@ -466,7 +468,7 @@ fn flink(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let proc_mut = proc.get_mutable();
     let namespaces = proc_mut.get_namespaces();
     let fs_namespace = namespaces
-        .get_namespace::<FilesystemNamespace>(namespace_id)
+        .get_namespace::<OpenFileNamespace>(namespace_id)
         .expect("default fs namespace must exist");
     drop(proc_mut);
 
@@ -522,7 +524,7 @@ fn funlink(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let proc_mut = proc.get_mutable();
     let namespaces = proc_mut.get_namespaces();
     let fs_namespace = namespaces
-        .get_namespace::<FilesystemNamespace>(namespace_id)
+        .get_namespace::<OpenFileNamespace>(namespace_id)
         .expect("default fs namespace must exist");
     drop(proc_mut);
 
@@ -563,7 +565,7 @@ fn fstat(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let proc_mut = proc.get_mutable();
     let namespaces = proc_mut.get_namespaces();
     let fs_namespace = namespaces
-        .get_namespace::<FilesystemNamespace>(namespace_id)
+        .get_namespace::<OpenFileNamespace>(namespace_id)
         .expect("default fs namespace must exist");
     drop(proc_mut);
     let Some(file_handle) = fs_namespace.get_file_handle(fd) else {

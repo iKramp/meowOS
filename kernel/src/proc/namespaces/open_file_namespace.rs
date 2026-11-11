@@ -1,7 +1,8 @@
 use std::{
+    alloc::vec::Vec,
     collections::btree_map::BTreeMap,
     error::KernelError,
-    kerror, lock_w_info, r_lock_w_info,
+    lock_w_info, r_lock_w_info,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
     w_lock_w_info,
 };
@@ -15,23 +16,23 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct FilesystemNamespace {
+pub struct OpenFileNamespace {
     id: u64,
-    open_files: RWSpinlock<FileSystemNamespaceOpenFiles>,
+    open_files: RWSpinlock<OpenFileNamespaceOpenFiles>,
     cwd: NoIntSpinlock<FileHandle>,
 }
 
 #[derive(Debug)]
-struct FileSystemNamespaceOpenFiles {
+struct OpenFileNamespaceOpenFiles {
     open_files: BTreeMap<u64, Arc<FileHandle>>,
     file_handle_counter: u64,
 }
 
-impl FilesystemNamespace {
+impl OpenFileNamespace {
     pub fn new(id: u64, cwd: FileHandle) -> Self {
-        FilesystemNamespace {
+        OpenFileNamespace {
             id,
-            open_files: RWSpinlock::new(FileSystemNamespaceOpenFiles {
+            open_files: RWSpinlock::new(OpenFileNamespaceOpenFiles {
                 open_files: BTreeMap::new(),
                 file_handle_counter: 0,
             }),
@@ -97,15 +98,30 @@ impl FilesystemNamespace {
         chain.push(cwd.inode);
         chain.into_boxed_slice()
     }
+
+    pub fn get_root_chain(&self) -> InodeIdentifierChain {
+        let cwd = lock_w_info!(self.cwd);
+        if let Some(root) = cwd.parent_chain.first() {
+            let mut chain = Vec::new();
+            chain.push(*root);
+            chain.into_boxed_slice()
+        } else {
+            let mut chain = Vec::new();
+            chain.push(cwd.inode);
+            chain.into_boxed_slice()
+        }
+    }
 }
 
-impl ProcNamespace for FilesystemNamespace {
+impl ProcNamespace for OpenFileNamespace {
     fn get_id(&self) -> u64 {
         self.id
     }
 
-    fn create_empty(_id: u64) -> Result<Self, KernelError> {
-        kerror!(InvalidOperation)
+    fn create_empty(_id: u64, other: &Self) -> Result<Self, KernelError> {
+        let other_cwd = lock_w_info!(other.cwd);
+        let cwd = FileHandle::clone_from(&other_cwd);
+        Ok(OpenFileNamespace::new(_id, cwd))
     }
 
     fn create_from(id: u64, other: &Self) -> Result<Self, KernelError> {
@@ -117,9 +133,9 @@ impl ProcNamespace for FilesystemNamespace {
             open_files.insert(*fd, handle.clone());
         }
         let cwd = FileHandle::clone_from(&other_cwd);
-        Ok(FilesystemNamespace {
+        Ok(OpenFileNamespace {
             id,
-            open_files: RWSpinlock::new(FileSystemNamespaceOpenFiles {
+            open_files: RWSpinlock::new(OpenFileNamespaceOpenFiles {
                 open_files,
                 file_handle_counter: counter,
             }),
@@ -128,6 +144,6 @@ impl ProcNamespace for FilesystemNamespace {
     }
 
     fn get_default(holder: &super::ProcNamespaces) -> Arc<Self> {
-        holder.filesystem_namespace.clone()
+        holder.open_file_namespace.clone()
     }
 }

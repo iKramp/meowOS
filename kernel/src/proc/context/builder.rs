@@ -7,14 +7,13 @@ use crate::memory::VirtualMemoryRangePermissions;
 use crate::memory::addresses::VirtAddr;
 use crate::proc::MemoryRangeType;
 use crate::proc::PROCESS_ID_COUNTER;
-use crate::proc::ProcNamespace;
 use crate::proc::ProcNamespaces;
 use crate::proc::ProcessData;
 use crate::proc::SCHEDULER;
 use crate::proc::SyscallNamespace;
 use crate::proc::TimeNamespace;
-use crate::proc::namespaces::FilesystemNamespace;
 use crate::proc::namespaces::MemoryNamespace;
+use crate::proc::namespaces::OpenFileNamespace;
 use crate::proc::process_data::CpuStateType;
 use crate::vfs::file::FileHandle;
 use std::alloc::boxed::Box;
@@ -51,7 +50,7 @@ pub fn create_process_from_context(context_info: &ContextInfo, cwd: FileHandle) 
 
     let memory_namespace = Arc::new(memory_namespace);
     let syscall_namespace = Arc::new(SyscallNamespace::default(crate::proc::get_namespace_id()));
-    let filesystem_namespace = Arc::new(FilesystemNamespace::new(crate::proc::get_namespace_id(), cwd));
+    let open_file_namespace = Arc::new(OpenFileNamespace::new(crate::proc::get_namespace_id(), cwd));
     let time_namespace = Arc::new(TimeNamespace::default());
 
     let mut cpu_state = InterruptProcessorState::new(rip, rsp);
@@ -61,7 +60,7 @@ pub fn create_process_from_context(context_info: &ContextInfo, cwd: FileHandle) 
         is_32_bit,
         cmdline,
         CpuStateType::Interrupt(cpu_state),
-        ProcNamespaces::new(memory_namespace, syscall_namespace, filesystem_namespace, time_namespace),
+        ProcNamespaces::new(memory_namespace, syscall_namespace, open_file_namespace, time_namespace),
     );
 
     let mut scheduler_lock = lock_w_info!(SCHEDULER);
@@ -273,7 +272,7 @@ pub fn add_args(args: &[Box<str>], mem_namespace: &mut MemoryNamespace) -> Resul
 }
 
 pub fn build_empty_memory_namespace() -> MemoryNamespace {
-    let namespace = MemoryNamespace::create_empty(crate::proc::get_namespace_id()).expect("failed to create memory namespace");
+    let namespace = MemoryNamespace::new_empty(crate::proc::get_namespace_id());
 
     let new_page_tree_root = namespace.page_tree_root();
     let existing_page_tree_root = arch::memory::current_root();
