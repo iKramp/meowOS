@@ -38,6 +38,8 @@ pub use scheduler::{release_current_proc, save_cpu_state};
 static SCHEDULER: NoIntSpinlock<MaybeUninit<Scheduler>> = NoIntSpinlock::new(MaybeUninit::uninit());
 
 static PROCESS_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+//0 is default
 static NAMESPACE_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 pub static mut PROC_INITIALIZED: bool = false;
@@ -70,9 +72,11 @@ pub fn init_ap() {
     syscall::init();
 }
 
+///Can only be used from the kernel shell, not by processes. It doesn't use any external namespaces
+///and initializes default namespaces for the created processes
 #[heap_future::heap_future]
 pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &str, cwd: &str) -> Result<Pid, KernelError> {
-    let file_handle = vfs::open_file(path, None, OpenFlags(1)).await?;
+    let file_handle = vfs::open_file(path, None, OpenFlags(1), &get_kernel_mount_namespace()).await?;
     let stat = vfs::stat_file(&file_handle).await;
     let buf_pages = stat.size.div_ceil(4096);
     let phys_buf = physical_allocator::allocate_contiguous(buf_pages as u32);
@@ -98,7 +102,7 @@ pub async fn run_process_default_env(path: ResolvedPathBorrowed<'_>, cmdline: &s
     };
 
     let cwd_resolved = vfs::resolve_path(cwd);
-    let file_handle = vfs::open_file((&cwd_resolved).into(), None, OpenFlags(1)).await?;
+    let file_handle = vfs::open_file((&cwd_resolved).into(), None, OpenFlags(1), &get_kernel_mount_namespace()).await?;
 
     let new_pid = match create_process_from_context(&context, file_handle) {
         Ok(pid) => pid,

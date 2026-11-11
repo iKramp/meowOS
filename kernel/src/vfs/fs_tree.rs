@@ -1,15 +1,14 @@
+use core::fmt::Debug;
 use std::{
     boxed::Box,
     collections::btree_map::BTreeMap,
     error::KernelError,
-    kerror, kerror_unwrapped, lock_w_info, println, r_lock_w_info,
+    kerror, kerror_unwrapped, lock_w_info, println,
     sync::no_int_spinlock::{NoIntSpinlock, NoIntSpinlockGuard},
     vec::Vec,
 };
 
-use crate::vfs::{
-    DeviceId, EmptyExtraInodeData, GLOBAL_MOUNTS, InodeIdentifier, InodeIdentifierChain, ResolvedPathBorrowed, VFS,
-};
+use crate::vfs::{DeviceId, EmptyExtraInodeData, InodeIdentifier, InodeIdentifierChain, ResolvedPathBorrowed, VFS};
 
 static INODE_CACHE: NoIntSpinlock<FsTreeCache> = NoIntSpinlock::new(FsTreeCache::new());
 
@@ -53,7 +52,7 @@ pub(super) fn init(root: InodeIdentifier) {
 pub(super) async fn get_inode_chain(
     path: ResolvedPathBorrowed<'_>,
     from: Option<InodeIdentifierChain>,
-    namespace_mounts: Option<&BTreeMap<InodeIdentifier, InodeIdentifier>>,
+    namespace_mounts: impl Iterator<Item = (InodeIdentifier, InodeIdentifier)> + Clone + Debug + Send,
 ) -> Result<(InodeIdentifier, InodeIdentifierChain), KernelError> {
     println!("get_inode_chain: path: {:?}, from: {:X?}", path, from);
     let mut chain = match from {
@@ -78,7 +77,7 @@ pub(super) async fn get_inode_chain(
 
         println!("get_inode_chain: getting child for component: {:?}", component);
 
-        let child = get_child(current, component, true, namespace_mounts).await?;
+        let child = get_child(current, component, true, namespace_mounts.clone()).await?;
 
         println!("get_inode_chain: got child inode: {:X?}", child);
         chain.push(child);
@@ -132,7 +131,7 @@ pub async fn get_child(
     parent: InodeIdentifier,
     name: &str,
     resolve_mounts: bool,
-    namespace_mounts: Option<&BTreeMap<InodeIdentifier, InodeIdentifier>>,
+    namespace_mounts: impl Iterator<Item = (InodeIdentifier, InodeIdentifier)> + Clone + Debug + Send,
 ) -> Result<InodeIdentifier, KernelError> {
     let cache = lock_w_info!(INODE_CACHE);
     if let Some(parent_node) = cache.inodes.get(&parent) {
@@ -220,42 +219,26 @@ async fn load_dir(current: InodeIdentifier) -> Result<NoIntSpinlockGuard<'static
 /// point, second is the overlaid inode
 pub fn resolve_mount_point(
     mut inode: InodeIdentifier,
-    namespace_mounts: Option<&BTreeMap<InodeIdentifier, InodeIdentifier>>,
+    namespace_mounts: impl Iterator<Item = (InodeIdentifier, InodeIdentifier)> + Clone + Debug + Send,
 ) -> Option<(InodeIdentifier, InodeIdentifier)> {
-    let global_mounts = r_lock_w_info!(GLOBAL_MOUNTS);
     let mut prev_inode = None;
 
     println!("resolve_mount_point: resolving mount point for inode {:X?}", inode);
 
     loop {
-        let mut found_mount = false;
-
-        if let Some(mount) = global_mounts.get(&inode) {
+        let mountpoint = namespace_mounts.clone().find(|(mountpoint, _)| *mountpoint == inode);
+        if let Some((_, overlaid)) = mountpoint {
             println!(
-                "resolve_mount_point: found global mount for inode {:X?}, overlaid inode: {:X?}",
-                inode, mount
+                "resolve_mount_point: found namespace mount for inode {:X?}, overlaid inode: {:X?}",
+                inode, overlaid
             );
             prev_inode = Some(inode);
-            inode = *mount;
-            found_mount = true;
-        }
-
-        if let Some(namespace_mounts) = namespace_mounts {
-            println!(
-                "resolve_mount_point: checking namespace mounts for inode {:X?}, namespace mounts: {:X?}",
-                inode, namespace_mounts
-            );
-            if let Some(mount) = namespace_mounts.get(&inode) {
-                prev_inode = Some(inode);
-                inode = *mount;
-                found_mount = true;
-            }
-        }
-
-        if !found_mount {
+            inode = overlaid;
+        } else {
             break;
         }
     }
+
     println!(
         "resolve_mount_point: finished resolving mount point for inode {:X?}, final inode: {:X?}, prev_inode: {:?}",
         prev_inode, inode, prev_inode

@@ -5,11 +5,13 @@ use core::{
 use std::{boxed::Box, error::KernelError, kerror, sync::arc::Arc, vec::Vec};
 
 pub(in crate::proc) use memory_namespace::*;
+pub use mount_namespace::*;
 pub use open_file_namespace::*;
 pub(in crate::proc) use syscall_namespace::*;
 pub(in crate::proc) use time_namespace::*;
 
 pub mod memory_namespace;
+mod mount_namespace;
 mod namespace_management_pack;
 mod open_file_namespace;
 mod syscall_namespace;
@@ -33,6 +35,7 @@ pub(in crate::proc) enum NamespaceType {
     Mem = 1,
     OpenFile = 2,
     Time = 3,
+    Mount = 4,
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +44,7 @@ pub(in crate::proc) enum NamespaceHolder {
     Mem(Arc<MemoryNamespace>),
     OpenFile(Arc<OpenFileNamespace>),
     Time(Arc<TimeNamespace>),
+    Mount(Arc<MountNamespace>),
 }
 
 #[derive(Debug)]
@@ -50,6 +54,7 @@ pub struct ProcNamespaces {
     syscall_namespace: Arc<SyscallNamespace>,
     open_file_namespace: Arc<OpenFileNamespace>,
     time_namespace: Arc<TimeNamespace>,
+    mount_namespace: Arc<MountNamespace>,
 }
 
 #[derive(Clone)]
@@ -59,6 +64,7 @@ pub(in crate::proc) struct NamespaceIds {
     syscall_namespace: u64,
     open_file_namespace: u64,
     time_namespace: u64,
+    mount_namespace: u64,
 }
 
 type ChangeNamespaceFn = Box<dyn FnOnce(ProcessData)>;
@@ -69,12 +75,14 @@ impl ProcNamespaces {
         syscall_namespace: Arc<SyscallNamespace>,
         open_file_namespace: Arc<OpenFileNamespace>,
         time_namespace: Arc<TimeNamespace>,
+        mount_namespace: Arc<MountNamespace>,
     ) -> Self {
         let mut owned_namespaces = Vec::new();
         owned_namespaces.push(NamespaceHolder::Mem(memory_namespace.clone()));
         owned_namespaces.push(NamespaceHolder::Syscall(syscall_namespace.clone()));
         owned_namespaces.push(NamespaceHolder::OpenFile(open_file_namespace.clone()));
         owned_namespaces.push(NamespaceHolder::Time(time_namespace.clone()));
+        owned_namespaces.push(NamespaceHolder::Mount(mount_namespace.clone()));
 
         owned_namespaces.sort_by_key(|ns| ns.get_id());
 
@@ -84,6 +92,7 @@ impl ProcNamespaces {
             syscall_namespace,
             open_file_namespace,
             time_namespace,
+            mount_namespace,
         }
     }
 
@@ -101,6 +110,9 @@ impl ProcNamespaces {
         if ids.time_namespace == 0 {
             ids.time_namespace = self.time_namespace.get_id();
         }
+        if ids.mount_namespace == 0 {
+            ids.mount_namespace = self.mount_namespace.get_id();
+        }
 
         let Some(NamespaceHolder::Mem(memory_namespace)) = self.get_namespace_holder(ids.memory_namespace) else {
             return kerror!(InvalidArgument);
@@ -114,11 +126,15 @@ impl ProcNamespaces {
         let Some(NamespaceHolder::Time(time_namespace)) = self.get_namespace_holder(ids.time_namespace) else {
             return kerror!(InvalidArgument);
         };
+        let Some(NamespaceHolder::Mount(mount_namespace)) = self.get_namespace_holder(ids.mount_namespace) else {
+            return kerror!(InvalidArgument);
+        };
         Ok(Self::new(
             memory_namespace.clone(),
             syscall_namespace.clone(),
             open_file_namespace.clone(),
             time_namespace.clone(),
+            mount_namespace.clone(),
         ))
     }
 
@@ -147,6 +163,7 @@ impl ProcNamespaces {
             NamespaceType::Mem => NamespaceHolder::Mem(MemoryNamespace::get_default(self)),
             NamespaceType::OpenFile => NamespaceHolder::OpenFile(OpenFileNamespace::get_default(self)),
             NamespaceType::Time => NamespaceHolder::Time(TimeNamespace::get_default(self)),
+            NamespaceType::Mount => NamespaceHolder::Mount(MountNamespace::get_default(self)),
         }
     }
 
@@ -176,6 +193,10 @@ impl ProcNamespaces {
                 self.time_namespace = ns.clone();
                 None
             }
+            NamespaceHolder::Mount(ns) => {
+                self.mount_namespace = ns.clone();
+                None
+            }
         };
         Ok(fn_to_call)
     }
@@ -186,6 +207,7 @@ impl ProcNamespaces {
             NamespaceHolder::Mem(ns) => ns.get_id(),
             NamespaceHolder::OpenFile(ns) => ns.get_id(),
             NamespaceHolder::Time(ns) => ns.get_id(),
+            NamespaceHolder::Mount(ns) => ns.get_id(),
         };
         let index = self
             .owned_namespaces
@@ -226,6 +248,7 @@ impl NamespaceHolder {
             NamespaceHolder::Mem(ns) => ns.get_id(),
             NamespaceHolder::OpenFile(ns) => ns.get_id(),
             NamespaceHolder::Time(ns) => ns.get_id(),
+            NamespaceHolder::Mount(ns) => ns.get_id(),
         }
     }
 
@@ -235,6 +258,7 @@ impl NamespaceHolder {
             NamespaceHolder::Mem(_) => NamespaceType::Mem,
             NamespaceHolder::OpenFile(_) => NamespaceType::OpenFile,
             NamespaceHolder::Time(_) => NamespaceType::Time,
+            NamespaceHolder::Mount(_) => NamespaceType::Mount,
         }
     }
 
@@ -263,6 +287,12 @@ impl NamespaceHolder {
                     return kerror!(InvalidArgument);
                 };
                 Ok(NamespaceHolder::Time(Arc::new(new_ns)))
+            }
+            NamespaceHolder::Mount(other_ns) => {
+                let Ok(new_ns) = MountNamespace::create_from(id, other_ns) else {
+                    return kerror!(InvalidArgument);
+                };
+                Ok(NamespaceHolder::Mount(Arc::new(new_ns)))
             }
         }
     }
@@ -293,6 +323,12 @@ impl NamespaceHolder {
                 };
                 Ok(NamespaceHolder::Time(Arc::new(new_ns)))
             }
+            NamespaceHolder::Mount(other_ns) => {
+                let Ok(new_ns) = MountNamespace::create_empty(id, other_ns) else {
+                    return kerror!(InvalidArgument);
+                };
+                Ok(NamespaceHolder::Mount(Arc::new(new_ns)))
+            }
         }
     }
 
@@ -307,6 +343,8 @@ impl NamespaceHolder {
             NamespaceHolder::OpenFile(_) => return None,
             NamespaceHolder::Time(ns) if ns.get().type_id() == type_id => Arc::into_raw(ns.clone()) as *const T,
             NamespaceHolder::Time(_) => return None,
+            NamespaceHolder::Mount(ns) if ns.get().type_id() == type_id => Arc::into_raw(ns.clone()) as *const T,
+            NamespaceHolder::Mount(_) => return None,
             //no wildcard to get exhaustiveness checking
         };
         Some(unsafe { Arc::from_raw(raw_ptr) })
@@ -319,6 +357,8 @@ impl NamespaceType {
             0 => Some(Self::Syscall),
             1 => Some(Self::Mem),
             2 => Some(Self::OpenFile),
+            3 => Some(Self::Time),
+            4 => Some(Self::Mount),
             _ => None,
         }
     }
@@ -329,6 +369,7 @@ impl NamespaceType {
             NamespaceType::Mem => 1,
             NamespaceType::OpenFile => 2,
             NamespaceType::Time => 3,
+            NamespaceType::Mount => 4,
         }
     }
 }

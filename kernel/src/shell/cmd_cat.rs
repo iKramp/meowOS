@@ -5,7 +5,7 @@ use crate::{
         addresses::{VirtAddr, owned_phys_slice_to_non_owned},
         physical_allocator,
     },
-    proc::CommandSplitter,
+    proc::{CommandSplitter, namespaces::get_kernel_mount_namespace},
     shell::AsyncCommandRetType,
     tty::TTY,
     vfs::{self, file::OpenFlags},
@@ -21,7 +21,7 @@ pub(super) fn cmd_cat(args: CommandSplitter) -> AsyncCommandRetType {
 async fn cmd_cat_internal(mut args: CommandSplitter) -> Result<(), KernelError> {
     let path = args.next().ok_or(kerror_unwrapped!(InvalidArgument))?;
     let resolved_path = vfs::resolve_path(&path);
-    let file_handle = vfs::open_file((&resolved_path).into(), None, OpenFlags(1)).await?;
+    let file_handle = vfs::open_file((&resolved_path).into(), None, OpenFlags(1), &get_kernel_mount_namespace()).await?;
     let file_info = vfs::stat_file(&file_handle).await;
     let file_size = file_info.size;
     drop(file_info);

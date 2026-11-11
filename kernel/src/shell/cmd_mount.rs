@@ -5,7 +5,7 @@ use std::kerror_unwrapped;
 
 use uuid::Uuid;
 
-use crate::proc::CommandSplitter;
+use crate::proc::{CommandSplitter, namespaces};
 use crate::shell::AsyncCommandRetType;
 use crate::vfs::{self};
 
@@ -31,5 +31,5 @@ pub async fn cmd_mount_internal(mut args: CommandSplitter) -> Result<(), KernelE
         _ => Uuid::from_str(&part_id).map_err(|_| kerror_unwrapped!(InvalidArgument))?,
     };
 
-    vfs::mount_blkdev_partition(part_id, resolved_mountpoint).await
+    vfs::mount_blkdev_partition(part_id, resolved_mountpoint, &namespaces::get_kernel_mount_namespace()).await
 }

@@ -12,6 +12,7 @@ use crate::proc::ProcessData;
 use crate::proc::SCHEDULER;
 use crate::proc::SyscallNamespace;
 use crate::proc::TimeNamespace;
+use crate::proc::namespaces;
 use crate::proc::namespaces::MemoryNamespace;
 use crate::proc::namespaces::OpenFileNamespace;
 use crate::proc::process_data::CpuStateType;
@@ -60,7 +61,13 @@ pub fn create_process_from_context(context_info: &ContextInfo, cwd: FileHandle) 
         is_32_bit,
         cmdline,
         CpuStateType::Interrupt(cpu_state),
-        ProcNamespaces::new(memory_namespace, syscall_namespace, open_file_namespace, time_namespace),
+        ProcNamespaces::new(
+            memory_namespace,
+            syscall_namespace,
+            open_file_namespace,
+            time_namespace,
+            namespaces::get_kernel_mount_namespace(),
+        ),
     );
 
     let mut scheduler_lock = lock_w_info!(SCHEDULER);

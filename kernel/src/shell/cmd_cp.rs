@@ -2,7 +2,7 @@ use std::{alloc::borrow::ToOwned, boxed::Box, error::KernelError, kerror, kerror
 
 use crate::{
     memory::physical_allocator,
-    proc::CommandSplitter,
+    proc::{CommandSplitter, namespaces::get_kernel_mount_namespace},
     shell::AsyncCommandRetType,
     vfs::{self, file::FileHandle},
 };
@@ -24,7 +24,13 @@ async fn cmd_cp_internal(mut args: CommandSplitter) -> Result<(), KernelError> {
 
     let resolved_dest_path = crate::vfs::resolve_path(&dest_path);
 
-    let source_file = vfs::open_file((&resolved_source_path).into(), None, *vfs::file::OpenFlags(0).set_read(true)).await?;
+    let source_file = vfs::open_file(
+        (&resolved_source_path).into(),
+        None,
+        *vfs::file::OpenFlags(0).set_read(true),
+        &get_kernel_mount_namespace(),
+    )
+    .await?;
     let file_name = resolved_source_path
         .get(resolved_source_path.iter().count() - 1)
         .ok_or(kerror_unwrapped!(InvalidArgument))?
@@ -33,6 +39,7 @@ async fn cmd_cp_internal(mut args: CommandSplitter) -> Result<(), KernelError> {
         (&resolved_dest_path).into(),
         None,
         *vfs::file::OpenFlags(0).set_read(true).set_write(true),
+        &get_kernel_mount_namespace(),
     )
     .await?;
 
@@ -94,6 +101,7 @@ async fn copy_dir(
         resolved_dest_path,
         None,
         *vfs::file::OpenFlags(0).set_read(true).set_write(true),
+        &get_kernel_mount_namespace(),
     )
     .await?;
     let direntries = vfs::get_dir_entries(source).await?;
@@ -102,7 +110,13 @@ async fn copy_dir(
         let entry_name = entry.name;
         source_path.push(entry_name.clone());
         let resolved_src_path = vfs::validate_path(source_path)?;
-        let entry_file = vfs::open_file(resolved_src_path, None, *vfs::file::OpenFlags(0).set_read(true)).await?;
+        let entry_file = vfs::open_file(
+            resolved_src_path,
+            None,
+            *vfs::file::OpenFlags(0).set_read(true),
+            &get_kernel_mount_namespace(),
+        )
+        .await?;
 
         copy_inode(&entry_file, source_path, &dest_dir, dest_path, &entry_name).await?;
         source_path.pop();
@@ -128,6 +142,7 @@ async fn copy_file(
         resolved_dest_path,
         None,
         *vfs::file::OpenFlags(0).set_read(true).set_write(true),
+        &get_kernel_mount_namespace(),
     )
     .await?;
 

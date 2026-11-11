@@ -17,6 +17,7 @@ struct NamespaceIds {
     syscall_namespace: u64,
     open_file_namespace: u64,
     time_namespace: u64,
+    mount_namespace: u64,
 }
 
 //This changes based on the architecture

@@ -1,3 +1,4 @@
+use core::fmt::Debug;
 use core::sync::atomic::{
     AtomicBool, AtomicU64,
     Ordering::{self, Relaxed},
@@ -13,11 +14,11 @@ use std::{
         no_int_spinlock::NoIntSpinlockGuard,
     },
     vec::Vec,
-    w_lock_w_info,
 };
 
 use uuid::Uuid;
 
+use crate::proc::namespaces::MountNamespace;
 use crate::{
     drivers::{
         block_device::disk::{BlockDevice, DirEntry, MountedPartition, PartitionSchemeDriver},
@@ -25,7 +26,7 @@ use crate::{
     },
     memory::addresses::PhysAddr,
     vfs::{
-        GLOBAL_MOUNTS, Inode, InodeIdentifier,
+        Inode, InodeIdentifier,
         file::{OpenFlags, get_open_file},
     },
 };
@@ -128,7 +129,11 @@ fn remove_disk_slow(uuid: Uuid, mut vfs: NoIntSpinlockGuard<'_, Vfs>) {
 }
 
 #[heap_future::heap_future]
-pub async fn mount_blkdev_partition(part_id: Uuid, mountpoint: ResolvedPath) -> Result<(), KernelError> {
+pub async fn mount_blkdev_partition(
+    part_id: Uuid,
+    mountpoint: ResolvedPath,
+    namespace: &MountNamespace,
+) -> Result<(), KernelError> {
     let mut vfs = lock_w_info!(VFS);
     let Some(partition) = vfs.available_partitions.get(&part_id) else {
         return kerror!(NoEntry);
@@ -157,7 +162,7 @@ pub async fn mount_blkdev_partition(part_id: Uuid, mountpoint: ResolvedPath) -> 
         partition,
     };
     let fs = fs_factory.mount(mounted_partition).await;
-    if let Err(e) = mount_filesystem(mountpoint, fs.clone(), part_id).await {
+    if let Err(e) = mount_filesystem(mountpoint, fs.clone(), part_id, namespace).await {
         let _ = fs.unmount().await; //double error...???
         Err(e)
     } else {
@@ -167,16 +172,24 @@ pub async fn mount_blkdev_partition(part_id: Uuid, mountpoint: ResolvedPath) -> 
 
 ///Not dealing with namespace mounts yet, all is global
 #[heap_future::heap_future]
-async fn mount_filesystem(mountpoint: ResolvedPath, fs: Arc<dyn FileSystem + Send>, part_id: Uuid) -> Result<(), KernelError> {
+async fn mount_filesystem(
+    mountpoint: ResolvedPath,
+    fs: Arc<dyn FileSystem + Send>,
+    part_id: Uuid,
+    namespace: &MountNamespace,
+) -> Result<(), KernelError> {
     let root = mountpoint.inner().is_empty();
     println!("Mounting filesystem at {:?}", mountpoint.inner());
 
     if root {
         make_new_root_checks(&fs).await?;
-        mount_vfs_adapters(&fs).await;
+        mount_vfs_adapters(&fs, namespace).await;
     }
 
-    let (parent_inode, _parent_inode_chain) = fs_tree::get_inode_chain((&mountpoint).into(), None, None).await?;
+    let mount_iterator = unsafe { namespace.get_iterator() };
+    let (parent_inode, _parent_inode_chain) =
+        fs_tree::get_inode_chain((&mountpoint).into(), None, mount_iterator.2.clone()).await?;
+    drop(mount_iterator);
     let inode_id = InodeIdentifier {
         device_id: fs.device_id(),
         index: ROOT_INODE_INDEX,
@@ -184,7 +197,7 @@ async fn mount_filesystem(mountpoint: ResolvedPath, fs: Arc<dyn FileSystem + Sen
 
     let mut vfs = lock_w_info!(VFS);
     vfs.mounted_filesystems.insert(part_id, fs);
-    mount_inode(parent_inode, inode_id);
+    mount_inode(parent_inode, inode_id, namespace, false);
 
     drop(vfs);
 
@@ -222,19 +235,17 @@ async fn make_new_root_checks(fs: &Arc<dyn FileSystem + Send>) -> Result<(), Ker
     Ok(())
 }
 
-fn mount_inode(parent_inode: InodeIdentifier, child_inode: InodeIdentifier) {
-    let mut global_mounts = w_lock_w_info!(GLOBAL_MOUNTS);
-    global_mounts.insert(parent_inode, child_inode);
+fn mount_inode(parent_inode: InodeIdentifier, child_inode: InodeIdentifier, namespace: &MountNamespace, hidden: bool) {
+    namespace.add_mount_point(parent_inode, child_inode, hidden);
     //any other updates
 }
 
-fn unmount_inode(parent_inode: InodeIdentifier) {
-    let mut global_mounts = w_lock_w_info!(GLOBAL_MOUNTS);
-    global_mounts.remove(&parent_inode);
+fn unmount_inode(parent_inode: InodeIdentifier, namespace: &MountNamespace) {
+    namespace.remove_mount_point(parent_inode);
     //any other updates
 }
 
-async fn mount_vfs_adapters(fs: &Arc<dyn FileSystem + Send>) {
+async fn mount_vfs_adapters(fs: &Arc<dyn FileSystem + Send>, namespace: &MountNamespace) {
     let proc_adapter = crate::vfs::adapters::ProcAdapter::get();
     let proc_adapter_partition_id = proc_adapter.partition_id();
     let tty_adapter = crate::vfs::adapters::TtyAdapter::get();
@@ -288,11 +299,13 @@ async fn mount_vfs_adapters(fs: &Arc<dyn FileSystem + Send>) {
                 index: entry.inode,
             },
             inode_id,
+            namespace,
+            false,
         );
     }
 }
 
-pub async fn unmount(path: ResolvedPathBorrowed<'_>) -> Result<(), KernelError> {
+pub async fn unmount(path: ResolvedPathBorrowed<'_>, namespace: &MountNamespace) -> Result<(), KernelError> {
     if path.inner().is_empty() {
         unimplemented!("Unmounting root filesystem is not supported yet");
         //TODO: update fs_tree root
@@ -300,7 +313,9 @@ pub async fn unmount(path: ResolvedPathBorrowed<'_>) -> Result<(), KernelError> 
 
     let path_len = path.inner().len();
     let without_last = if path_len > 1 { path.index(0..path_len - 1) } else { path };
-    let (parent_inode, _parent_chain) = fs_tree::get_inode_chain(without_last, None, None).await?;
+
+    let mount_iterator = unsafe { namespace.get_iterator() };
+    let (parent_inode, _parent_chain) = fs_tree::get_inode_chain(without_last, None, mount_iterator.2.clone()).await?;
 
     let inode = fs_tree::get_child(
         parent_inode,
@@ -309,13 +324,13 @@ pub async fn unmount(path: ResolvedPathBorrowed<'_>) -> Result<(), KernelError> 
             .to_string()
             .as_str(),
         false,
-        None,
+        mount_iterator.2.clone(),
     )
     .await?;
 
-    let inodes = fs_tree::resolve_mount_point(inode, None).ok_or(kerror_unwrapped!(NoEntry))?;
+    let inodes = fs_tree::resolve_mount_point(inode, mount_iterator.2).ok_or(kerror_unwrapped!(NoEntry))?;
 
-    unmount_inode(inodes.0);
+    unmount_inode(inodes.0, namespace);
 
     // if last_part_mount {
     //     let mut vfs = lock_w_info!(VFS);
@@ -336,13 +351,17 @@ pub async fn open_file(
     path: ResolvedPathBorrowed<'_>,
     from: Option<InodeIdentifierChain>,
     open_flags: OpenFlags,
+    namespace: &MountNamespace,
 ) -> Result<FileHandle, KernelError> {
     if open_flags.truncate() {
         println!(level:error, "Truncate on open is not supported yet");
         return kerror!(InvalidOperation);
     }
 
-    let (inode_index, inode_chain) = fs_tree::get_inode_chain(path, from, None).await?;
+    let mount_iterator = unsafe { namespace.get_iterator() };
+    let (inode_index, inode_chain) = fs_tree::get_inode_chain(path, from, mount_iterator.2.clone()).await?;
+    drop(mount_iterator);
+
     let chain_len = inode_chain.len();
     let parent_in_chain_index = if chain_len == 1 { 0 } else { chain_len - 2 };
     let open_file = get_open_file(inode_index, inode_chain[parent_in_chain_index]).await?;

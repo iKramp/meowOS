@@ -7,7 +7,7 @@ use std::vec::Vec;
 
 use crate::memory::addresses::*;
 use crate::memory::{physical_allocator, safe_memcpy_from_user, safe_memcpy_to_user};
-use crate::proc::namespaces::OpenFileNamespace;
+use crate::proc::namespaces::{MountNamespace, OpenFileNamespace};
 use crate::proc::syscall::{SyscallCpuState, SyscallHandler, SyscallPack, register_syscall_pack, string_from_args};
 use crate::proc::{self, ProcessData, syscall};
 use crate::task_runner::{self, PidOption};
@@ -70,9 +70,15 @@ fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
 
     let proc_mut = proc.get_mutable();
     let namespaces = proc_mut.get_namespaces();
-    let fs_namespace = namespaces
-        .get_namespace::<OpenFileNamespace>(namespace_id)
-        .expect("default fs namespace must exist");
+    let Some(fs_namespace) = namespaces.get_namespace::<OpenFileNamespace>(namespace_id) else {
+        println!("fopen: namespace {} not found", namespace_id);
+        proc.set_syscall_return(&[u64::MAX]);
+        return;
+    };
+
+    let mnt_namespace = namespaces
+        .get_namespace::<MountNamespace>(0)
+        .expect("default mount namespace must exist");
 
     let file_source: InodeIdentifierChain = if path.starts_with('/') {
         fs_namespace.get_root_chain()
@@ -94,7 +100,7 @@ fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let proc_clone = proc.downgrade();
     let task = Box::pin(async move {
         let resolved_path = vfs::resolve_path(&path);
-        let handle = vfs::open_file((&resolved_path).into(), Some(file_source), flags).await;
+        let handle = vfs::open_file((&resolved_path).into(), Some(file_source), flags, &mnt_namespace).await;
         let Some(proc) = proc_clone.upgrade() else {
             return; //proc was killed
         };

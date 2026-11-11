@@ -9,6 +9,8 @@ Current namespace types and their enum values are:
 enum NamespaceType {
     Syscall = 0,
     Mem = 1,
-    Fs = 2,
+    OpenFile = 2,
+    Time = 3,
+    Mount = 4,
 }
 ```
