@@ -7,7 +7,7 @@ For now /input, but will move to /dev/input in the future.
 
 ## Structure:
 `input/all` -> aggregated events from all input devices
-`input/<device>` -> events from a specific input device, where `<device>` is the name of the device (e.g. keyboard, mouse, controller)
+`input/<device>` -> events from a specific type of input device, where `<device>` is the name of the device type (e.g. keyboard, mouse, controller)
 `input/<device_id>` -> events from a specific input device, where `<device_id>` is the id of the device (will at some point be connected to /dev/somewhere devices)
 
 The structure of a generated evnet:
