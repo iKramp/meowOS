@@ -1,14 +1,14 @@
 use core::sync::atomic::AtomicU64;
-use std::{boxed::Box, lock_w_info, queue::DataQueueHead, sync::no_int_spinlock::NoIntSpinlock};
+use std::{boxed::Box, ring_queue::RingQueue};
 
 use crate::net::{self, address_pair::AddressPair, packet::ProcessedPacket, protocols::NetAddress};
 
-const SOCKET_QUEUE_SIZE: usize = 1024;
+const SOCKET_QUEUE_SIZE: u16 = 1024;
 static SOCKET_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub struct NetSocket {
     addresses: Box<[AddressPair<NetAddress>]>,
-    queue: NoIntSpinlock<DataQueueHead<ProcessedPacket>>,
+    queue: RingQueue<ProcessedPacket>,
     id: u64,
 }
 
@@ -16,7 +16,7 @@ impl NetSocket {
     pub fn new(addresses: Box<[AddressPair<NetAddress>]>) -> NetSocket {
         NetSocket {
             addresses,
-            queue: NoIntSpinlock::new(DataQueueHead::new(SOCKET_QUEUE_SIZE)),
+            queue: RingQueue::new(SOCKET_QUEUE_SIZE),
             id: SOCKET_ID_COUNTER.fetch_add(1, core::sync::atomic::Ordering::SeqCst),
         }
     }
@@ -38,10 +38,10 @@ impl NetSocket {
     }
 
     pub fn push_packet(&self, packet: ProcessedPacket) {
-        lock_w_info!(self.queue).push(packet)
+        self.queue.push(packet);
     }
 
     pub fn get_packet(&self) -> Option<ProcessedPacket> {
-        lock_w_info!(self.queue).get_first()
+        self.queue.get_first()
     }
 }

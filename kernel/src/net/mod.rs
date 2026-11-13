@@ -15,9 +15,9 @@ use core::hash::SipHasher;
 use core::mem::MaybeUninit;
 use std::boxed::Box;
 use std::cow::Acow;
-use std::lock_w_info;
 use std::println;
-use std::sync::no_int_spinlock::NoIntSpinlock;
+use std::ring_queue::RingQueue;
+use std::sync::once_lock::OnceLock;
 use std::vec::Vec;
 
 pub use flow::RoutingStep;
@@ -35,7 +35,6 @@ use crate::net::protocols::NetAddress;
 use crate::net::protocols::arp::ProtocolAddr;
 use crate::rand::rand_u64;
 use crate::task_runner;
-use std::queue::*;
 
 pub type NicIdentifier = u32;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,9 +49,13 @@ static NIC_COUNTER: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU3
 
 static mut NET_INITIALIZED: bool = false;
 
-static NET_QUEUE: NoIntSpinlock<DataQueueHead<PacketInRouting>> = NoIntSpinlock::new(DataQueueHead::new(MAX_PACKETS));
+static NET_QUEUE: OnceLock<RingQueue<PacketInRouting>> = OnceLock::new();
 
 static mut NET_HASHER: MaybeUninit<SipHasher> = MaybeUninit::uninit();
+
+fn get_net_queue() -> &'static RingQueue<PacketInRouting> {
+    NET_QUEUE.get_or_init(|| RingQueue::new(MAX_PACKETS as u16))
+}
 
 pub(in crate::net) fn hash_addr_slice(addrs: &[AddressPair<NetAddress>]) -> u64 {
     let mut hasher = unsafe { NET_HASHER.assume_init_ref().clone() };
@@ -105,12 +108,8 @@ fn process_packets() {
         return;
     }
 
-    let mut new_queue = DataQueueHead::new(MAX_PACKETS);
-    let mut process_queue = lock_w_info!(NET_QUEUE);
-    std::mem::swap(&mut new_queue, &mut process_queue);
-    drop(process_queue);
-
-    while let Some(packet) = new_queue.get_first() {
+    let net_queue = get_net_queue();
+    while let Some(packet) = net_queue.get_first() {
         flow::process_packet_flow(packet);
     }
 }
@@ -119,11 +118,11 @@ pub(in crate::net) fn add_net_packet_to_queue(packet: PacketInRouting) {
     if !unsafe { NET_INITIALIZED } {
         return;
     }
-    lock_w_info!(NET_QUEUE).push(packet);
+    get_net_queue().push(packet);
 }
 
 pub fn append_raw_net_queue(
-    mut other: DataQueueHead<Vec<RawNetDataChunk>>,
+    other: impl IntoIterator<Item = Vec<RawNetDataChunk>>,
     nic_id: NicIdentifier,
     routing_step: RoutingStep,
     layer: NetLayerType,
@@ -131,22 +130,27 @@ pub fn append_raw_net_queue(
     if !unsafe { NET_INITIALIZED } {
         return;
     }
-    let mut net_queue = lock_w_info!(NET_QUEUE);
-    while let Some(packet) = other.get_first() {
-        let packet_in_routing = PacketInRouting {
-            data: Acow::new(NetPacket::new(packet, NetPacketSource::Nic(nic_id))),
-            routing_step,
-            layer,
-        };
-        net_queue.push(packet_in_routing);
-    }
+    let net_queue = get_net_queue();
+    let mapped = other.into_iter().map(|packet| PacketInRouting {
+        data: Acow::new(NetPacket::new(packet, NetPacketSource::Nic(nic_id))),
+        routing_step,
+        layer,
+    });
+    net_queue.append_iter(mapped);
 }
 
-pub(in crate::net) fn append_net_queue(other: DataQueueHead<PacketInRouting>) {
+pub(in crate::net) fn append_net_queue(other: RingQueue<PacketInRouting>) {
     if !unsafe { NET_INITIALIZED } {
         return;
     }
-    lock_w_info!(NET_QUEUE).append(other);
+    get_net_queue().append(other);
+}
+
+pub(in crate::net) fn append_net_queue_iter(iter: impl IntoIterator<Item = PacketInRouting>) {
+    if !unsafe { NET_INITIALIZED } {
+        return;
+    }
+    get_net_queue().append_iter(iter);
 }
 
 fn compute_internet_checksum(header: &[u8]) -> u16 {

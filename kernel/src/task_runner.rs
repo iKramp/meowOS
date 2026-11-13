@@ -89,7 +89,7 @@ impl AsyncTaskData {
     pub const fn new() -> Self {
         Self {
             task_id_counter: AtomicU64::new(0),
-            task_list: NoIntSpinlock::new(std::queue::DataQueueHead::new(100000)),
+            task_list: NoIntSpinlock::new(std::queue::DataQueueHead::new(usize::MAX)),
             tasks_to_wake: NoIntSpinlock::new(Vec::new()),
             // waiting_tasks: NoIntSpinlock::new(BTreeMap::new()),
             waiting_tasks: NoIntSpinlock::new(Vec::new()),

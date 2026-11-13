@@ -29,6 +29,7 @@ pub mod error;
 pub mod ffi_future;
 mod mem_utils;
 pub mod queue;
+pub mod ring_queue;
 
 pub mod cow;
 pub use core::any;

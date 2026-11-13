@@ -150,7 +150,7 @@ pub(super) fn init_receive(dev: &mut E1000eDevice) {
 
 pub(super) fn process_received_packets(dev: &E1000eDevice) {
     let packets = get_received_packets(dev);
-    let mut net_packet_list = std::queue::DataQueueHead::<Vec<RawNetDataChunk>>::new(packets.len());
+    let mut net_packet_list = Vec::with_capacity(packets.len());
 
     for mut packet in packets.into_iter() {
         let buffer = core::mem::replace(&mut packet.buffer, OwnedPhysRange::empty());

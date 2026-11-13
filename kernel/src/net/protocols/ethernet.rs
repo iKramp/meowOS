@@ -62,7 +62,8 @@ fn bridge_hook(packet: &mut Acow<NetPacket>) -> HookResult {
 
     let out_macs = routing_tables::get_mac_bridges(&mac);
 
-    let mut out_queue = std::queue::DataQueueHead::<PacketInRouting>::new(out_macs.len());
+    // let mut out_queue = std::queue::DataQueueHead::<PacketInRouting>::new(out_macs.len());
+    let mut out_queue = Vec::with_capacity(out_macs.len());
     for out_mac in out_macs {
         if out_mac == mac {
             continue;
@@ -105,7 +106,7 @@ fn bridge_hook(packet: &mut Acow<NetPacket>) -> HookResult {
         out_queue.push(new_packet);
     }
 
-    net::append_net_queue(out_queue);
+    net::append_net_queue_iter(out_queue);
 
     HookResult::Drop
 }

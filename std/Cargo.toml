@@ -11,6 +11,7 @@ static_mut_refs = "allow"
 crate-type = ["rlib"]
 
 [dependencies]
+bitfield = { git = "https://github.com/iKramp/rust-bitfield.git" } 
 
 [features]
 test_includes = []
