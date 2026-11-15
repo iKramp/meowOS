@@ -47,6 +47,7 @@ struct ExecArgs {
     start_ptr: u64,
     name_len: u64,
     name_ptr: u64,
+    clone_ns_table: bool,
 }
 
 fn exec(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
@@ -86,7 +87,7 @@ fn exec(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let Ok(namespaces) = proc
         .get_mutable()
         .get_namespaces()
-        .clone_from_ids(exec_args.namespaces.clone())
+        .clone_from_ids(exec_args.namespaces.clone(), exec_args.clone_ns_table)
     else {
         proc.set_syscall_return(&[u64::MAX]);
         return;

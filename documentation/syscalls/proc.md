@@ -49,6 +49,7 @@ struct ExecArgs {
     start_ptr: u64,
     name_len: u64,
     name_ptr: u64,
+    clone_ns_table: bool,
 }
 
 #[repr(C)]
@@ -70,7 +71,8 @@ struct FfiDuration {
 #### Description:
 Executes a new program with the environment defined in the Namespaces and RegisterState structures.
 The program starts executing at start_ptr
-namespace id 0 means clone current namespace
+Namespace id 0 means clone current namespace
+If clone_ns_table is false, a new table is constructed from namespaces used. Otherwise, it is cloned from the current process
 
 ### Syscall 1: exit
 #### Args:

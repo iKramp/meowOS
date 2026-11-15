@@ -96,7 +96,7 @@ impl ProcNamespaces {
         }
     }
 
-    pub(in crate::proc) fn clone_from_ids(&self, mut ids: NamespaceIds) -> Result<Self, KernelError> {
+    pub(in crate::proc) fn clone_from_ids(&self, mut ids: NamespaceIds, clone_table: bool) -> Result<Self, KernelError> {
         //defaults
         if ids.memory_namespace == 0 {
             ids.memory_namespace = self.memory_namespace.get_id();
@@ -129,13 +129,25 @@ impl ProcNamespaces {
         let Some(NamespaceHolder::Mount(mount_namespace)) = self.get_namespace_holder(ids.mount_namespace) else {
             return kerror!(InvalidArgument);
         };
-        Ok(Self::new(
-            memory_namespace.clone(),
-            syscall_namespace.clone(),
-            open_file_namespace.clone(),
-            time_namespace.clone(),
-            mount_namespace.clone(),
-        ))
+        if !clone_table {
+            Ok(Self::new(
+                memory_namespace.clone(),
+                syscall_namespace.clone(),
+                open_file_namespace.clone(),
+                time_namespace.clone(),
+                mount_namespace.clone(),
+            ))
+        } else {
+            let owned_namespaces = self.owned_namespaces.clone();
+            Ok(Self {
+                owned_namespaces,
+                memory_namespace: memory_namespace.clone(),
+                syscall_namespace: syscall_namespace.clone(),
+                open_file_namespace: open_file_namespace.clone(),
+                time_namespace: time_namespace.clone(),
+                mount_namespace: mount_namespace.clone(),
+            })
+        }
     }
 
     pub fn get_namespace<T: ProcNamespace>(&self, id: u64) -> Option<Arc<T>> {
