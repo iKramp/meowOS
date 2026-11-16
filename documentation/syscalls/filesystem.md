@@ -12,6 +12,7 @@
 | 6 | flink | creates a hard link to a file |
 | 7 | funlink | unlinks a file |
 | 8 | fstat | gets information about a file descriptor |
+| 9 | send_file | sends a file descriptor to another namespace |
 
 
 ## DETAILED SYSCALL DOCUMENTATION
@@ -213,3 +214,15 @@ pub struct Inode {
 ///The bottom 24 bits represent [`InodePermissionFlags`]
 pub struct InodeTypeAndPerms(u32);
 ```
+
+### Syscall 9: send_file
+#### Args:
+1. u64 fd - file descriptor to send
+1. u64 target_namespace - namespace to send the file descriptor to
+#### Return Value:
+ - On success, returns 0
+ - On failure, returns -1
+#### Description:
+Sends the file descriptor fd to another namespace specified by target_namespace. The operation fails if
+the target namespace already has a file descriptor with the same fd. The file remains open in the current namespace, but the open files
+are not linked (read on one does not advance the other)

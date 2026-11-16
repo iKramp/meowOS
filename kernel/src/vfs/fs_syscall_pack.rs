@@ -11,7 +11,7 @@ use crate::proc::namespaces::{MountNamespace, OpenFileNamespace};
 use crate::proc::syscall::{SyscallCpuState, SyscallHandler, SyscallPack, register_syscall_pack, string_from_args};
 use crate::proc::{self, ProcessData, syscall};
 use crate::task_runner::{self, PidOption};
-use crate::vfs::file::OpenFlags;
+use crate::vfs::file::{FileHandle, OpenFlags};
 use crate::vfs::{self, InodeIdentifierChain, InodePermissionFlags, InodeType, InodeTypeAndPerms};
 
 pub(super) fn init_fs_syscall_pack() {
@@ -25,6 +25,7 @@ pub(super) fn init_fs_syscall_pack() {
         (flink, "flink"),
         (funlink, "funlink"),
         (fstat, "fstat"),
+        (send_file, "send_file"),
     ];
 
     let fs_syscalls = SyscallPack::new(Box::new(handlers));
@@ -113,14 +114,16 @@ fn fopen(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
                     .expect("default fs namespace must exist");
                 let f_descriptor = fs_namespace.open_file_handle(handle, fd);
                 drop(proc_mut);
+                let Ok(f_descriptor) = f_descriptor else {
+                    proc.set_syscall_return(&[u64::MAX]);
+                    return;
+                };
                 proc.set_syscall_return(&[f_descriptor]);
             }
             Err(_) => {
-                println!("fopen: failed to open file at path {path}");
                 proc.set_syscall_return(&[u64::MAX]);
             }
         }
-        println!("fopen: finished processing fopen for pid {pid:?}");
         proc::wake_process(pid)
     });
 
@@ -608,4 +611,37 @@ fn fstat(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
 
     task_runner::add_task(ffi_safe_task, PidOption::Some(pid));
     proc.set_sleeping(true);
+}
+
+fn send_file(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
+    let namespace_id = args.get_namespace_id();
+    let fd = args.get_arg(0);
+    let target_namespace_id = args.get_arg(1);
+
+    let proc_mut = proc.get_mutable();
+    let namespaces = proc_mut.get_namespaces();
+    let fs_namespace = namespaces
+        .get_namespace::<OpenFileNamespace>(namespace_id)
+        .expect("default fs namespace must exist");
+    let target_fs_namespace = namespaces
+        .get_namespace::<OpenFileNamespace>(target_namespace_id)
+        .expect("target fs namespace must exist");
+    drop(proc_mut);
+
+    let Some(file_handle) = fs_namespace.get_file_handle(fd) else {
+        println!("send_file: invalid fd {fd}");
+        proc.set_syscall_return(&[u64::MAX]);
+        return;
+    };
+
+    let new_fd = target_fs_namespace.open_file_handle(FileHandle::clone_from(&file_handle), Some(fd));
+
+    match new_fd {
+        Ok(new_fd) => {
+            proc.set_syscall_return(&[new_fd]);
+        }
+        Err(_) => {
+            proc.set_syscall_return(&[u64::MAX]);
+        }
+    }
 }

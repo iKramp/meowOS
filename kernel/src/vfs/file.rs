@@ -1,7 +1,7 @@
 use core::{
     any::Any,
     future::AsyncDrop,
-    mem::ManuallyDrop,
+    mem::{ManuallyDrop, MaybeUninit},
     sync::atomic::{AtomicBool, AtomicU64},
 };
 use std::fmt::Debug;
@@ -95,10 +95,9 @@ impl FileHandle {
     }
 }
 
-//TODO: check if this Arc is needed
 #[derive(Debug)]
 pub(in crate::vfs) struct OpenFile {
-    pub inode: ManuallyDrop<Arc<AsyncRWlock<Inode>>>,
+    pub inode: ManuallyDrop<AsyncRWlock<Inode>>,
 }
 
 bitfield! {
@@ -190,7 +189,7 @@ pub(in crate::vfs) async fn get_open_file(
 
     let empty_inode = unsafe { Inode::empty() };
     let dummy_open_file = Arc::new(OpenFile {
-        inode: ManuallyDrop::new(Arc::new(AsyncRWlock::new(empty_inode))),
+        inode: ManuallyDrop::new(AsyncRWlock::new(empty_inode)),
     });
     let open_file_clone = dummy_open_file.clone();
     let mut inode_lock = open_file_clone.inode.lock_write().await; //instant because no other holders exist
@@ -206,8 +205,8 @@ pub(in crate::vfs) async fn get_open_file(
 impl Drop for OpenFile {
     fn drop(&mut self) {
         //anything as long as arc doesn't error. It's in ManuallyDrop
-        let dummy_arc = unsafe { Arc::from_raw(0x1000 as *const AsyncRWlock<Inode>) };
-        let mut dummy_manually_drop = ManuallyDrop::new(dummy_arc);
+        let dummy_inode = unsafe { MaybeUninit::uninit().assume_init() };
+        let mut dummy_manually_drop = ManuallyDrop::new(dummy_inode);
 
         core::mem::swap(&mut self.inode, &mut dummy_manually_drop);
 

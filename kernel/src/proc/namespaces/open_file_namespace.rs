@@ -2,7 +2,7 @@ use std::{
     alloc::vec::Vec,
     collections::btree_map::BTreeMap,
     error::KernelError,
-    lock_w_info, r_lock_w_info,
+    kerror, lock_w_info, r_lock_w_info,
     sync::{arc::Arc, no_int_spinlock::NoIntSpinlock, rw_lock::RWSpinlock},
     w_lock_w_info,
 };
@@ -40,24 +40,33 @@ impl OpenFileNamespace {
         }
     }
 
-    pub fn open_file_handle(&self, file_handle: FileHandle, requested: Option<FileDescriptor>) -> FileDescriptor {
+    pub fn open_file_handle(
+        &self,
+        file_handle: FileHandle,
+        requested: Option<FileDescriptor>,
+    ) -> Result<FileDescriptor, KernelError> {
         let mut internal = w_lock_w_info!(self.open_files);
-        'requested: {
-            if let Some(fd) = requested {
-                if internal.open_files.contains_key(&fd) {
-                    break 'requested;
-                }
-                if fd >= internal.file_handle_counter {
-                    internal.file_handle_counter = fd + 1;
-                }
-                internal.open_files.insert(fd, Arc::new(file_handle));
-                return fd;
+        if let Some(fd) = requested {
+            if internal.open_files.contains_key(&fd) {
+                return kerror!(InvalidArgument);
             }
+            if fd >= internal.file_handle_counter {
+                internal.file_handle_counter = fd + 1;
+            }
+            internal.open_files.insert(fd, Arc::new(file_handle));
+            Ok(fd)
+        } else {
+            //handle overflow, potential vuln. Under normal operation this can't happen,
+            //so simply not doing anything in this case is fine
+            if internal.open_files.contains_key(&internal.file_handle_counter) {
+                return kerror!(InvalidArgument);
+            }
+
+            let fd = internal.file_handle_counter;
+            internal.file_handle_counter += 1;
+            internal.open_files.insert(fd, Arc::new(file_handle));
+            Ok(fd)
         }
-        let fd = internal.file_handle_counter;
-        internal.file_handle_counter += 1;
-        internal.open_files.insert(fd, Arc::new(file_handle));
-        fd
     }
 
     pub fn get_inode(&self, fd: FileDescriptor) -> Option<InodeIdentifier> {
