@@ -94,6 +94,11 @@ impl SyscallNamespace {
             return kerror!(InvalidArgument);
         };
 
+        if mapped_syscalls.iter().find(|e| e.pack_id == pack_id).is_some() {
+            //already mapped
+            return kerror!(InvalidArgument);
+        };
+
         mapped_syscalls.insert(
             pos,
             MappedSyscallPack {
