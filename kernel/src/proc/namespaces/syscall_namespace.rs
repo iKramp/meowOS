@@ -19,11 +19,19 @@ struct MappedSyscallPack {
     pack: Arc<SyscallPack>,
 }
 
+#[derive(Debug, Clone)]
+struct RestrictedSyscallPack {
+    mask: u32,
+    pack_id: u64,
+}
+
 #[derive(Debug)]
 pub(in crate::proc) struct SyscallNamespace {
     id: u64,
     //sorted by index
     mapped_syscalls: NoIntSpinlock<Vec<MappedSyscallPack>>,
+    //not sorted, more rare operations, instead use swap_remove
+    restricted_syscalls: NoIntSpinlock<Vec<RestrictedSyscallPack>>,
 }
 
 impl ProcNamespace for SyscallNamespace {
@@ -31,19 +39,24 @@ impl ProcNamespace for SyscallNamespace {
         self.id
     }
 
-    fn create_empty(id: u64, _other: &Self) -> Result<Self, KernelError> {
+    fn create_empty(id: u64, other: &Self) -> Result<Self, KernelError> {
+        let other_restricted_syscalls = lock_w_info!(other.restricted_syscalls);
         //don't clone
         Ok(Self {
             id,
             mapped_syscalls: NoIntSpinlock::new(Vec::new()),
+            restricted_syscalls: NoIntSpinlock::new(other_restricted_syscalls.clone()),
         })
     }
 
     fn create_from(id: u64, other: &Self) -> Result<Self, KernelError> {
+        let other_restricted_syscalls = lock_w_info!(other.restricted_syscalls);
         let new_namespace = Self {
             id,
             mapped_syscalls: NoIntSpinlock::new(Vec::new()),
+            restricted_syscalls: NoIntSpinlock::new(other_restricted_syscalls.clone()),
         };
+        drop(other_restricted_syscalls);
         let other_mapped_syscalls = lock_w_info!(other.mapped_syscalls);
         let mut mapped_syscalls = lock_w_info!(new_namespace.mapped_syscalls);
         mapped_syscalls.clear();
@@ -69,6 +82,7 @@ impl SyscallNamespace {
         let ns = Self {
             id,
             mapped_syscalls: NoIntSpinlock::new(Vec::new()),
+            restricted_syscalls: NoIntSpinlock::new(Vec::new()),
         };
 
         let (syscall_pack, pack_id) = syscall::get_syscall_pack("syscall_management").expect("syscall pack not found");
@@ -88,6 +102,7 @@ impl SyscallNamespace {
         }
 
         let mut mapped_syscalls = lock_w_info!(self.mapped_syscalls);
+        let mut restricted_syscalls = lock_w_info!(self.restricted_syscalls);
 
         let Err(pos) = mapped_syscalls.binary_search_by(|e| e.base.cmp(&base_index)) else {
             //already mapped
@@ -99,11 +114,20 @@ impl SyscallNamespace {
             return kerror!(InvalidArgument);
         };
 
+        let restricted = restricted_syscalls.iter().position(|e| e.pack_id == pack_id);
+        let mask = if let Some(pos) = restricted {
+            let mask = restricted_syscalls[pos].mask;
+            restricted_syscalls.swap_remove(pos);
+            mask
+        } else {
+            u32::MAX
+        };
+
         mapped_syscalls.insert(
             pos,
             MappedSyscallPack {
                 base: base_index,
-                mask: u32::MAX,
+                mask,
                 pack,
                 pack_id,
             },
@@ -117,6 +141,15 @@ impl SyscallNamespace {
         let pos = mapped_syscalls.binary_search_by(|m| m.pack_id.cmp(&offset));
         match pos {
             Ok(pos) => {
+                let restricted = RestrictedSyscallPack {
+                    mask: mapped_syscalls[pos].mask,
+                    pack_id: mapped_syscalls[pos].pack_id,
+                };
+                if restricted.mask != u32::MAX {
+                    let mut restricted_syscalls = lock_w_info!(self.restricted_syscalls);
+                    restricted_syscalls.push(restricted);
+                }
+
                 mapped_syscalls.remove(pos);
                 Ok(())
             }
