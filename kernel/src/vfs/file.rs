@@ -205,6 +205,7 @@ pub(in crate::vfs) async fn get_open_file(
 impl Drop for OpenFile {
     fn drop(&mut self) {
         //anything as long as arc doesn't error. It's in ManuallyDrop
+        #[allow(clippy::uninit_assumed_init, invalid_value)]
         let dummy_inode = unsafe { MaybeUninit::uninit().assume_init() };
         let mut dummy_manually_drop = ManuallyDrop::new(dummy_inode);
 

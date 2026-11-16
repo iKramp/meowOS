@@ -130,9 +130,9 @@ fn mmap(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     };
 
     let ret = if region_id == 0 {
-        memory_namespace.get_range_from_address(VirtAddr(offset))
+        memory_namespace.get_shared_range_from_address(VirtAddr(offset))
     } else {
-        memory_namespace.get_range_from_id(region_id)
+        memory_namespace.get_shared_range_from_id(region_id)
     };
 
     let Some((range, base_addr)) = ret else {
@@ -165,9 +165,9 @@ fn munmap(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     };
 
     let ret = if region_id == 0 {
-        memory_namespace.get_range_from_address(VirtAddr(offset))
+        memory_namespace.get_shared_range_from_address(VirtAddr(offset))
     } else {
-        memory_namespace.get_range_from_id(region_id)
+        memory_namespace.get_shared_range_from_id(region_id)
     };
 
     let Some((range, base_addr)) = ret else {
@@ -184,4 +184,30 @@ fn munmap(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let ret = range.free_manual_external(pages_start..pages_end);
     let err_code = if ret.is_ok() { 0 } else { u64::MAX };
     proc.set_syscall_return(&[err_code]);
+}
+
+fn send_region(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
+    let namespace_id = args.get_namespace_id();
+    let region_id = args.get_arg(0) as u32;
+    let target_namespace_id = args.get_arg(1);
+    let new_region_address = args.get_arg(2);
+
+    let mutable = proc.get_mutable();
+    let namespaces = mutable.get_namespaces();
+    let Some(memory_namespace) = namespaces.get_namespace::<MemoryNamespace>(namespace_id) else {
+        proc.set_syscall_return(&[u64::MAX]);
+        return;
+    };
+    let Some(target_memory_namespace) = namespaces.get_namespace::<MemoryNamespace>(target_namespace_id) else {
+        proc.set_syscall_return(&[u64::MAX]);
+        return;
+    };
+
+    let res = memory_namespace.send_memory_range(region_id, &target_memory_namespace, VirtAddr(new_region_address));
+    let Ok(new_region_id) = res else {
+        proc.set_syscall_return(&[u64::MAX]);
+        return;
+    };
+
+    proc.set_syscall_return(&[new_region_id as u64]);
 }

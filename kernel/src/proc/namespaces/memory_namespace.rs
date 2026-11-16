@@ -38,6 +38,7 @@ impl MemoryRangeType {
 pub(in crate::proc) struct OwnedVirtualMemoryRange {
     pub shared_range: Arc<VirtualMemoryRange>,
     pub name: Box<str>,
+    //really belongs in shared range but data there is management data, not metadata
     pub range_type: MemoryRangeType,
     pub map_address: VirtAddr,
     pub range_id: u32,
@@ -183,6 +184,27 @@ impl MemoryNamespace {
         Ok(counter)
     }
 
+    pub fn send_memory_range(
+        &self,
+        range_id: u32,
+        target_namespace: &MemoryNamespace,
+        new_map_address: VirtAddr,
+    ) -> Result<u32, KernelError> {
+        let dynamic = lock_w_info!(self.dynamic_data);
+        let range_info = dynamic
+            .memory_ranges
+            .iter()
+            .find(|r| r.range_id == range_id)
+            .ok_or(kerror_unwrapped!(NoEntry))?;
+        let new_range_id = target_namespace.add_mem_range(
+            range_info.shared_range.clone(),
+            range_info.name.clone(),
+            range_info.range_type,
+            new_map_address,
+        )?;
+        Ok(new_range_id)
+    }
+
     pub fn remove_mem_range_by_name(&self, name: &str) -> Result<(), KernelError> {
         let mut dynamic_data = lock_w_info!(self.dynamic_data);
         let index = dynamic_data
@@ -277,7 +299,7 @@ impl MemoryNamespace {
     }
 
     //returns (range, base address)
-    pub fn get_range_from_address(&self, addr: VirtAddr) -> Option<(Arc<VirtualMemoryRange>, VirtAddr)> {
+    pub fn get_shared_range_from_address(&self, addr: VirtAddr) -> Option<(Arc<VirtualMemoryRange>, VirtAddr)> {
         for range in lock_w_info!(self.dynamic_data).memory_ranges.iter() {
             let r_range = range.shared_range.reserved_range(range.map_address);
             if r_range.start <= addr && addr < r_range.end {
@@ -287,7 +309,7 @@ impl MemoryNamespace {
         None
     }
 
-    pub fn get_range_from_id(&self, id: u32) -> Option<(Arc<VirtualMemoryRange>, VirtAddr)> {
+    pub fn get_shared_range_from_id(&self, id: u32) -> Option<(Arc<VirtualMemoryRange>, VirtAddr)> {
         for range in lock_w_info!(self.dynamic_data).memory_ranges.iter() {
             if range.range_id == id {
                 return Some((range.shared_range.clone(), range.map_address));
@@ -302,7 +324,7 @@ impl MemoryNamespace {
         if !user_mode {
             return false;
         }
-        let Some((range, base_addr)) = self.get_range_from_address(addr) else {
+        let Some((range, base_addr)) = self.get_shared_range_from_address(addr) else {
             return false;
         };
         if !range.permissions().write() && write {

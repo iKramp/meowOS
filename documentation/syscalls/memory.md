@@ -9,6 +9,7 @@
 | 3 | set_prot | sets permissions for a region |
 | 4 | mmap | maps memory into a region |
 | 5 | munmap | unmaps memory from a region |
+| 6 | send_region | sends a region to another namespace |
 
 
 ## DETAILED SYSCALL DOCUMENTATION
@@ -116,3 +117,13 @@ If region is kernel managed:
  - Removes from (including) address to end of region. End is the farthest the region has grown in whatever direction.
    This is used for shrinking the stack or heap. Region stays contiguous.
  - NOT IMPLEMENTED YET!!!!!
+
+
+### Syscall 6: send_region
+#### Args:
+1. u64 region_id - ID of the region to send
+2. u64 target_namespace - namespace to send the region to
+3. u64 new_region_address
+#### Return Value:
+ - On success, returns the ID of the region in the target namespace
+ - On failure, returns -1

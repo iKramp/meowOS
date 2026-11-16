@@ -219,6 +219,7 @@ pub struct InodeTypeAndPerms(u32);
 #### Args:
 1. u64 fd - file descriptor to send
 1. u64 target_namespace - namespace to send the file descriptor to
+1. u64 new_fd - if set (not -1), the file descriptor will be sent as this fd in the target namespace
 #### Return Value:
  - On success, returns 0
  - On failure, returns -1

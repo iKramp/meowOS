@@ -617,6 +617,11 @@ fn send_file(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     let namespace_id = args.get_namespace_id();
     let fd = args.get_arg(0);
     let target_namespace_id = args.get_arg(1);
+    let mut target_fd = args.get_arg(2);
+
+    if target_fd == u64::MAX {
+        target_fd = fd;
+    }
 
     let proc_mut = proc.get_mutable();
     let namespaces = proc_mut.get_namespaces();
@@ -634,7 +639,7 @@ fn send_file(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         return;
     };
 
-    let new_fd = target_fs_namespace.open_file_handle(FileHandle::clone_from(&file_handle), Some(fd));
+    let new_fd = target_fs_namespace.open_file_handle(FileHandle::clone_from(&file_handle), Some(target_fd));
 
     match new_fd {
         Ok(new_fd) => {
