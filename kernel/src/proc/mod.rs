@@ -28,10 +28,12 @@ pub mod namespaces;
 mod proc_syscall_pack;
 mod process_data;
 mod scheduler;
+pub mod signal;
 pub mod syscall;
 mod time_syscall_pack;
 pub use context::CommandSplitter;
 pub use context_switch::{context_switch, interrupt_context_switch};
+pub use process_data::CpuStateType;
 pub use process_data::{ProcessData, StackCpuStateData};
 pub use scheduler::{release_current_proc, save_cpu_state};
 
@@ -140,11 +142,17 @@ pub fn kill_process(pid: Pid, status: u64) {
     let Some(process) = (unsafe { lock_w_info!(SCHEDULER).assume_init_mut().remove_process(pid) }) else {
         return;
     };
-    process.call_exit_hooks(status);
+    process.call_kill_tasks(status);
 }
 
 pub fn wake_process(pid: Pid) {
     let mut scheduler_lock = lock_w_info!(SCHEDULER);
     let scheduler = unsafe { scheduler_lock.assume_init_mut() };
     scheduler.wake_proc(pid);
+}
+
+pub fn sleep_process(pid: Pid) {
+    let mut scheduler_lock = lock_w_info!(SCHEDULER);
+    let scheduler = unsafe { scheduler_lock.assume_init_mut() };
+    scheduler.sleep_proc(pid);
 }

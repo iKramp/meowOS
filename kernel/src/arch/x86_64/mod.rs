@@ -1,7 +1,9 @@
 pub mod cpu_identification;
 pub mod cpu_locals;
+pub mod float;
 pub mod interrupts;
 pub mod memory;
 pub mod multiprocessing;
+pub mod signal;
 pub mod syscall;
 pub mod tsc;

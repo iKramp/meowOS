@@ -2,7 +2,7 @@ use crate::{
     arch::{self, memory::PAGING_LEVELS},
     interrupts::InterruptReturnType,
     memory::addresses::*,
-    proc::{ProcessData, kill_process, namespaces::memory_namespace::MemoryNamespace},
+    proc::{ProcessData, kill_process, namespaces::memory_namespace::MemoryNamespace, signal::signal_return_fn},
 };
 use std::{
     println, printlnc,
@@ -94,12 +94,23 @@ fn fatal_page_fault(cpu_data: &InterruptProcessorState, page_fault_addr: u64) ->
 }
 
 fn user_page_fault(
-    cpu_data: &InterruptProcessorState,
+    cpu_data: &mut InterruptProcessorState,
     proc_data: &Arc<ProcessData>,
     page_fault_addr: u64,
     error_code: PageFaultErrorCode,
 ) -> InterruptReturnType {
     let page_fault_start_time = Instant::now();
+
+    if page_fault_addr == signal_return_fn as *const () as u64 {
+        let success = signal_return_fn(cpu_data);
+        if success {
+            return InterruptReturnType::Normal;
+        } else {
+            println!(level:error, "Failed to return from signal handler for process {:?}", proc_data.pid());
+            kill_process(proc_data.pid(), 0xDEAD);
+            return InterruptReturnType::ForceReschedule;
+        }
+    }
 
     let proc_mut = proc_data.get_mutable();
     let namespaces = proc_mut.get_namespaces();

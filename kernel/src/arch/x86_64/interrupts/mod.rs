@@ -15,8 +15,13 @@ pub(in crate::arch::x86_64) use apic::LAPIC_REGISTERS;
 pub use apic::enable_apic;
 pub(super) use gdt::{STATIC_GDT_PTR, create_new_gdt, load_gdt};
 pub use ioapic::init_ioapic;
+pub(in crate::arch::x86_64) use macros::InterruptFrame;
 pub use macros::InterruptProcessorState;
 pub(in crate::arch::x86_64) use pic::disable_pic_completely;
+
+pub(in crate::arch::x86_64) const USER_STACK_SEGMENT: u64 = 0x1B;
+pub(in crate::arch::x86_64) const USER_CODE_SEGMENT: u64 = 0x23;
+pub(in crate::arch::x86_64) const DEFAULT_RFLAGS: u64 = 0x202; //interrupts enabled
 
 use crate::arch::{
     interrupts::{

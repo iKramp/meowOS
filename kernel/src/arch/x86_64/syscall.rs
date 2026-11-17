@@ -142,6 +142,10 @@ impl SyscallCpuState {
     pub fn get_namespace_id(&self) -> u64 {
         self.rbx
     }
+
+    pub fn get_stack_pointer(&self) -> u64 {
+        self.rsp
+    }
 }
 
 impl Debug for SyscallCpuState {

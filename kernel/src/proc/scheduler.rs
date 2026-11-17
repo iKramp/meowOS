@@ -51,6 +51,24 @@ impl Scheduler {
         }
     }
 
+    pub fn sleep_proc(&mut self, pid: Pid) {
+        let proc = self.tasks.get(&pid);
+        if let Some(proc) = proc {
+            proc.set_sleeping(true);
+        }
+
+        let ready_pos = self.ready_to_run.iter().position(|p| *p == pid);
+        if let Some(pos) = ready_pos {
+            self.ready_to_run.swap_remove(pos);
+            if proc.is_some() {
+                self.sleeping_tasks.push(pid);
+            } else {
+                println!(level:warn, "sleeping process {pid:?} that doesn't exist, removing from scheduler");
+                self.remove_process(pid);
+            }
+        }
+    }
+
     pub fn schedule(&mut self) -> Option<Arc<ProcessData>> {
         if self.ready_to_run.is_empty() {
             switch_to_generic_mem_tree();

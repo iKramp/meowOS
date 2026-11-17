@@ -13,7 +13,7 @@ use std::{
 use crate::{
     interrupts::InterruptProcessorState,
     memory::addresses::PhysAddr,
-    proc::{ProcNamespaces, syscall::SyscallCpuState},
+    proc::{ProcNamespaces, signal::SignalState, syscall::SyscallCpuState},
 };
 
 use super::Pid;
@@ -24,6 +24,7 @@ type ProcExitHook = Box<dyn FnOnce(u64) + Send>;
 pub struct ProcessData {
     pid: Pid,
     sleeping: AtomicBool,
+    killed: AtomicBool,
     is_32_bit: bool,
     page_tree_root: AtomicU64,
     cmdline: Box<str>,
@@ -34,6 +35,9 @@ pub struct ProcessData {
     proc_start_time: Instant,
     cpu_time_userspace: AtomicDuration,
     cpu_time_kernelspace: AtomicDuration,
+    //maybe a namespace with signal handlers, configuration,...
+    signal_state: SignalState,
+    in_signal_handler: AtomicBool,
 }
 
 impl Debug for ProcessData {
@@ -73,6 +77,16 @@ pub enum CpuStateType {
     None, //is currently running, was taken
 }
 
+impl CpuStateType {
+    pub fn get_stack_pointer(&self) -> Option<u64> {
+        match self {
+            CpuStateType::Interrupt(state) => Some(state.get_stack_pointer()),
+            CpuStateType::Syscall(state) => Some(state.get_stack_pointer()),
+            CpuStateType::None => None,
+        }
+    }
+}
+
 pub enum StackCpuStateData<'a> {
     Interrupt(&'a InterruptProcessorState),
     Syscall(&'a SyscallCpuState),
@@ -90,6 +104,7 @@ impl ProcessData {
         Self {
             pid,
             sleeping: AtomicBool::new(false),
+            killed: AtomicBool::new(false),
             is_32_bit,
             page_tree_root: AtomicU64::new(root.0),
             cmdline,
@@ -98,6 +113,8 @@ impl ProcessData {
             proc_start_time: Instant::now(),
             cpu_time_userspace: AtomicDuration::new(UsDuration::from_micros(0)),
             cpu_time_kernelspace: AtomicDuration::new(UsDuration::from_micros(0)),
+            signal_state: SignalState::new(),
+            in_signal_handler: AtomicBool::new(false),
         }
     }
 
@@ -105,11 +122,20 @@ impl ProcessData {
         lock_w_info!(self.internal)
     }
 
-    pub fn call_exit_hooks(&self, exit_code: u64) {
+    pub fn call_kill_tasks(&self, exit_code: u64) {
+        debug_assert!(
+            !self.killed.load(core::sync::atomic::Ordering::Acquire),
+            "exit hooks called on already killed process"
+        );
         let mut hooks = lock_w_info!(self.exit_hooks);
         for hook in hooks.drain(..) {
             hook(exit_code);
         }
+        self.killed.store(true, core::sync::atomic::Ordering::Release);
+    }
+
+    pub fn is_killed(&self) -> bool {
+        self.killed.load(core::sync::atomic::Ordering::Acquire)
     }
 
     pub fn add_exit_hook(&self, hook: Box<dyn FnOnce(u64) + Send>) {
@@ -195,5 +221,18 @@ impl ProcessData {
 
     pub fn get_cpu_time_kernelspace(&self) -> UsDuration {
         self.cpu_time_kernelspace.load(core::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub(in crate::proc) fn get_signal_state(&self) -> &SignalState {
+        &self.signal_state
+    }
+
+    pub fn is_in_signal_handler(&self) -> bool {
+        self.in_signal_handler.load(core::sync::atomic::Ordering::Acquire)
+    }
+
+    pub fn set_in_signal_handler(&self, in_handler: bool) {
+        self.in_signal_handler
+            .store(in_handler, core::sync::atomic::Ordering::Release);
     }
 }

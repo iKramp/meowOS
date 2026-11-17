@@ -1,3 +1,5 @@
+use crate::arch::interrupts::{DEFAULT_RFLAGS, USER_CODE_SEGMENT, USER_STACK_SEGMENT};
+
 #[macro_export]
 macro_rules! handler {
     (
@@ -202,12 +204,12 @@ pub struct InterruptProcessorState {
     pub rbx: u64,
     pub rax: u64,
     pub err_code: u64,
-    pub interrupt_frame: InterruptFrame,
+    pub(in crate::arch) interrupt_frame: InterruptFrame,
 }
 
 #[derive(Debug, Clone)]
 #[repr(C)]
-pub struct InterruptFrame {
+pub(in crate::arch) struct InterruptFrame {
     pub rip: u64,
     pub cs: u64,
     pub rflags: u64,
@@ -218,6 +220,10 @@ pub struct InterruptFrame {
 impl InterruptProcessorState {
     pub fn new(rip: u64, rsp: u64) -> Self {
         Self::new_full(0, 0, 0, 0, 0, 0, 0, 0, 0, rsp, 0, 0, 0, 0, 0, 0, rip)
+    }
+
+    pub fn get_stack_pointer(&self) -> u64 {
+        self.interrupt_frame.rsp
     }
 
     pub fn set_arg_registers(&mut self, argc: u64, argv: u64, envp: u64) {
@@ -265,10 +271,10 @@ impl InterruptProcessorState {
             err_code: 0,
             interrupt_frame: InterruptFrame {
                 rip,
-                cs: 0x23,      //user code segment
-                rflags: 0x202, //default flags with interrupts enabled
+                cs: USER_CODE_SEGMENT,
+                rflags: DEFAULT_RFLAGS,
                 rsp,
-                ss: 0x1B, //user data segment
+                ss: USER_STACK_SEGMENT,
             },
         }
     }
