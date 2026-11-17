@@ -57,7 +57,7 @@ pub struct ProcNamespaces {
     mount_namespace: Arc<MountNamespace>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[repr(C)]
 pub(in crate::proc) struct NamespaceIds {
     memory_namespace: u64,

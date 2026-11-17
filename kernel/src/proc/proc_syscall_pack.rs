@@ -1,4 +1,4 @@
-use std::{boxed::Box, error::KernelError, lock_w_info, string::ToString, sync::arc::Arc};
+use std::{boxed::Box, error::KernelError, lock_w_info, println, string::ToString, sync::arc::Arc};
 
 use crate::{
     clocks::{ScheduledEvent, schedule_event},
@@ -40,6 +40,7 @@ pub struct RegisterState {
     pub r15: u64,
 }
 
+#[derive(Debug, Clone)]
 #[repr(C)]
 struct ExecArgs {
     namespaces: NamespaceIds,
@@ -62,6 +63,8 @@ fn exec(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         return;
     }
     let exec_args = unsafe { exec_args_heap_box.assume_init() };
+
+    println!("exec called with {:#x?} for process {:?}", exec_args, proc.pid());
 
     let name_buf_uninit = Box::new_uninit_slice(exec_args.name_len as usize);
     let valid = safe_memcpy_from_user(
