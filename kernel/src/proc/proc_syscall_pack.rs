@@ -3,16 +3,25 @@ use std::{boxed::Box, error::KernelError, lock_w_info, println, string::ToString
 use crate::{
     clocks::{ScheduledEvent, schedule_event},
     interrupts::InterruptProcessorState,
-    memory::safe_memcpy_from_user,
+    memory::{addresses::VirtAddr, safe_memcpy_from_user},
     proc::{
         self, NamespaceIds, PROCESS_ID_COUNTER, Pid, ProcNamespaces, ProcessData, SCHEDULER,
         process_data::CpuStateType,
+        signal::SignalType,
         syscall::{SyscallCpuState, SyscallHandler, SyscallPack},
     },
 };
 
 pub(super) fn init_proc_syscalls() {
-    let handlers: [(SyscallHandler, &'static str); _] = [(exec, "exec"), (exit, "exit"), (sleep, "sleep")];
+    let handlers: [(SyscallHandler, &'static str); _] = [
+        (exec, "exec"),
+        (exit, "exit"),
+        (sleep, "sleep"),
+        (get_pid, "get_pid"),
+        (set_sig_handler, "set_sig_handler"),
+        (remove_sig_handler, "remove_sig_handler"),
+        (send_signal, "send_signal"),
+    ];
 
     let exec_syscall_pack = SyscallPack::new(Box::new(handlers));
     crate::proc::syscall::register_syscall_pack("proc".into(), Arc::new(exec_syscall_pack));
@@ -169,4 +178,80 @@ fn sleep(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     proc.set_sleeping(true);
 
     schedule_event(scheduled_event);
+}
+
+fn get_pid(_args: &SyscallCpuState, proc: &Arc<ProcessData>) {
+    let pid = proc.pid();
+    proc.set_syscall_return(&[pid.0 as u64]);
+}
+
+fn set_sig_handler(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
+    let signal_number = args.get_arg(0) as usize;
+    let handler_ptr = args.get_arg(1);
+
+    let Ok(sig) = SignalType::try_from(signal_number) else {
+        proc.set_syscall_return(&[u64::MAX]);
+        return;
+    };
+
+    proc.get_mutable()
+        .get_signal_state_mut()
+        .set_handler(sig, VirtAddr(handler_ptr));
+    proc.set_syscall_return(&[0]);
+}
+
+fn remove_sig_handler(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
+    let signal_number = args.get_arg(0) as usize;
+
+    let Ok(sig) = SignalType::try_from(signal_number) else {
+        proc.set_syscall_return(&[u64::MAX]);
+        return;
+    };
+
+    proc.get_mutable().get_signal_state_mut().remove_handler(sig);
+    proc.set_syscall_return(&[0]);
+}
+
+fn send_signal(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
+    let target_pid = Pid(args.get_arg(0) as u32);
+    let signal_number = args.get_arg(1) as usize;
+    let data_len = args.get_arg(2) as usize;
+    let data_ptr = args.get_arg(3);
+
+    if data_len > 128 {
+        proc.set_syscall_return(&[u64::MAX]);
+        return;
+    }
+
+    let data_buf_uninit = Box::new_uninit_slice(data_len);
+    let valid = safe_memcpy_from_user(data_buf_uninit.as_ptr() as u64, data_ptr, data_len);
+    if !valid {
+        proc.set_syscall_return(&[u64::MAX]);
+        return;
+    }
+    let data_buf = unsafe { data_buf_uninit.assume_init() };
+
+    let Ok(sig) = SignalType::try_from(signal_number) else {
+        proc.set_syscall_return(&[u64::MAX]);
+        return;
+    };
+
+    let target_proc = match proc::get_proc(target_pid) {
+        Some(proc) => proc,
+        None => {
+            proc.set_syscall_return(&[u64::MAX]);
+            return;
+        }
+    };
+
+    let custom_signal_data = proc::signal::CustomSignalFields::new(data_buf);
+
+    let signal_data = proc::signal::SignalData {
+        signal_type: sig,
+        source: proc.pid(),
+        fields: Box::new(custom_signal_data),
+    };
+
+    target_proc.get_mutable().get_signal_state_mut().send_signal(signal_data);
+    proc.set_syscall_return(&[0]);
 }

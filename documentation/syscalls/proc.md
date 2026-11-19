@@ -7,6 +7,10 @@
 | 0 | exec | executes a new program |
 | 1 | exit | terminates the current process |
 | 2 | sleep | puts the process to sleep for a specified duration |
+| 3 | getpid | retrieves the process ID of the current process |
+| 4 | set_sig_handler | sets a signal handler for a specific signal |
+| 5 | remove_sig_handler | removes a signal handler for a specific signal (go back to default action) |
+| 6 | send_signal | sends a signal to a specific process |
 
 ## STRUCTURE INFORMATION
 
@@ -91,3 +95,42 @@ Terminates the current process and returns the given exit code to the parent pro
  - On failure, returns -1
 #### Description:
 Puts the process to sleep for the specified duration
+
+### Syscall 3: getpid
+#### Args:
+#### Return Value:
+ - Returns the process ID of the current process
+#### Description:
+Retrieves the process ID of the current process
+
+### Syscall 4: set_sig_handler
+#### Args:
+1. signal_number: u64 - the signal number for which to set the handler
+1. handler_ptr: u64 - pointer to the signal handler function
+#### Return Value:
+ - On success, returns 0
+ - On failure, returns -1
+#### Description:
+Sets a signal handler for a specific signal. The handler function will be called when the specified signal is received by the process
+
+### Syscall 5: remove_sig_handler
+#### Args:
+1. signal_number: u64 - the signal number for which to remove the handler
+#### Return Value:
+ - On success, returns 0
+ - On failure, returns -1
+#### Description:
+Removes a signal handler for a specific signal, reverting to the default action for that signal
+
+### Syscall 6: send_signal
+#### Args:
+1. target_pid: u64 - the process ID of the target process to which the signal will be sent
+1. signal_number: u64 - the signal number to send to the target process
+1. sig_data_len: u64 - length of the additional data to send with the signal (max 128B)
+1. sig_data: *const u8 - pointer to additional data to send with the signal
+#### Return Value:
+ - On success, returns 0
+ - On failure, returns -1
+#### Description:
+Sends a signal to a specific process. Data can be sent (where appropriate) with the signal. This is not supported for
+linux signals

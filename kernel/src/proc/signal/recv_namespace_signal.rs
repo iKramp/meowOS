@@ -6,6 +6,7 @@ use crate::proc::{
     signal::{SignalData, SignalFields, SignalType},
 };
 
+#[derive(Debug)]
 struct RecvNamespaceSignal {
     source: Pid,
     namespace_id: u64,

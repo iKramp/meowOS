@@ -35,9 +35,6 @@ pub struct ProcessData {
     proc_start_time: Instant,
     cpu_time_userspace: AtomicDuration,
     cpu_time_kernelspace: AtomicDuration,
-    //maybe a namespace with signal handlers, configuration,...
-    signal_state: SignalState,
-    in_signal_handler: AtomicBool,
 }
 
 impl Debug for ProcessData {
@@ -58,6 +55,8 @@ impl Debug for ProcessData {
 pub struct ProcessDataMutable {
     cpu_state: CpuStateType,
     namespaces: ProcNamespaces,
+    //maybe a namespace with signal handlers, configuration,...
+    signal_state: SignalState,
 }
 
 impl ProcessDataMutable {
@@ -67,6 +66,14 @@ impl ProcessDataMutable {
 
     pub(in crate::proc) fn get_namespaces_mut(&mut self) -> &mut ProcNamespaces {
         &mut self.namespaces
+    }
+
+    pub(super) fn get_signal_state(&self) -> &SignalState {
+        &self.signal_state
+    }
+
+    pub(super) fn get_signal_state_mut(&mut self) -> &mut SignalState {
+        &mut self.signal_state
     }
 }
 
@@ -108,13 +115,15 @@ impl ProcessData {
             is_32_bit,
             page_tree_root: AtomicU64::new(root.0),
             cmdline,
-            internal: NoIntSpinlock::new(ProcessDataMutable { cpu_state, namespaces }),
+            internal: NoIntSpinlock::new(ProcessDataMutable {
+                cpu_state,
+                namespaces,
+                signal_state: SignalState::new(),
+            }),
             exit_hooks: NoIntSpinlock::new(Vec::new()),
             proc_start_time: Instant::now(),
             cpu_time_userspace: AtomicDuration::new(UsDuration::from_micros(0)),
             cpu_time_kernelspace: AtomicDuration::new(UsDuration::from_micros(0)),
-            signal_state: SignalState::new(),
-            in_signal_handler: AtomicBool::new(false),
         }
     }
 
@@ -221,18 +230,5 @@ impl ProcessData {
 
     pub fn get_cpu_time_kernelspace(&self) -> UsDuration {
         self.cpu_time_kernelspace.load(core::sync::atomic::Ordering::Relaxed)
-    }
-
-    pub(in crate::proc) fn get_signal_state(&self) -> &SignalState {
-        &self.signal_state
-    }
-
-    pub fn is_in_signal_handler(&self) -> bool {
-        self.in_signal_handler.load(core::sync::atomic::Ordering::Acquire)
-    }
-
-    pub fn set_in_signal_handler(&self, in_handler: bool) {
-        self.in_signal_handler
-            .store(in_handler, core::sync::atomic::Ordering::Release);
     }
 }

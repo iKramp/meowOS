@@ -1,5 +1,7 @@
 //linux __sifields union
 
+use core::fmt::Debug;
+
 use crate::{memory::addresses::VirtAddr, proc::signal::SignalFields};
 
 #[repr(C)]
@@ -123,5 +125,13 @@ impl SignalFields for LinSiFields {
         let size = core::mem::size_of::<Self>();
         let ptr = self as *const Self as *const u8;
         unsafe { core::slice::from_raw_parts(ptr, size) }
+    }
+}
+
+impl Debug for LinSiFields {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("LinSiFields")
+            .field("bytes", &self.get_data_as_bytes())
+            .finish()
     }
 }

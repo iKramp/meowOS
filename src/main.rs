@@ -24,6 +24,11 @@ enum DiskType {
     Virtio,
 }
 
+#[allow(dead_code, unused)]
+fn signal(sig: i32, func: fn(i32) -> *const ()) -> *const () {
+    todo!()
+}
+
 fn main() {
     //chose whether to debug with GDB
     let debug = true;

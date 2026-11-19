@@ -49,7 +49,12 @@ pub fn no_ret_context_switch() -> ! {
             }
         };
 
-        if let Some(signal_to_handle) = proc_data_arc.get_signal_state().get_to_handle(&proc_data_arc) {
+        let to_handle = proc_data_arc
+            .get_mutable()
+            .get_signal_state_mut()
+            .get_to_handle(&proc_data_arc);
+
+        if let Some(signal_to_handle) = to_handle {
             if proc_data_arc.is_killed() {
                 debug_assert!(
                     false,

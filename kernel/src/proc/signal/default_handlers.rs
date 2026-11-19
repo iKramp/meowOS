@@ -19,7 +19,7 @@ pub(super) fn run_default_handler(proc: &ProcessData, signal_data: SignalData) {
     #[cfg(debug_assertions)]
     {
         if signal_data.signal_type == SignalType::Continue {
-            let pending = proc.get_signal_state().get_pending_linux_signals();
+            let pending = proc.get_mutable().get_signal_state().get_pending_linux_signals();
             if has_stop_signals(pending) {
                 println!(level:warn, "process with pid {:?} has pending stop signals while handling continue signal. This should not happen", proc.pid());
             }
@@ -60,7 +60,7 @@ pub(super) fn run_registered_prehandler(proc: &ProcessData, signal_data: &Signal
         SignalType::Continue => {
             #[cfg(debug_assertions)]
             {
-                let pending = proc.get_signal_state().get_pending_linux_signals();
+                let pending = proc.get_mutable().get_signal_state().get_pending_linux_signals();
                 if has_stop_signals(pending) {
                     println!(level:warn, "process with pid {:?} has pending stop signals while handling continue signal. This should not happen", proc.pid());
                 }

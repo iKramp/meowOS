@@ -1,5 +1,6 @@
 use core::{
     cell::UnsafeCell,
+    fmt::Debug,
     mem::{ManuallyDrop, MaybeUninit},
     sync::atomic::{
         AtomicU64,
@@ -173,5 +174,20 @@ impl<T> Drop for RingQueue<T> {
             let elem = &mut self.buffer[i as usize];
             unsafe { ManuallyDrop::drop(elem) };
         }
+    }
+}
+
+impl<T: Debug> Debug for RingQueue<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let state = QueueState(self.state.load(Relaxed));
+        let count = if state.head() >= state.tail() {
+            state.head() - state.tail()
+        } else {
+            self.capacity as u64 - state.tail() + state.head()
+        };
+        f.debug_struct("RingQueue")
+            .field("capacity", &self.capacity)
+            .field("count", &count)
+            .finish()
     }
 }

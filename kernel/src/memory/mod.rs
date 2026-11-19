@@ -134,7 +134,7 @@ pub fn probe_pointer_range(ptr_start: u64, mut ptr_end: u64) -> bool {
 }
 
 pub fn safe_memcpy_from_user(dst: u64, src: u64, len: usize) -> bool {
-    let src_end = src + len as u64 - 1;
+    let src_end = (src + len as u64).saturating_sub(1);
     if !is_userspace_ptr(VirtAddr(src)) || !is_userspace_ptr(VirtAddr(src_end)) {
         println!(level:warn, "invalid userspace pointer range: {:#x?} - {:#x?}", src, src_end);
         return false;
@@ -143,7 +143,7 @@ pub fn safe_memcpy_from_user(dst: u64, src: u64, len: usize) -> bool {
 }
 
 pub fn safe_memcpy_to_user(dst: u64, src: u64, len: usize) -> bool {
-    let dst_end = dst + len as u64 - 1;
+    let dst_end = (dst + len as u64).saturating_sub(1);
     if !is_userspace_ptr(VirtAddr(dst)) || !is_userspace_ptr(VirtAddr(dst_end)) {
         println!(level:warn, "invalid userspace pointer range: {:#x?} - {:#x?}", dst, dst_end);
         return false;
@@ -152,6 +152,9 @@ pub fn safe_memcpy_to_user(dst: u64, src: u64, len: usize) -> bool {
 }
 
 pub fn safe_memcpy_kernel(dst: u64, src: u64, len: usize) -> bool {
+    if len == 0 {
+        return true;
+    }
     let prev_int_state = disable_interrupts();
 
     let res = unsafe { probe_memcpy(dst, src, len as u64) };

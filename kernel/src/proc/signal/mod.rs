@@ -1,4 +1,4 @@
-use core::mem::MaybeUninit;
+use core::{fmt::Debug, mem::MaybeUninit};
 use std::{alloc::boxed::Box, error::KernelError, kerror, ring_queue::RingQueue};
 
 use crate::{
@@ -18,11 +18,12 @@ mod default_handlers;
 mod linux_compat;
 mod recv_namespace_signal;
 
-pub trait SignalFields: core::any::Any + Send {
+pub trait SignalFields: core::any::Any + Send + Debug {
     fn get_data_as_bytes(&self) -> &[u8];
 }
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct SignalData {
     pub signal_type: SignalType,
     pub source: Pid,
@@ -97,6 +98,16 @@ pub(super) struct SignalState {
     handler_table: SignalHandlerTable,
 }
 
+impl Debug for SignalState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("SignalState")
+            .field("pending_linux_signals", &self.pending_linux_signals)
+            .field("pending_special_signals", &self.pending_special_signals)
+            .field("handler_table", &self.handler_table.handlers)
+            .finish()
+    }
+}
+
 impl SignalState {
     pub fn new() -> Self {
         Self {
@@ -124,7 +135,7 @@ impl SignalState {
         self.pending_linux_signals
     }
 
-    pub fn get_to_handle(&self, proc: &ProcessData) -> Option<(VirtAddr, SignalData)> {
+    pub fn get_to_handle(&mut self, proc: &ProcessData) -> Option<(VirtAddr, SignalData)> {
         let (handler, data) = self.get_to_handle_inner()?;
 
         match handler {
@@ -139,10 +150,10 @@ impl SignalState {
         }
     }
 
-    fn get_to_handle_inner(&self) -> Option<(Option<VirtAddr>, SignalData)> {
-        let pending_linux = self.pending_linux_signals;
-        if pending_linux != 0 {
-            let signal_index = pending_linux.trailing_zeros();
+    fn get_to_handle_inner(&mut self) -> Option<(Option<VirtAddr>, SignalData)> {
+        if self.pending_linux_signals != 0 {
+            let signal_index = self.pending_linux_signals.trailing_zeros();
+            self.pending_linux_signals &= !(1 << signal_index); //clear the bit
             let Ok(signal_type) = SignalType::try_from(signal_index as usize) else {
                 return None;
             };
@@ -175,6 +186,52 @@ impl SignalState {
         }
 
         None
+    }
+
+    pub fn set_handler(&mut self, signal_type: SignalType, handler: VirtAddr) -> bool {
+        #[allow(clippy::match_like_matches_macro)]
+        let illegal = match signal_type {
+            SignalType::Kill => true,
+            _ => false,
+        };
+
+        if illegal {
+            return false;
+        }
+
+        let index = signal_type as usize;
+        if index >= self.handler_table.handlers.len() {
+            return false;
+        }
+        self.handler_table.handlers[index] = handler;
+        true
+    }
+
+    pub fn remove_handler(&mut self, signal_type: SignalType) -> bool {
+        let index = signal_type as usize;
+        if index >= self.handler_table.handlers.len() {
+            return false;
+        }
+        self.handler_table.handlers[index] = VirtAddr(0);
+        true
+    }
+
+    pub fn send_signal(&mut self, signal_data: SignalData) -> bool {
+        let signal_type = signal_data.signal_type;
+        let index = signal_type as usize;
+        if index >= self.handler_table.handlers.len() {
+            return false;
+        }
+
+        if index < 64 {
+            self.pending_linux_signals |= 1 << index;
+        } else {
+            if !self.pending_special_signals.push(signal_data) {
+                return false; //queue full
+            }
+        }
+
+        true
     }
 }
 
@@ -234,4 +291,21 @@ pub fn signal_return_fn(cpu_data: &mut InterruptProcessorState) -> bool {
     //might get funky when a syscall is interrupted by a signal and returned as an interrupt
     *cpu_data = InterruptProcessorState::from(unsafe { user_context.assume_init() });
     true
+}
+
+#[derive(Clone, Debug)]
+pub struct CustomSignalFields {
+    data: Box<[u8]>,
+}
+
+impl CustomSignalFields {
+    pub fn new(data: Box<[u8]>) -> Self {
+        Self { data }
+    }
+}
+
+impl SignalFields for CustomSignalFields {
+    fn get_data_as_bytes(&self) -> &[u8] {
+        &self.data
+    }
 }

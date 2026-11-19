@@ -80,10 +80,6 @@ pub(super) fn dispatch(new_proc: Arc<ProcessData>) -> ! {
 pub(super) fn dispatch_signal(new_proc: Arc<ProcessData>, signal_handler: VirtAddr, signal_data: SignalData) {
     let user_context;
     {
-        if new_proc.is_in_signal_handler() {
-            return;
-        }
-
         let new_page_tree = new_proc.page_tree();
         arch::memory::set_page_tree_root(new_page_tree);
 
