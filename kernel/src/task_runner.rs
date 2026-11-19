@@ -5,6 +5,7 @@ use core::{
     task::{Context, Poll as StdPoll},
 };
 use std::{
+    alloc::collections::BTreeMap,
     boxed::Box,
     ffi_future::{
         future::{Future, Poll},
@@ -24,6 +25,13 @@ use crate::{
 };
 
 static REPEATING_TASKS: RWSpinlock<Vec<Box<dyn Fn() + Send>>> = RWSpinlock::new(Vec::new());
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TaskContinuationMode {
+    Continue,
+    ProcKilled,
+    Interrupted,
+}
 
 pub fn add_repeating_task(task: Box<dyn Fn() + Send>) {
     let mut tasks = w_lock_w_info!(REPEATING_TASKS);
@@ -76,12 +84,33 @@ impl core::fmt::Debug for AsyncTaskWrapper<'_> {
     }
 }
 
+impl core::cmp::PartialEq for AsyncTaskWrapper<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl core::cmp::Eq for AsyncTaskWrapper<'_> {}
+
+impl core::cmp::PartialOrd for AsyncTaskWrapper<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl core::cmp::Ord for AsyncTaskWrapper<'_> {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.id.cmp(&other.id)
+    }
+}
+
 pub struct AsyncTaskData {
     task_id_counter: AtomicU64,
-    task_list: NoIntSpinlock<std::queue::DataQueueHead<AsyncTaskWrapper<'static>>>,
+    task_list: NoIntSpinlock<BTreeMap<u64, AsyncTaskWrapper<'static>>>,
     tasks_to_wake: NoIntSpinlock<Vec<u64>>,
-    // waiting_tasks: NoIntSpinlock<BTreeMap<u64, AsyncTaskInternal>>,
-    waiting_tasks: NoIntSpinlock<Vec<(u64, AsyncTaskWrapper<'static>)>>,
+    waiting_tasks: NoIntSpinlock<BTreeMap<u64, AsyncTaskWrapper<'static>>>,
+    process_killed_tasks: NoIntSpinlock<BTreeMap<u64, AsyncTaskWrapper<'static>>>,
+    interrupted_tasks: NoIntSpinlock<BTreeMap<u64, AsyncTaskWrapper<'static>>>,
     has_tasks_to_process: AtomicBool,
 }
 
@@ -89,10 +118,11 @@ impl AsyncTaskData {
     pub const fn new() -> Self {
         Self {
             task_id_counter: AtomicU64::new(0),
-            task_list: NoIntSpinlock::new(std::queue::DataQueueHead::new(usize::MAX)),
+            task_list: NoIntSpinlock::new(BTreeMap::new()),
             tasks_to_wake: NoIntSpinlock::new(Vec::new()),
-            // waiting_tasks: NoIntSpinlock::new(BTreeMap::new()),
-            waiting_tasks: NoIntSpinlock::new(Vec::new()),
+            waiting_tasks: NoIntSpinlock::new(BTreeMap::new()),
+            process_killed_tasks: NoIntSpinlock::new(BTreeMap::new()),
+            interrupted_tasks: NoIntSpinlock::new(BTreeMap::new()),
             has_tasks_to_process: AtomicBool::new(false),
         }
     }
@@ -142,7 +172,7 @@ pub extern "C" fn add_task(task: AsyncTask<'static>, pid: PidOption) {
     let internal = AsyncTaskWrapper { task, proc_id: pid, id };
 
     let mut task_list = lock_w_info!(locals.async_task_data.task_list);
-    task_list.push(internal);
+    task_list.insert(id, internal);
 }
 
 pub fn wake_task(task_id: u64, apic_id: u8) {
@@ -163,7 +193,7 @@ pub fn wake_task(task_id: u64, apic_id: u8) {
 fn sleep_task(task: AsyncTaskWrapper<'static>) {
     let locals = CpuLocals::get();
     let mut waiting_lock = lock_w_info!(locals.async_task_data.waiting_tasks);
-    waiting_lock.push((task.id, task));
+    waiting_lock.insert(task.id, task);
     drop(waiting_lock);
     drop(locals);
 }
@@ -177,15 +207,48 @@ fn wake_tasks_in_list(locals: &mut CpuLocals) {
         let mut task_list = lock_w_info!(locals.async_task_data.task_list);
         let mut waiting_lock = lock_w_info!(locals.async_task_data.waiting_tasks);
         for task_id in to_wake {
-            if let Some(pos) = waiting_lock.iter().position(|(id, _)| *id == task_id) {
-                let (_, task) = waiting_lock.remove(pos);
-                task_list.push(task);
+            if let Some(task) = waiting_lock.remove(&task_id) {
+                task_list.insert(task_id, task);
             } else {
-                println!("Tried to wake non-existing async task {}", task_id);
+                println!(level:warn, "Tried to wake non-existing async task {}", task_id);
             }
         }
         drop(waiting_lock);
         drop(task_list);
+    }
+}
+
+//moves task to the specified list. This effectively wakes the task
+//A task may be moved Waiting/Active -> Interrupted -> Killed (or waiting/active directly to killed)
+fn interrupt_task(task_id: u64, killed: bool) {
+    let locals = CpuLocals::get();
+    let lists = [
+        &locals.async_task_data.task_list,
+        &locals.async_task_data.waiting_tasks,
+        &locals.async_task_data.interrupted_tasks,
+        &locals.async_task_data.process_killed_tasks,
+    ];
+
+    let lists_to_check = if killed { &lists[..3] } else { &lists[..2] };
+
+    for list in lists_to_check {
+        let mut list_lock = lock_w_info!(list);
+        if let Some(task) = list_lock.remove(&task_id) {
+            drop(list_lock);
+            let target_list = if killed {
+                &locals.async_task_data.process_killed_tasks
+            } else {
+                &locals.async_task_data.interrupted_tasks
+            };
+            let mut target_lock = lock_w_info!(target_list);
+            target_lock.insert(task_id, task);
+            drop(target_lock);
+            locals
+                .async_task_data
+                .has_tasks_to_process
+                .store(true, core::sync::atomic::Ordering::Release);
+            return;
+        }
     }
 }
 
@@ -200,20 +263,32 @@ pub fn process_tasks() {
 
     unsafe { CpuLocals::get_lock_info().assert_no_locks() };
 
-    let mut task_process_start = Instant::now();
+    process_task_list(TaskContinuationMode::Continue);
+    process_task_list(TaskContinuationMode::ProcKilled);
+    process_task_list(TaskContinuationMode::Interrupted);
+}
+
+pub fn process_task_list(list: TaskContinuationMode) {
     loop {
         let locals = CpuLocals::get_mut();
-        let mut task_list = lock_w_info!(locals.async_task_data.task_list);
-        let Some(task) = task_list.get_first() else {
+        // let mut task_list = lock_w_info!(locals.async_task_data.task_list);
+        let mut task_list = match list {
+            TaskContinuationMode::Continue => lock_w_info!(locals.async_task_data.task_list),
+            TaskContinuationMode::ProcKilled => lock_w_info!(locals.async_task_data.process_killed_tasks),
+            TaskContinuationMode::Interrupted => lock_w_info!(locals.async_task_data.interrupted_tasks),
+        };
+        let Some(mut task) = task_list.pop_first() else {
             break;
         };
         drop(task_list);
-        drop(locals);
-        let new_pid = task.proc_id;
+
+        let new_pid = task.1.proc_id;
         let proc;
         if let Some(pid) = new_pid {
             let tmp_proc = proc::get_proc(pid);
             if tmp_proc.is_none() {
+                task.1.proc_id = None;
+                lock_w_info!(locals.async_task_data.process_killed_tasks).insert(task.0, task.1);
                 continue; //current task is removed because its process was killed
             }
             proc = tmp_proc;
@@ -221,8 +296,8 @@ pub fn process_tasks() {
             proc = None;
         }
         switch_mem_tree(&mut None, proc.as_ref());
-        process_single_task(task);
-
+        let task_process_start = Instant::now();
+        process_single_task(task.1, list);
         let task_process_end = Instant::now();
 
         if let Some(proc) = proc {
@@ -231,8 +306,6 @@ pub fn process_tasks() {
             let cpu_time = UsDuration::from_micros(cpu_time_us);
             proc.add_cpu_time_kernelspace(cpu_time);
         }
-
-        task_process_start = task_process_end;
     }
 }
 
@@ -270,10 +343,11 @@ fn ros_waker(data: Box<WakerData>) -> Waker {
     unsafe { Waker::from_raw(ros_raw_waker(data)) }
 }
 
-fn process_single_task(task: AsyncTaskWrapper<'static>) {
+fn process_single_task(task: AsyncTaskWrapper<'static>, cont_mode: TaskContinuationMode) {
     let mut locals = CpuLocals::get_mut();
     let apic_id = locals.apic_id;
     locals.current_async_task_id = Some(task.id);
+    locals.async_task_continue_mode = cont_mode;
     drop(locals);
 
     let waker_data = Box::new(WakerData {
@@ -282,6 +356,15 @@ fn process_single_task(task: AsyncTaskWrapper<'static>) {
     });
     // let result = task.task.as_mut().poll(&mut Context::from_waker(&ros_waker(waker_data)));
     let result = unsafe { (task.task.poll_fn)(task.task.data, &ros_waker(waker_data)) };
+
+    #[cfg(debug_assertions)]
+    {
+        let locals = CpuLocals::get();
+        assert!(
+            locals.async_task_continue_mode == TaskContinuationMode::Continue,
+            "async task did not ack the continuation mode"
+        );
+    }
 
     match result {
         Poll::Pending => {

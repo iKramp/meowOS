@@ -23,6 +23,10 @@ pub enum KernelErrorCode {
     IllegalValue,
     InvalidProcessFile,
     OutOfMemory,
+
+    //special error conditions for handling async functions returning early
+    ProcKilled,
+    Interrupted,
 }
 
 #[derive(Debug)]
@@ -85,6 +89,9 @@ impl core::fmt::Display for KernelErrorCode {
             KernelErrorCode::IllegalValue => write!(f, "Illegal value"),
             KernelErrorCode::InvalidProcessFile => write!(f, "Invalid process file (not valid ELF)"),
             KernelErrorCode::OutOfMemory => write!(f, "Out of memory"),
+
+            KernelErrorCode::ProcKilled => write!(f, "Process was killed"),
+            KernelErrorCode::Interrupted => write!(f, "Operation was interrupted"),
         }
     }
 }

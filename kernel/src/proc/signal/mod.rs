@@ -6,7 +6,7 @@ use crate::{
     interrupts::InterruptProcessorState,
     memory::{addresses::VirtAddr, safe_memcpy_from_user},
     proc::{
-        Pid, ProcessData,
+        self, Pid, ProcessData,
         signal::{
             default_handlers::{run_default_handler, run_registered_prehandler},
             linux_compat::LinSiFields,
@@ -192,6 +192,7 @@ impl SignalState {
         #[allow(clippy::match_like_matches_macro)]
         let illegal = match signal_type {
             SignalType::Kill => true,
+            SignalType::Stop => true,
             _ => false,
         };
 
@@ -216,9 +217,20 @@ impl SignalState {
         true
     }
 
-    pub fn send_signal(&mut self, signal_data: SignalData) -> bool {
+    pub fn send_signal(&mut self, signal_data: SignalData, proc_pid: Pid) -> bool {
         let signal_type = signal_data.signal_type;
         let index = signal_type as usize;
+
+        //special handling
+        #[allow(clippy::single_match)]
+        match signal_type {
+            SignalType::Kill => {
+                proc::kill_process(proc_pid, signal_type as u64 + (1 << 63));
+                return true;
+            }
+            _ => {}
+        }
+
         if index >= self.handler_table.handlers.len() {
             return false;
         }

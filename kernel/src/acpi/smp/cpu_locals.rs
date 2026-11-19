@@ -15,6 +15,7 @@ use crate::{
     arch::cpu_locals::{ArchCpuLocals, init_dummy_cpu_local},
     clocks::AcceptedScheduledEvent,
     memory::addresses::*,
+    task_runner::TaskContinuationMode,
 };
 
 use crate::{acpi::platform_info::PlatformInfo, proc::ProcessData, task_runner::AsyncTaskData};
@@ -37,6 +38,7 @@ pub struct CpuLocals {
 
     pub async_task_data: AsyncTaskData,
     pub current_async_task_id: Option<u64>,
+    pub async_task_continue_mode: TaskContinuationMode,
 
     pub apic_id: u8,
     pub processor_id: u8,

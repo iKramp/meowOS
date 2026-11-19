@@ -252,6 +252,9 @@ fn send_signal(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
         fields: Box::new(custom_signal_data),
     };
 
-    target_proc.get_mutable().get_signal_state_mut().send_signal(signal_data);
+    target_proc
+        .get_mutable()
+        .get_signal_state_mut()
+        .send_signal(signal_data, target_proc.pid());
     proc.set_syscall_return(&[0]);
 }

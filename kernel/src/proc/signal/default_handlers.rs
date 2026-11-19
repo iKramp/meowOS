@@ -104,13 +104,7 @@ fn get_default_action(signal: SignalType) -> DefaultAction {
         SignalType::StackFault => DefaultAction::Terminate,
         SignalType::ChildStatusChanged => DefaultAction::Ignore,
         SignalType::Continue => DefaultAction::Continue,
-        SignalType::Stop => {
-            debug_assert!(
-                false,
-                "stop signal should not be resolved from pending. Proc should be stopped immediately"
-            );
-            DefaultAction::Stop
-        }
+        SignalType::Stop => DefaultAction::Stop,
         SignalType::TerminalStop => DefaultAction::Stop,
         SignalType::TTin => DefaultAction::Stop,
         SignalType::TTou => DefaultAction::Stop,
