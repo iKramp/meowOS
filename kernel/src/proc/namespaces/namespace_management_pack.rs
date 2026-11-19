@@ -1,4 +1,4 @@
-use std::{boxed::Box, sync::arc::Arc};
+use std::{boxed::Box, println, sync::arc::Arc};
 
 use crate::{
     memory::safe_memcpy_to_user,
@@ -8,6 +8,8 @@ use crate::{
         syscall::{self, SyscallCpuState, SyscallHandler, SyscallPack},
     },
 };
+
+const DEBUG_NAMESPACES: bool = true;
 
 pub fn init_namespace_management_syscalls() {
     let handlers: [(SyscallHandler, &'static str); _] = [
@@ -44,12 +46,24 @@ fn mknamespace(args: &SyscallCpuState, proc: &Arc<ProcessData>) {
     drop(mutable);
 
     let namespace = if clear_namespace {
+        if DEBUG_NAMESPACES {
+            println!(
+                "Creating new empty namespace of type {:?} from existing namespace id {}",
+                namespace_type, existing_namespace_id
+            );
+        }
         let Ok(namespace) = NamespaceHolder::create_empty_from(get_namespace_id(), &existing_namespace) else {
             proc.set_syscall_return(&[u64::MAX]);
             return;
         };
         namespace
     } else {
+        if DEBUG_NAMESPACES {
+            println!(
+                "Creating new namespace of type {:?} from existing namespace id {}",
+                namespace_type, existing_namespace_id
+            );
+        }
         let Ok(new_namespace) = NamespaceHolder::create_from(get_namespace_id(), &existing_namespace) else {
             proc.set_syscall_return(&[u64::MAX]);
             return;

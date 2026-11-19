@@ -12,7 +12,7 @@ pub fn init_ioapic(platform_info: &PlatformInfo) {
             let (virt_range, entry) =
                 memory::kernel_manual_map(OwnedPhysAddr(PhysAddr(io_apic_info.address.into())).into(), None);
             let virt_addr = virt_range.into_owned_virt_addr();
-            entry.set_caching_strategy(memory::MemoryCachingStrategy::Uncacheable);
+            entry.set_caching_strategy(memory::MemoryCachingStrategy::Uncacheable, 1);
             flush_tlb(Some(virt_addr.0));
 
             let test = translate_virt_phys_addr(virt_addr.0, None);

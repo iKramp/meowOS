@@ -159,7 +159,7 @@ impl MemoryBar {
             } else {
                 MemoryCachingStrategy::Uncacheable
             };
-            page_entry.set_caching_strategy(caching);
+            page_entry.set_caching_strategy(caching, 1);
             flush_tlb(Some(virt_range.0.start + i * 0x1000));
         }
         virt_range

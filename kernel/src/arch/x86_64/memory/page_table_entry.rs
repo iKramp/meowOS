@@ -1,12 +1,13 @@
+use core::fmt::Debug;
 use core::fmt::Display;
 
-use bitfield::bitfield;
+use bitfield::{Bit, BitMut, bitfield};
 
 use crate::memory::{MemoryCachingStrategy, addresses::*};
 
 bitfield! {
     pub struct PageTableEntry(u64);
-    impl Debug;
+    // impl Debug;
     pub present, set_present: 0;
     pub writeable, set_writeable: 1;
     pub user_accessible, set_user_accessible: 2;
@@ -14,18 +15,9 @@ bitfield! {
     pub(in crate::arch::x86_64::memory) page_cache_disable, set_page_cache_disable: 4;
     pub accessed, _: 5;
     pub dirty, _: 6;
-    pub huge_page, set_huge_page: 7; //is shared with pat
     pub global, set_global: 8;
     pub(in crate::arch::x86_64::memory) reserved, _: 51, 48;
     pub(in crate::arch::x86_64::memory) no_execute, set_no_execute: 63;
-}
-
-pub fn entry_caching_strategy(entry: &PageTableEntry) -> MemoryCachingStrategy {
-    let pat = false;
-    let pcd = entry.page_cache_disable();
-    let pwt = entry.page_write_through();
-
-    LiminePat::from_pat_pcd_pwt(pat, pcd, pwt).into()
 }
 
 impl Display for PageTableEntry {
@@ -33,17 +25,24 @@ impl Display for PageTableEntry {
         // Format the output
         f.debug_struct("PageTableEntry")
             .field("present", &self.present())
-            .field("address", &self.address())
-            .field("huge page", &self.huge_page())
-            .field("no execute", &self.no_execute())
             .field("writeable", &self.writeable())
+            .field("user accessible", &self.user_accessible())
             .field("write through", &self.page_write_through())
             .field("disable cache", &self.page_cache_disable())
-            .field("user accessible", &self.user_accessible())
             .field("accessed", &self.accessed())
             .field("dirty", &self.dirty())
             .field("global", &self.global())
+            .field("reserved", &self.reserved())
+            .field("no execute", &self.no_execute())
+            .field("address", &self.address(1))
+            .field("huge page", &self.bit(7)) //not real for all levels
             .finish()
+    }
+}
+
+impl Debug for PageTableEntry {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        Display::fmt(self, f)
     }
 }
 
@@ -88,13 +87,13 @@ impl PageTableEntry {
     //creates default entry:
     //present, writeable, not write-through, not cache disabled, not accessed,
     //not dirty, not huge, not global, no execute, user/supervisor based on argument
-    pub fn new(phys_address: PhysAddr, user_mode: bool) -> Self {
+    pub fn new(phys_address: PhysAddr, user_mode: bool, level: u8) -> Self {
         let mut entry = Self((phys_address.0 & 0x_FFF_FFF_FFF_000) | 0b000000011 | (1 << 63));
         if user_mode {
             entry.0 |= 4;
         }
 
-        entry.set_pat(LiminePat::WB);
+        entry.set_caching_strategy(MemoryCachingStrategy::WriteBack, level);
 
         entry
     }
@@ -103,37 +102,38 @@ impl PageTableEntry {
         Self(0)
     }
 
-    pub fn address(&self) -> PhysAddr {
+    pub fn address(&self, level: u8) -> PhysAddr {
+        debug_assert!((1..=4).contains(&level));
+        let huge = self.huge_page(level);
         PhysAddr(self.0 & 0xF_FFF_FFF_FFF_000)
     }
 
-    pub fn set_address(&mut self, address: PhysAddr) {
+    pub fn set_address(&mut self, address: PhysAddr, level: u8, huge: bool) {
         const MASK: u64 = 0xF_FFF_FFF_FFF_000;
         self.0 = (self.0 & !MASK) | (address.0 & MASK);
     }
 
-    pub(in crate::arch::x86_64::memory) fn set_pat(&mut self, pat: LiminePat) {
-        let (_pat, pcd, pwt) = pat.to_pat_pcd_pwt();
+    fn set_pat(&mut self, pat: LiminePat, level: u8) {
+        let (pat, pcd, pwt) = pat.to_pat_pcd_pwt();
         self.set_page_cache_disable(pcd);
         self.set_page_write_through(pwt);
-        //for now i ignore pat teehee :3
-        //pat bit depends on if it's a page directory or page table. Can be checked with huge
-        //table, but huge-huge tables (1GB) also have huge tables, and don't have pat bit
+        self.set_pat_bit(level, pat);
     }
 
-    pub(in crate::arch::x86_64::memory) fn pat(&self) -> LiminePat {
+    fn pat(&self, level: u8) -> LiminePat {
         let pcd = self.page_cache_disable();
         let pwt = self.page_write_through();
+        let pat = self.pat_bit(level);
 
-        LiminePat::from_pat_pcd_pwt(false, pcd, pwt)
+        LiminePat::from_pat_pcd_pwt(pat, pcd, pwt)
     }
 
-    pub fn set_caching_strategy(&mut self, caching: MemoryCachingStrategy) {
-        self.set_pat(caching.into());
+    pub fn set_caching_strategy(&mut self, caching: MemoryCachingStrategy, level: u8) {
+        self.set_pat(caching.into(), level);
     }
 
-    pub fn caching_strategy(&self) -> MemoryCachingStrategy {
-        entry_caching_strategy(self)
+    pub fn caching_strategy(&self, level: u8) -> MemoryCachingStrategy {
+        self.pat(level).into()
     }
 
     pub fn executable(&self) -> bool {
@@ -146,18 +146,52 @@ impl PageTableEntry {
 
     fn get(tree_root: PhysAddr, entry_virt: VirtAddr) -> Option<&'static mut Self> {
         let mut page_node_addr = VirtAddr::from(tree_root);
-        for level in (0..4).rev() {
-            let index = (entry_virt.0 >> (12 + level * 9)) & 0b111111111;
+        for level in (1..=4).rev() {
+            let index = (entry_virt.0 >> (12 + (level - 1) * 9)) & 0b111111111;
             let page_table_entry = unsafe { &mut *(page_node_addr.0 as *mut Self).add(index as usize) };
             if !page_table_entry.present() {
                 return None;
             }
-            if page_table_entry.huge_page() || level == 0 {
+            if page_table_entry.huge_page(level) || level == 1 {
                 return Some(page_table_entry);
             }
-            page_node_addr = page_table_entry.address().into();
+            page_node_addr = page_table_entry.address(level).into();
         }
         unreachable!()
+    }
+
+    pub fn huge_page(&self, level: u8) -> bool {
+        match level {
+            2 => self.bit(7),
+            3 => self.bit(7),
+            _ => false,
+        }
+    }
+
+    pub fn set_huge_page(&mut self, level: u8, huge: bool) {
+        match level {
+            2 => self.set_bit(7, huge),
+            3 => self.set_bit(7, huge),
+            _ => {}
+        }
+    }
+
+    fn pat_bit(&self, level: u8) -> bool {
+        match level {
+            1 => self.bit(7),
+            2 => self.bit(12),
+            3 => self.bit(12),
+            _ => true, //invalid
+        }
+    }
+
+    fn set_pat_bit(&mut self, level: u8, pat: bool) {
+        match level {
+            1 => self.set_bit(7, pat),
+            2 => self.set_bit(12, pat),
+            3 => self.set_bit(12, pat),
+            _ => {}
+        }
     }
 }
 

@@ -41,6 +41,11 @@ pub(super) fn dispatch(new_proc: Arc<ProcessData>) -> ! {
 
         //change page tree
         let new_page_tree = new_proc.page_tree();
+        println!(
+            "Dispatching to process {} with page tree {:x}",
+            new_proc.pid().0,
+            new_page_tree.0
+        );
         arch::memory::set_page_tree_root(new_page_tree);
 
         //schedule preemption

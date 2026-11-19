@@ -2,8 +2,11 @@ use core::ops::Range;
 use std::{error::KernelError, kerror, lock_w_info, println, sync::no_int_spinlock::NoIntSpinlock};
 
 use crate::{
-    arch::x86_64::memory::{
-        PAGE_TABLE_ENTRIES, PAGING_LEVELS, current_root, page_table::PageTable, page_table_entry::PageTableEntry,
+    arch::{
+        memory::{PAGE_LEVEL_BITS, PAGE_SIZE_BYTES, flush_tlb},
+        x86_64::memory::{
+            PAGE_TABLE_ENTRIES, PAGING_LEVELS, current_root, page_table::PageTable, page_table_entry::PageTableEntry,
+        },
     },
     memory::{addresses::*, physical_allocator, virt_mem_manager::allocation_area::AllocationAreaFlags},
 };
@@ -238,7 +241,8 @@ pub fn unmap_lower_half() {
         if !entry.present() {
             continue;
         }
-        if entry.huge_page() {
+        if entry.huge_page(4) {
+            //can't happen on x86
             panic!("not dealing with huge pages at level 4");
         }
         //don't delete lower entries, limine shares them with HHDM
@@ -259,9 +263,10 @@ pub fn prepare_higher_half() {
         }
         let frame = physical_allocator::allocate();
         unsafe { core::ptr::write_volatile(get_at_addr::<PageTable, _>(&frame), PageTable::new_empty()) };
-        *entry = PageTableEntry::new(frame.0, false);
+        *entry = PageTableEntry::new(frame.0, false, 4);
         core::mem::forget(frame); //don't deallocate
     }
+    flush_tlb(None);
 }
 
 pub fn copy_higher_half(existing_tree: PhysAddr, new_tree: PhysAddr) {
@@ -274,6 +279,46 @@ pub fn copy_higher_half(existing_tree: PhysAddr, new_tree: PhysAddr) {
             .skip(PAGE_TABLE_ENTRIES as usize / 2)
         {
             *new = *existing;
+        }
+    }
+    flush_tlb(None);
+}
+
+//final_ is used when a huge page is being mapped
+fn clone_tree(existing_tree: PhysAddr, new_tree: PhysAddr, level: u8, final_: bool) {
+    assert!((0..=4).contains(&level));
+
+    if level == 0 || final_ {
+        //not tree, final frame
+        let src_virt = VirtAddr::from(existing_tree);
+        let dst_virt = VirtAddr::from(new_tree);
+        let len = PAGE_SIZE_BYTES as usize * (PAGE_TABLE_ENTRIES as usize).pow(level as u32);
+        unsafe { core::ptr::copy_nonoverlapping(src_virt.0 as *const u8, dst_virt.0 as *mut u8, len) };
+        return;
+    }
+
+    unsafe {
+        let existing_page_table = get_at_addr::<PageTable, _>(existing_tree);
+        let new_page_table = get_at_addr::<PageTable, _>(new_tree);
+        for (existing, new) in existing_page_table.entries().zip(new_page_table.entries_mut()) {
+            if !existing.present() {
+                *new = *existing;
+                continue;
+            }
+
+            let is_huge_page = existing.huge_page(level);
+
+            let frames = if is_huge_page {
+                (PAGE_TABLE_ENTRIES as u64).pow(level as u32 - 1)
+            } else {
+                1
+            };
+
+            let frames = physical_allocator::allocate_contiguous(frames as u32);
+            clone_tree(existing.address(level), frames.0.start, level - 1, is_huge_page);
+            *new = *existing;
+            new.set_address(frames.0.start, level, is_huge_page);
+            core::mem::forget(frames); //don't deallocate
         }
     }
 }

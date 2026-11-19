@@ -7,7 +7,7 @@ use std::{
 
 use crate::proc::namespaces::ProcNamespace;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(in crate::proc) struct TimeNamespace {
     id: u64,
     internal: RWSpinlock<TimeNamespaceInternal>,

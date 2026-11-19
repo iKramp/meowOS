@@ -166,8 +166,8 @@ pub fn safe_memcpy_kernel(dst: u64, src: u64, len: usize) -> bool {
     res.valid
 }
 
-pub fn print_mem_mapping() {
-    virt_mem_manager::print_mem_mapping();
+pub fn print_mem_mapping(root: Option<(PhysAddr, u64)>) {
+    virt_mem_manager::print_mem_mapping(root);
 }
 
 pub fn probe_ptr_u64(ptr: u64) -> Option<u64> {

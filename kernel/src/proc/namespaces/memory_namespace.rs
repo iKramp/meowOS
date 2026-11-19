@@ -7,8 +7,8 @@ use std::{
 };
 
 use crate::{
-    arch::{self, x86_64::memory::page_table_entry::PageTableEntry},
-    memory::{self, VirtualMemoryRange, VirtualMemoryRangeCapacity, addresses::*, physical_allocator},
+    arch::{self, memory::flush_tlb, x86_64::memory::page_table_entry::PageTableEntry},
+    memory::{self, VirtualMemoryRange, VirtualMemoryRangeCapacity, addresses::*, physical_allocator, print_mem_mapping},
     proc::namespaces::ProcNamespace,
 };
 
@@ -56,7 +56,7 @@ pub(in crate::proc) struct MemoryNamespaceDynamicData {
     memory_ranges: Vec<OwnedVirtualMemoryRange>,
 }
 
-fn get_tree_root() -> PhysAddr {
+fn get_new_tree_root() -> PhysAddr {
     let owned_root = physical_allocator::allocate();
     let root = owned_root.0;
     core::mem::forget(owned_root); //dealloc handled by drop impl
@@ -75,9 +75,8 @@ impl ProcNamespace for MemoryNamespace {
     }
 
     fn create_from(id: u64, other: &Self) -> Result<MemoryNamespace, KernelError> {
-        let new_root = get_tree_root();
+        let new_root = get_new_tree_root();
 
-        //drop current ranges
         let new_namespace = Self {
             id,
             page_tree_root: new_root,
@@ -87,15 +86,18 @@ impl ProcNamespace for MemoryNamespace {
             }),
         };
 
+        //other threads can't allocate/deallocate
         let other_dynamic = lock_w_info!(other.dynamic_data);
 
         for range in other_dynamic.memory_ranges.iter() {
-            let res = new_namespace.add_mem_range(
-                range.shared_range.clone(),
-                range.name.clone(),
-                range.range_type,
-                range.map_address,
-            );
+            println!("Copying range {} to new namespace\nold_tree:", range.name);
+
+            print_mem_mapping(Some((range.shared_range.node_addr(), range.shared_range.level() as u64)));
+            let new_shared = VirtualMemoryRange::clone_from(&range.shared_range);
+            println!("new tree:");
+            print_mem_mapping(Some((new_shared.node_addr(), new_shared.level() as u64)));
+
+            let res = new_namespace.add_mem_range(Arc::new(new_shared), range.name.clone(), range.range_type, range.map_address);
             res?;
         }
 
@@ -105,6 +107,13 @@ impl ProcNamespace for MemoryNamespace {
             assert_eq!(new_dynamic.memory_ranges.len(), other_dynamic.memory_ranges.len());
             assert_eq!(new_dynamic.range_counter, other_dynamic.range_counter);
         }
+
+        // copy_higher_half(other.page_tree_root, new_namespace.page_tree_root);
+        //
+        println!("memory_namespace::create_from\noriginal_tree:");
+        print_mem_mapping(Some((other.page_tree_root, 4)));
+        println!("new_tree:");
+        print_mem_mapping(Some((new_root, 4)));
 
         Ok(new_namespace)
     }
@@ -117,7 +126,7 @@ impl ProcNamespace for MemoryNamespace {
 impl MemoryNamespace {
     //same as ProcNamespace::create_empty but doesn't need to be called on a namespace instance
     pub fn new_empty(id: u64) -> Self {
-        let page_tree_root = get_tree_root();
+        let page_tree_root = get_new_tree_root();
         Self {
             id,
             page_tree_root,
@@ -140,6 +149,18 @@ impl MemoryNamespace {
         range_type: MemoryRangeType,
         map_address: VirtAddr,
     ) -> Result<u32, KernelError> {
+        let alignment = 1u64 << (12 + 9 * (range.level() + 1));
+
+        if map_address.0 % alignment != 0 {
+            #[cfg(debug_assertions)]
+            panic!(
+                "MemoryNamespace::add_mem_range: map_address {:#x} is not aligned to {:#x}",
+                map_address.0, alignment
+            );
+            #[allow(unreachable_code)]
+            return kerror!(InvalidArgument);
+        }
+
         let new_range = range.reserved_range(map_address);
         if new_range.end.0 >= (1 << 48) {
             //disallow mapping in kernel space
@@ -166,10 +187,11 @@ impl MemoryNamespace {
             return kerror!(InvalidArgument);
         }
 
-        *entry = PageTableEntry::new(range.node_addr(), true);
+        *entry = PageTableEntry::new(range.node_addr(), true, range.level() + 1);
 
         entry.set_executable(true);
         entry.set_writeable(true);
+        flush_tlb(Some(map_address));
         //restrictions apply at lower levels
 
         let counter = dynamic.range_counter;
@@ -236,7 +258,7 @@ impl MemoryNamespace {
             println!("checks did not catch invalid unmap");
             return;
         };
-        if table_entry.address() != range.shared_range.node_addr() {
+        if table_entry.address(range.shared_range.level() + 1) != range.shared_range.node_addr() {
             println!("checks did not catch invalid unmap");
             return;
         }
@@ -266,7 +288,7 @@ impl MemoryNamespace {
                 println!("checks did not catch invalid unmap");
                 continue;
             };
-            if table_entry.address() != range.shared_range.node_addr() {
+            if table_entry.address(range.shared_range.level() + 1) != range.shared_range.node_addr() {
                 println!("checks did not catch invalid unmap");
                 continue;
             }

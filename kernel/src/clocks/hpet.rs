@@ -41,7 +41,7 @@ impl HpetWrapper {
         let mut owned_virt_addr = virt_range.into_owned_virt_addr();
         let virt_addr = owned_virt_addr.0;
 
-        entry.set_caching_strategy(memory::MemoryCachingStrategy::Uncacheable);
+        entry.set_caching_strategy(memory::MemoryCachingStrategy::Uncacheable, 1);
         flush_tlb(Some(virt_addr));
 
         core::mem::swap(&mut self.allocated_page, &mut owned_virt_addr);

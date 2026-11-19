@@ -5,6 +5,7 @@ use crate::memory::VirtualMemoryRangeGrowDirection;
 use crate::memory::VirtualMemoryRangeManagementMode;
 use crate::memory::VirtualMemoryRangePermissions;
 use crate::memory::addresses::VirtAddr;
+use crate::memory::print_mem_mapping;
 use crate::proc::MemoryRangeType;
 use crate::proc::PROCESS_ID_COUNTER;
 use crate::proc::ProcNamespaces;
@@ -52,7 +53,7 @@ pub fn create_process_from_context(context_info: &ContextInfo, cwd: FileHandle) 
     let memory_namespace = Arc::new(memory_namespace);
     let syscall_namespace = Arc::new(SyscallNamespace::default(crate::proc::get_namespace_id()));
     let open_file_namespace = Arc::new(OpenFileNamespace::new(crate::proc::get_namespace_id(), cwd));
-    let time_namespace = Arc::new(TimeNamespace::default());
+    let time_namespace = Arc::new(TimeNamespace::new(crate::proc::get_namespace_id(), 0, 0));
 
     let mut cpu_state = InterruptProcessorState::new(rip, rsp);
     cpu_state.set_arg_registers(argc_argv.0, argc_argv.1, 0);
@@ -69,6 +70,8 @@ pub fn create_process_from_context(context_info: &ContextInfo, cwd: FileHandle) 
             namespaces::get_kernel_mount_namespace(),
         ),
     );
+
+    println!("process_data: {:#X?}", process_data);
 
     let mut scheduler_lock = lock_w_info!(SCHEDULER);
     let scheduler = unsafe { scheduler_lock.assume_init_mut() };

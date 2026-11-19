@@ -67,7 +67,7 @@ pub extern "C" fn page_fault(
 }
 
 fn fatal_page_fault(cpu_data: &InterruptProcessorState, page_fault_addr: u64) -> ! {
-    println!("{}", cpu_data as *const InterruptProcessorState as usize);
+    println!("cpu_data ptr: {:X}", cpu_data as *const InterruptProcessorState as usize);
     printlnc!(level:error,
         (0, 0, 255),
         "EXCEPTION: PAGE FAULT at {:X}. error code: {:#X?}\nproc state: {:#X?}, rip: {:?}",

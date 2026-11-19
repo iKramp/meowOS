@@ -3,8 +3,8 @@ use core::{ops::Range, sync::atomic::AtomicU32};
 use std::{error::KernelError, kerror, lock_w_info, sync::no_int_spinlock::NoIntSpinlock};
 
 use crate::{
-    arch::x86_64::memory::page_table::PageTable,
-    memory::{self, addresses::*, physical_allocator},
+    arch::{memory::flush_tlb, x86_64::memory::page_table::PageTable},
+    memory::{self, addresses::*, physical_allocator, virt_mem_manager::clone_tree},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -153,6 +153,29 @@ impl VirtualMemoryRange {
             allocated_pages: AtomicU32::new(0),
             perms,
             mem_range_type: mem_range_management_mode,
+            alloc_lock: NoIntSpinlock::new(()),
+        }
+    }
+
+    //TODO: use COW
+    pub fn clone_from(&self) -> Self {
+        let owned_table_addr = physical_allocator::allocate();
+        let table_addr = owned_table_addr.0;
+        core::mem::forget(owned_table_addr); // Deallocation handled by drop impl
+        let table = unsafe { get_at_addr::<PageTable, _>(table_addr) };
+        table.clear();
+
+        let level = self.level();
+        let existing_phys = self.node_addr();
+        clone_tree(existing_phys, table_addr, level, false);
+        flush_tlb(None);
+
+        Self {
+            virt_tree_node: table_addr,
+            virt_tree_level: level,
+            allocated_pages: AtomicU32::new(self.current_size_pages()),
+            perms: self.permissions(),
+            mem_range_type: self.mem_range_type,
             alloc_lock: NoIntSpinlock::new(()),
         }
     }

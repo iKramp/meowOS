@@ -2,7 +2,10 @@ use core::{mem::MaybeUninit, ops::Range};
 use std::{println, vec::Vec};
 
 use super::{flush_tlb, page_table_entry::PageTableEntry};
-use crate::memory::{VirtualMemoryRangePermissions, addresses::*, physical_allocator};
+use crate::{
+    arch::memory::{PAGE_LEVEL_BITS, PAGE_SIZE_BITS},
+    memory::{VirtualMemoryRangePermissions, addresses::*, physical_allocator},
+};
 
 #[repr(C)]
 pub struct PageTable {
@@ -43,7 +46,7 @@ impl PageTable {
                 if !entry.present() {
                     continue;
                 }
-                let phys_addr = entry.address();
+                let phys_addr = entry.address(level);
 
                 if level == 1 {
                     if dealloc_phys {
@@ -52,7 +55,7 @@ impl PageTable {
                     continue;
                 }
 
-                if entry.huge_page() {
+                if entry.huge_page(level) {
                     if dealloc_phys {
                         let size_pages = 512_u64.pow(level as u32 - 1);
                         let range_to_dealloc = PhysRange {
@@ -106,7 +109,7 @@ impl PageTable {
                 }
 
                 let addr_offset = (i - start_index) * 0x1000;
-                *entry = PageTableEntry::new(phys_addr + addr_offset, false);
+                *entry = PageTableEntry::new(phys_addr + addr_offset, false, current_node_level);
                 flush_tlb(Some(virt_addr + addr_offset))
             }
 
@@ -126,14 +129,14 @@ impl PageTable {
             if !entry.present() {
                 let new_frame = physical_allocator::allocate();
                 unsafe { memset_at_addr(new_frame.0, 0, 4096) };
-                *entry = PageTableEntry::new(new_frame.0, false);
+                *entry = PageTableEntry::new(new_frame.0, false, current_node_level);
                 lower_table_phys = new_frame.0;
                 core::mem::forget(new_frame); //don't deallocate the frame
             } else {
-                lower_table_phys = entry.address();
+                lower_table_phys = entry.address(current_node_level);
             }
 
-            if entry.huge_page() {
+            if entry.huge_page(current_node_level) {
                 panic!("not dealing with huge pages");
             }
 
@@ -159,6 +162,7 @@ impl PageTable {
 
             index += 1;
         }
+        flush_tlb(None);
         (unsafe { first_entry.assume_init() }, allocated)
     }
 
@@ -200,11 +204,11 @@ impl PageTable {
             if !entry.present() {
                 panic!("unmapping unmapped area");
             }
-            if entry.huge_page() {
+            if entry.huge_page(current_node_level) {
                 panic!("not dealing with huge pages");
             }
 
-            let lower_table_phys = entry.address();
+            let lower_table_phys = entry.address(current_node_level);
             let lower_table = unsafe { get_at_addr::<PageTable, _>(lower_table_phys) };
             let new_node_virt = current_node_virt + (index << (12 + 9 * (current_node_level - 1)));
 
@@ -256,7 +260,7 @@ impl PageTable {
                     continue;
                 }
                 let entry_phys = physical_allocator::allocate();
-                *entry = PageTableEntry::new(entry_phys.0, true);
+                *entry = PageTableEntry::new(entry_phys.0, true, table_level);
                 entry.set_writeable(permissions.write());
                 entry.set_no_execute(!permissions.execute());
                 core::mem::forget(entry_phys); //don't deallocate the frame
@@ -268,19 +272,20 @@ impl PageTable {
             if !entry.present() {
                 let new_frame = physical_allocator::allocate();
                 unsafe { memset_at_addr(new_frame.0, 0, 4096) };
-                *entry = PageTableEntry::new(new_frame.0, true);
+                *entry = PageTableEntry::new(new_frame.0, true, table_level);
                 core::mem::forget(new_frame); //don't deallocate the frame
-            } else if entry.huge_page() {
+            } else if entry.huge_page(table_level) {
                 panic!("no huge pages in userspace for now")
             }
 
             entry.set_writeable(entry.writeable() || permissions.write());
             entry.set_no_execute(entry.no_execute() && !permissions.execute());
 
-            let lower_table = unsafe { get_at_addr::<PageTable, _>(entry.address()) };
+            let lower_table = unsafe { get_at_addr::<PageTable, _>(entry.address(table_level)) };
             let lower_table_page_index = table_page_index + (i as u32) * pages_per_entry;
             lower_table.userspace_map(page_range.clone(), permissions, table_level - 1, lower_table_page_index);
         }
+        flush_tlb(None);
     }
 
     pub fn userspace_unmap(&mut self, page_range: Range<u32>, table_level: u8, table_page_index: u32) {
@@ -303,17 +308,17 @@ impl PageTable {
             }
 
             if table_level == 1 {
-                freed_phys.push(entry.address());
+                freed_phys.push(entry.address(table_level));
                 *entry = PageTableEntry::blank();
                 continue;
             }
 
             //not lowest level
-            if entry.huge_page() {
+            if entry.huge_page(table_level) {
                 panic!("no huge pages in userspace for now")
             }
 
-            let lower_table_phys = entry.address();
+            let lower_table_phys = entry.address(table_level);
             let lower_table = unsafe { get_at_addr::<PageTable, _>(lower_table_phys) };
             let lower_table_page_index = table_page_index + (i as u32) * pages_per_entry;
             lower_table.userspace_unmap(page_range.clone(), table_level - 1, lower_table_page_index);
@@ -335,18 +340,18 @@ impl PageTable {
         if addr_range.is_empty() {
             return;
         }
-        let pages_per_entry = 512_u64.pow(table_level as u32 - 1) as u32;
+        let pages_per_entry = 512_u64.pow(table_level as u32 - 1);
         println!("pages per entry at level {}: {}", table_level, pages_per_entry);
 
         let start_addr = addr_range.start.max(table_addr);
-        let end_addr = addr_range.end.min(table_addr + pages_per_entry as u64 * 512 * 4096);
-        let start_index = (start_addr - table_addr).0 / (pages_per_entry as u64 * 4096);
-        let end_index = (end_addr - table_addr).0.div_ceil(pages_per_entry as u64 * 4096);
+        let end_addr = addr_range.end.min(table_addr + pages_per_entry * 512 * 4096);
+        let start_index = (start_addr - table_addr).0 / (pages_per_entry * 4096);
+        let end_index = (end_addr - table_addr).0.div_ceil(pages_per_entry * 4096);
         println!(
-            "setting prot for addr range {:?} at level {}, start index: {}, end index: {}",
+            "setting prot for addr range {:X?} at level {}, start index: {}, end index: {}",
             addr_range, table_level, start_index, end_index
         );
-        println!("start addr: {:?}, end addr: {:?}", start_addr, end_addr);
+        println!("start addr: {:X?}, end addr: {:X?}", start_addr, end_addr);
 
         for i in start_index..end_index {
             let entry = &mut self.entries[i as usize];
@@ -357,31 +362,36 @@ impl PageTable {
             }
 
             println!(
-                "setting prot at level {} for addr_range: {:?}, permissions: {:?}",
+                "setting prot at level {} for addr_range: {:X?}, permissions: {:?}",
                 table_level, addr_range, permissions
             );
-            if table_level == 1 || entry.huge_page() {
-                println!("setting prot at lowest level or huge page, entry before: {:?}", entry);
+            if table_level == 1 || entry.huge_page(table_level) {
+                println!("setting prot at lowest level or huge page, entry before: {:X?}", entry);
                 entry.set_writeable(permissions.write());
                 entry.set_no_execute(!permissions.execute());
-                flush_tlb(Some(table_addr + i * pages_per_entry as u64 * 4096));
+                flush_tlb(Some(table_addr + i * pages_per_entry * 4096));
                 continue;
             }
 
             entry.set_writeable(entry.writeable() || permissions.write());
             entry.set_no_execute(entry.no_execute() && !permissions.execute());
 
-            println!("setting prot at level {}, entry after: {:?}", table_level, entry);
+            println!("setting prot at level {}, entry after: {:X?}", table_level, entry);
 
-            let lower_table_phys = entry.address();
+            let lower_table_phys = entry.address(table_level);
+            assert!(
+                lower_table_phys.0 & !(u64::MAX << PAGE_SIZE_BITS) == 0,
+                "lower table phys address is not page aligned: {:X}",
+                lower_table_phys.0
+            );
             let lower_table = unsafe { get_at_addr::<PageTable, _>(lower_table_phys) };
-            let lower_table_addr = table_addr + i * pages_per_entry as u64 * 4096;
+            let lower_table_addr = table_addr + i * pages_per_entry * 4096;
             println!(
-                "recursively setting prot for lower table at level {}, page addr: {:?}",
+                "recursively setting prot for lower table at level {}, page addr: {:X?}",
                 table_level - 1,
                 lower_table_addr
             );
-            lower_table.set_prot(addr_range.clone(), permissions, table_level - 1, lower_table_addr);
+            lower_table.set_prot(start_addr..end_addr, permissions, table_level - 1, lower_table_addr);
         }
     }
 
@@ -406,7 +416,7 @@ impl PageTable {
                 let new_frame = physical_allocator::allocate();
                 unsafe { memset_at_addr(new_frame.0, 0, 4096) };
                 let user_mode = virt_addr.0 < (1 << 48);
-                *entry = PageTableEntry::new(new_frame.0, user_mode);
+                *entry = PageTableEntry::new(new_frame.0, user_mode, current_node_level);
                 entry.set_writeable(true);
                 entry.set_no_execute(false); //permissions on lower levels
                 core::mem::forget(new_frame); //don't deallocate the frame
@@ -415,12 +425,12 @@ impl PageTable {
             }
         }
 
-        if entry.huge_page() {
+        if entry.huge_page(current_node_level) {
             println!("huge page entry while getting entry at level");
             return None;
         }
 
-        let lower_table_phys = entry.address();
+        let lower_table_phys = entry.address(current_node_level);
         let new_table = unsafe { get_at_addr::<PageTable, _>(lower_table_phys) };
         let new_node_virt = current_node_virt + (index << (12 + 9 * (current_node_level - 1)));
 
@@ -452,11 +462,11 @@ impl PageTable {
             panic!("level 1 page tables don't point to other tables");
         }
 
-        if entry.huge_page() {
+        if entry.huge_page(current_node_level) {
             return None;
         }
 
-        let lower_table_phys = entry.address();
+        let lower_table_phys = entry.address(current_node_level);
         let new_node_virt = current_node_virt + (index << (12 + 9 * (current_node_level - 1)));
         let new_node = unsafe { get_at_addr::<PageTable, _>(lower_table_phys) };
         if current_node_level == wanted_node_level + 1 {
@@ -482,7 +492,7 @@ impl PageTable {
             }
 
             //entry is present
-            if entry.huge_page() || current_node_level == 1 {
+            if entry.huge_page(current_node_level) || current_node_level == 1 {
                 if let Some(curr) = curr_range.take() {
                     res.push(curr);
                 }
@@ -490,7 +500,7 @@ impl PageTable {
             }
 
             //entry is present and has lower node
-            let lower_table = unsafe { get_at_addr::<PageTable, _>(entry.address()) };
+            let lower_table = unsafe { get_at_addr::<PageTable, _>(entry.address(current_node_level)) };
             let mut lower_ranges = lower_table.get_free_ranges(addr, current_node_level - 1);
             if let Some(range) = &curr_range
                 && let Some(first) = lower_ranges.first()

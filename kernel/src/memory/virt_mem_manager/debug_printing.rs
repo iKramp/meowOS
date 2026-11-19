@@ -6,10 +6,19 @@ use crate::{
     memory::{MemoryCachingStrategy, addresses::*, virt_mem_manager::PageTable},
 };
 
-pub(in crate::memory) fn print_mem_mapping() {
-    let top_level_table_phys = current_root();
+pub(in crate::memory) fn print_mem_mapping(root: Option<(PhysAddr, u64)>) {
+    let (top_level_table_phys, level) = root.unwrap_or((current_root(), 4));
+
+    if level == 0 {
+        return;
+    }
+
     let top_level_table = unsafe { get_at_addr(top_level_table_phys) };
-    if let Some(range) = print_range(top_level_table, None, 4, VirtAddr(0)) {
+    println!(
+        "Memory mapping for root page table at physical address: {:#x?}, level {}",
+        top_level_table_phys, level
+    );
+    if let Some(range) = print_range(top_level_table, None, level, VirtAddr(0), true, true, true) {
         println!("{range}");
     }
 }
@@ -19,13 +28,14 @@ fn print_range(
     mut current_range: Option<MapRange>,
     level: u64,
     mut self_virt_addr: VirtAddr,
+    perm_write: bool, //these come from the parent tables
+    perm_user: bool,
+    perm_exec: bool,
 ) -> Option<MapRange> {
     println!(
-        "entered print_range with params: level: {}, self_virt_addr: {:016x}, current_range: {:?}",
-        level, self_virt_addr.0, current_range
+        "Printing range for table at virtual address: {:#x?}, level {}, perm_write: {}, perm_user: {}, perm_exec: {}",
+        self_virt_addr, level, perm_write, perm_user, perm_exec
     );
-    println!("table addr: {:016x?}", table as *const PageTable as u64);
-
     for entry in table.entries() {
         if !entry.present() {
             if let Some(range) = &current_range {
@@ -35,14 +45,19 @@ fn print_range(
             self_virt_addr += 1_u64 << (3 + level * 9);
             continue;
         }
-        if level == 1 || entry.huge_page() {
+        if level == 1 || entry.huge_page(level as u8) {
             #[allow(clippy::collapsible_if)] //is clearer
             if let Some(curr_range) = current_range.clone() {
-                if curr_range.pat != entry.caching_strategy()
-                    || curr_range.write != entry.writeable()
-                    || curr_range.execute == entry.executable()
-                    || (curr_range.phys.0 + curr_range.len != entry.address().0
-                        && curr_range.phys.0 - 0x1000 != entry.address().0)
+                let entry_write = perm_write && entry.writeable();
+                let entry_user = perm_user && entry.user_accessible();
+                let entry_exec = perm_exec && entry.executable();
+
+                if curr_range.pat != entry.caching_strategy(level as u8)
+                    || curr_range.write != entry_write
+                    || curr_range.execute == entry_exec
+                    || curr_range.user != entry_user
+                    || (curr_range.phys.0 + curr_range.len != entry.address(level as u8).0
+                        && curr_range.phys.0 - 0x1000 != entry.address(level as u8).0)
                 {
                     println!("{curr_range}");
                     current_range = None
@@ -52,7 +67,7 @@ fn print_range(
             if let Some(curr_range) = current_range.clone() {
                 let new_range = MapRange {
                     len: curr_range.len + (1 << (3 + level * 9)),
-                    phys: PhysAddr(curr_range.phys.0.min(entry.address().0)),
+                    phys: PhysAddr(curr_range.phys.0.min(entry.address(level as u8).0)),
                     ..curr_range
                 };
                 current_range = Some(new_range);
@@ -60,17 +75,25 @@ fn print_range(
                 let new_range = MapRange {
                     virt: self_virt_addr,
                     len: 1 << (3 + level * 9),
-                    phys: entry.address(),
-                    pat: entry.caching_strategy(),
-                    write: entry.writeable(),
-                    execute: entry.executable(),
-                    user: entry.user_accessible(),
+                    phys: entry.address(level as u8),
+                    pat: entry.caching_strategy(level as u8),
+                    write: entry.writeable() && perm_write,
+                    execute: entry.executable() && perm_exec,
+                    user: entry.user_accessible() && perm_user,
                 };
                 current_range = Some(new_range);
             }
         } else {
-            let lower_level_table = unsafe { get_at_addr::<PageTable, _>(entry.address()) };
-            let new_range = print_range(lower_level_table, current_range.clone(), level - 1, self_virt_addr);
+            let lower_level_table = unsafe { get_at_addr::<PageTable, _>(entry.address(level as u8)) };
+            let new_range = print_range(
+                lower_level_table,
+                current_range.clone(),
+                level - 1,
+                self_virt_addr,
+                perm_write && entry.writeable(),
+                perm_user && entry.user_accessible(),
+                perm_exec && entry.executable(),
+            );
             current_range = new_range;
         }
         self_virt_addr += 1_u64 << (3 + level * 9);

@@ -30,6 +30,7 @@ pub trait ProcNamespace: Debug + Send + Sync + Any + Sized {
 
 //update in documentation
 #[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::proc) enum NamespaceType {
     Syscall = 0,
     Mem = 1,

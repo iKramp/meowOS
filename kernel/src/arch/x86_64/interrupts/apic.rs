@@ -110,7 +110,7 @@ fn map_lapic_registers(lapic_address: PhysAddr) {
         let owned_phys_addr = OwnedPhysAddr(lapic_address);
         let (virt_range, entry) = memory::kernel_manual_map(owned_phys_addr.into(), None);
         let virt_addr = virt_range.into_owned_virt_addr();
-        entry.set_caching_strategy(memory::MemoryCachingStrategy::Uncacheable);
+        entry.set_caching_strategy(memory::MemoryCachingStrategy::Uncacheable, 1);
         flush_tlb(Some(virt_addr.0));
 
         let lapic_ref = &mut *(virt_addr.0.0 as *mut LapicRegisters);

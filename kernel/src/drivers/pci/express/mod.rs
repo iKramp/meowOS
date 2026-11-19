@@ -119,7 +119,7 @@ fn is_pcie(device: &mut PcieDevice) -> bool {
 fn map_config_space(phys_addr: PhysAddr) -> OwnedVirtAddr {
     let (pci_dev_virt, entry) = unsafe { memory::kernel_manual_map(OwnedPhysAddr(phys_addr).into(), None) };
     debug_assert!(pci_dev_virt.0.n_pages == 1, "config space mapping should be 1 page");
-    entry.set_caching_strategy(memory::MemoryCachingStrategy::Uncacheable);
+    entry.set_caching_strategy(memory::MemoryCachingStrategy::Uncacheable, 1);
     flush_tlb(Some(pci_dev_virt.0.start));
 
     let addr = pci_dev_virt.0.start;
